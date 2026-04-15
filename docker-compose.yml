@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  ldap:
+    image: osixia/openldap:1.5.0
+    container_name: ldap-test
+    environment:
+      - LDAP_ORGANISATION=ExampleCorp
+      - LDAP_DOMAIN=example.com
+      - LDAP_ADMIN_PASSWORD=adminpassword
+      - LDAP_TLS=false
+      - LDAP_READONLY_USER=true
+      - LDAP_READONLY_USER_USERNAME=readonly
+      - LDAP_READONLY_USER_PASSWORD=readonlypassword
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ./bootstrap.ldif:/container/service/slapd/assets/config/bootstrap.ldif:ro
+    restart: unless-stopped

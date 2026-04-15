@@ -1,0 +1,165 @@
+# DevOps Toolkit - Docker 测试环境
+# 多设备类型编排：服务器容器层、网络设备层、监控层
+
+services:
+  # === 服务器容器层 ===
+  server-web-01:
+    image: nginx:alpine
+    container_name: server-web-01
+    environment:
+      - DEVOPS_AGENT=true
+      - APP_PORT=8081
+    ports:
+      - "8081:80"
+    labels:
+      - env=development
+      - device_type=web
+      - device_group=frontend
+    networks:
+      - devops-test-net
+    restart: unless-stopped
+
+  server-web-02:
+    image: nginx:alpine
+    container_name: server-web-02
+    environment:
+      - DEVOPS_AGENT=true
+      - APP_PORT=8082
+    ports:
+      - "8082:80"
+    labels:
+      - env=development
+      - device_type=web
+      - device_group=frontend
+    networks:
+      - devops-test-net
+    restart: unless-stopped
+
+  server-app-01:
+    image: node:18-alpine
+    container_name: server-app-01
+    working_dir: /app
+    environment:
+      - DEVOPS_AGENT=true
+      - NODE_ENV=development
+    ports:
+      - "3000:3000"
+    volumes:
+      - devops-configs-server-01:/app/config
+    labels:
+      - env=development
+      - device_type=app
+      - device_group=backend
+    networks:
+      - devops-test-net
+    restart: unless-stopped
+
+  # === 数据库容器 ===
+  devops-db-mysql:
+    image: mysql:8.0
+    container_name: devops-db-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: devops_demo_123
+      MYSQL_DATABASE: devops_toolkit
+      MYSQL_USER: devops_user
+      MYSQL_PASSWORD: devops_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - devops-data-db:/var/lib/mysql
+    networks:
+      - devops-test-net
+    restart: unless-stopped
+
+  # === 缓存容器 ===
+  devops-cache-redis:
+    image: redis:7-alpine
+    container_name: devops-cache-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - devops-data-redis:/data
+    networks:
+      - devops-test-net
+    restart: unless-stopped
+
+  # === 网络设备层 ===
+  router-devops:
+    image: jess/gluetun:latest
+    container_name: router-devops
+    environment:
+      - TZ=Asia/Shanghai
+      - WIREGUARD_PRIVATE_KEY=demo_key_for_testing
+      - WIREGUARD_PUBLIC_KEY=demo_key_for_testing
+      - WIREGUARD_ADDRESS=10.8.0.1/32
+    ports:
+      - "222:22/tcp"
+    networks:
+      - devops-test-net
+
+  loadbalancer-devops:
+    image: haproxy:28-alpine
+    container_name: loadbalancer-devops
+    ports:
+      - "8080:80"
+    volumes:
+      - /devops/devops-toolkit/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - devops-test-net
+      - devops-fwd-net
+    depends_on:
+      - server-app-01
+    restart: unless-stopped
+
+  # === 监控层 ===
+  devops-node-exporter:
+    image: prom/node-exporter:latest
+    container_name: devops-node-exporter
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem'
+    volumes:
+      - /:/host:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    ports:
+      - "9100:9100"
+    networks:
+      - devops-test-net
+    restart: unless-stopped
+
+  devops-filebeat:
+    build:
+      context: .
+      dockerfile: filebeat.dockerfile
+    container_name: devops-filebeat
+    volumes:
+      - /var/log:
+          - /etc/filebeat.yml:ro
+    networks:
+      - devops-test-net
+    restart: unless-stopped
+
+  devops-beats-inputs:
+    image: docker.elastic.co/beats/filebeat:8.9.2
+    container_name: devops-beats-inputs
+    ports:
+      - "5044:5044"
+    networks:
+      - devops-test-net
+
+networks:
+  devops-test-net:
+    driver: bridge
+    name: devops-test-network
+  devops-fwd-net:
+    external: true
+    name: devops-fwd-net
+
+volumes:
+  devops-configs-server-01:
+  devops-configs-server-02:
+  devops-data-db:
+    external: false
+  devops-data-redis:

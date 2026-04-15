@@ -1,0 +1,125 @@
+# Base DN
+# This will create the root of the LDAP tree
+# All other entries will be relative to this DN
+
+# Create the root DN
+
+define attributes
+
+dn: dc=example,dc=com
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+o: ExampleCorp
+# Root organizational unit
+
+dn: ou=Groups,dc=example,dc=com
+objectClass: top
+objectClass: organizationalUnit
+ou: Groups
+# Organizational unit for users
+
+dn: ou=Users,dc=example,dc=com
+objectClass: top
+objectClass: organizationalUnit
+ou: Users
+
+# Define groups
+# AD group mapping will be based on group DNs
+# Example groups: IT_Ops, DevTeam_Payments, Security_Auditors, SRE_Lead
+# Use groupOfNames for simplicity
+
+dn: cn=IT_Ops,ou=Groups,dc=example,dc=com
+objectClass: top
+objectClass: groupOfNames
+cn: IT_Ops
+member: cn=John,ou=Users,dc=example,dc=com
+member: cn=Sarah,ou=Users,dc=example,dc=com
+
+# Developers in payments
+
+dn: cn=DevTeam_Payments,ou=Groups,dc=example,dc=com
+objectClass: top
+objectClass: groupOfNames
+cn: DevTeam_Payments
+member: cn=Alice,ou=Users,dc=example,dc=com
+member: cn=Bob,ou=Users,dc=example,dc=com
+
+# Security auditors
+
+dn: cn=Security_Auditors,ou=Groups,dc=example,dc=com
+objectClass: top
+objectClass: groupOfNames
+cn: Security_Auditors
+member: cn=Sarah,ou=Users,dc=example,dc=com
+
+# SRE Lead
+
+dn: cn=SRE_Lead,ou=Groups,dc=example,dc=com
+objectClass: top
+objectClass: groupOfNames
+cn: SRE_Lead
+member: cn=John,ou=Users,dc=example,dc=com
+
+# Define users
+# Each user will have a simple password for test purposes
+# In a real environment you would use a more secure password and hashing
+
+# User: Alice
+
+dn: cn=Alice,ou=Users,dc=example,dc=com
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+cn: Alice
+sn: Doe
+uid: alice
+mail: alice@example.com
+userPassword: alicepassword
+
+# User: Bob
+
+dn: cn=Bob,ou=Users,dc=example,dc=com
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+cn: Bob
+sn: Smith
+uid: bob
+mail: bob@example.com
+userPassword: bobpassword
+
+# User: John
+
+dn: cn=John,ou=Users,dc=example,dc=com
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+cn: John
+sn: Johnson
+uid: john
+mail: john@example.com
+userPassword: johnpassword
+
+# User: Sarah
+
+dn: cn=Sarah,ou=Users,dc=example,dc=com
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+cn: Sarah
+sn: Lee
+uid: sarah
+mail: sarah@example.com
+userPassword: sarahpassword
+
+# Additional comments:
+#   - The passwords above are plaintext for demo purposes.
+#   - The admin user 'admin' is created by the osixia/openldap image with the password set by the environment variable LDAP_ADMIN_PASSWORD.
+#   - For production, you would use hashed passwords and secure secrets management.
+
+# End of bootstrap LDIF
