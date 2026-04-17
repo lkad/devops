@@ -34,6 +34,118 @@
         "version": "1.0",
         "sync_at": null
       }
+    },
+    {
+      "id": "test-device-1776413989625",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415553708",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415593444",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415752043",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415817996",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415919690",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415992740",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
     }
   ]
 }

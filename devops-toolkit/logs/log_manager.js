@@ -21,7 +21,17 @@ class LogManager {
     this.backend = createStorageBackend(config.type, config);
     this.retentionDays = config.retention_days;
 
+    // Callbacks for external integrations (set by server.js)
+    this.onLogAdded = null;
+    this.onAlertTriggered = null;
+
     this.load();
+  }
+
+  // Set callbacks for integrations
+  setCallbacks(onLogAdded, onAlertTriggered) {
+    this.onLogAdded = onLogAdded;
+    this.onAlertTriggered = onAlertTriggered;
   }
 
   load() {
@@ -76,6 +86,11 @@ class LogManager {
 
     // Check alert rules
     this.checkAlerts(log);
+
+    // Broadcast via WebSocket if callback set
+    if (this.onLogAdded) {
+      this.onLogAdded(log);
+    }
 
     // Save periodically (every 10 logs) - only for local backend
     if (this.backend.constructor.name === 'LocalStorageBackend' && this.logs.length % 10 === 0) {
@@ -400,6 +415,18 @@ class LogManager {
         // In a real system, this would trigger notifications
         // For now, just log that the alert was triggered
         console.log(`[ALERT] Rule "${rule.name}" triggered by log: ${log.message}`);
+
+        // Trigger external alert if callback set
+        if (this.onAlertTriggered) {
+          this.onAlertTriggered({
+            name: rule.name,
+            message: log.message,
+            severity: log.level,
+            source: log.source,
+            timestamp: log.timestamp,
+            metadata: { rule_id: rule.id, log_id: log.id }
+          });
+        }
       }
     }
   }

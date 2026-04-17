@@ -14,11 +14,33 @@ const url = require('url');
 const DeviceManager = require('./devices/device_manager');
 const PipelineManager = require('./pipelines/pipeline_manager');
 const LogManager = require('./logs/log_manager');
+const wsManager = require('./websocket_manager');
+const MetricsManager = require('./metrics_manager');
+const AlertNotificationManager = require('./alerts_notification_manager');
 
 // Initialize managers
 const deviceManager = new DeviceManager(path.join(__dirname, 'config/devices'));
 const pipelineManager = new PipelineManager(path.join(__dirname, 'config/pipelines.json'));
 const logManager = new LogManager(path.join(__dirname, 'config/logs.json'));
+const metricsManager = require('./metrics_manager');
+const alertNotificationManager = require('./alerts_notification_manager');
+
+// Wire up LogManager callbacks
+logManager.setCallbacks(
+  // onLogAdded - broadcast to WebSocket
+  (log) => {
+    wsManager.broadcastLog(log);
+    metricsManager.recordLog(log.level);
+  },
+  // onAlertTriggered - send notifications
+  (alert) => {
+    alertNotificationManager.triggerAlert(alert);
+    metricsManager.recordAlert(alert.name, alert.severity);
+  }
+);
+
+// Configure alert channels from environment
+alertNotificationManager.configureFromEnv();
 
 // MIME types
 const MIME_TYPES = {
@@ -59,6 +81,7 @@ function sendHTML(res, html) {
 
 // Route handler
 async function handleRequest(req, res) {
+  const startTime = Date.now();
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
   const method = req.method;
@@ -73,6 +96,18 @@ async function handleRequest(req, res) {
     res.end();
     return;
   }
+
+  // Wrap sendJSON to record metrics
+  const originalSendJSON = sendJSON;
+  sendJSON = function(res, status, data) {
+    const duration = Date.now() - startTime;
+    // Record HTTP metrics for API requests
+    if (pathname.startsWith('/api/')) {
+      metricsManager.recordLatency(pathname, method, status, duration);
+    }
+    originalSendJSON(res, status, data);
+    sendJSON = originalSendJSON;
+  };
 
   // API routes
   if (pathname.startsWith('/api/')) {
@@ -182,6 +217,8 @@ async function handleRequest(req, res) {
           business_unit: body.business_unit || null,
           compute_cluster: body.compute_cluster || null
         });
+        metricsManager.recordDeviceEvent('registered');
+        wsManager.broadcastDeviceEvent({ type: 'registered', device });
         sendJSON(res, 201, { success: true, device });
       } catch (error) {
         sendJSON(res, 400, { success: false, error: error.message });
@@ -292,6 +329,8 @@ async function handleRequest(req, res) {
           ...body
         });
         if (run) {
+          metricsManager.recordPipelineEvent('executed', id);
+          wsManager.broadcastPipelineUpdate({ pipeline_id: id, run, action: 'executed' });
           sendJSON(res, 201, { success: true, run });
         } else {
           sendJSON(res, 404, { success: false, error: 'Pipeline not found' });
@@ -506,6 +545,118 @@ async function handleRequest(req, res) {
       return;
     }
 
+    // ============ Metrics API Routes ============
+
+    // GET /api/metrics - Get all metrics as JSON
+    if (method === 'GET' && pathname === '/api/metrics') {
+      const data = metricsManager.getMetricsJSON();
+      sendJSON(res, 200, { success: true, ...data });
+      return;
+    }
+
+    // POST /api/metrics/counter - Increment a counter
+    if (method === 'POST' && pathname === '/api/metrics/counter') {
+      try {
+        const body = await parseBody(req);
+        metricsManager.incCounter(body.name, body.labels || {}, body.value || 1);
+        sendJSON(res, 200, { success: true });
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // POST /api/metrics/gauge - Set/inc/dec a gauge
+    if (method === 'POST' && pathname === '/api/metrics/gauge') {
+      try {
+        const body = await parseBody(req);
+        if (body.action === 'inc') {
+          metricsManager.incGauge(body.name, body.labels || {}, body.value || 1);
+        } else if (body.action === 'dec') {
+          metricsManager.decGauge(body.name, body.labels || {}, body.value || 1);
+        } else {
+          metricsManager.setGauge(body.name, body.labels || {}, body.value);
+        }
+        sendJSON(res, 200, { success: true });
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // POST /api/metrics/histogram - Observe a histogram value
+    if (method === 'POST' && pathname === '/api/metrics/histogram') {
+      try {
+        const body = await parseBody(req);
+        metricsManager.observeHistogram(body.name, body.labels || {}, body.value);
+        sendJSON(res, 200, { success: true });
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // ============ Alert Notification API Routes ============
+
+    // GET /api/alerts/channels - List notification channels
+    if (method === 'GET' && pathname === '/api/alerts/channels') {
+      const channels = alertNotificationManager.getChannels();
+      sendJSON(res, 200, { success: true, channels });
+      return;
+    }
+
+    // POST /api/alerts/channels - Add notification channel
+    if (method === 'POST' && pathname === '/api/alerts/channels') {
+      try {
+        const body = await parseBody(req);
+        alertNotificationManager.addChannel(body.name, body.config);
+        sendJSON(res, 201, { success: true });
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // DELETE /api/alerts/channels/:name - Remove channel
+    if (method === 'DELETE' && pathname.match(/^\/api\/alerts\/channels\/[^/]+$/)) {
+      const name = pathname.split('/')[4];
+      alertNotificationManager.removeChannel(name);
+      sendJSON(res, 200, { success: true });
+      return;
+    }
+
+    // GET /api/alerts/history - Get alert history
+    if (method === 'GET' && pathname === '/api/alerts/history') {
+      const query = parsedUrl.query;
+      const options = {};
+      if (query.severity) options.severity = query.severity;
+      if (query.since) options.since = query.since;
+      if (query.limit) options.limit = parseInt(query.limit);
+      const history = alertNotificationManager.getHistory(options);
+      sendJSON(res, 200, { success: true, history });
+      return;
+    }
+
+    // GET /api/alerts/stats - Get alert statistics
+    if (method === 'GET' && pathname === '/api/alerts/stats') {
+      const stats = alertNotificationManager.getStats();
+      sendJSON(res, 200, { success: true, stats });
+      return;
+    }
+
+    // POST /api/alerts/trigger - Trigger an alert
+    if (method === 'POST' && pathname === '/api/alerts/trigger') {
+      try {
+        const body = await parseBody(req);
+        const result = await alertNotificationManager.triggerAlert(body);
+        wsManager.broadcastAlert(body);
+        sendJSON(res, 200, result);
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
     // ============ End Log API Routes ============
 
     // Unknown API route
@@ -533,6 +684,14 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // Prometheus metrics endpoint
+  if (pathname === '/metrics') {
+    const metrics = metricsManager.exportPrometheus();
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end(metrics);
+    return;
+  }
+
   // 404 for unknown routes
   res.writeHead(404);
   res.end('Not found');
@@ -542,12 +701,17 @@ async function handleRequest(req, res) {
 const PORT = process.env.PORT || 3000;
 const server = http.createServer(handleRequest);
 
+// Initialize WebSocket
+wsManager.initialize(server);
+
 server.listen(PORT, () => {
   console.log(`\n╔═══════════════════════════════════════════╗`);
   console.log(`║   DevOps Toolkit Web Server              ║`);
   console.log(`╚═══════════════════════════════════════════╝\n`);
   console.log(`🌐 Server running at http://localhost:${PORT}`);
   console.log(`📊 Device API: http://localhost:${PORT}/api/devices`);
+  console.log(`📈 Metrics: http://localhost:${PORT}/metrics`);
+  console.log(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
   console.log(`❤️  Health: http://localhost:${PORT}/health\n`);
 });
 

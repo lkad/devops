@@ -382,6 +382,114 @@ alert API (/api/v1/alerts):
 - **部署进度**: Pipeline 实时进度更新
 - **心跳保活**: 30 秒心跳，异常自动重连
 
+#### 6.1 WebSocket Manager Implementation
+
+WebSocket 管理器 (`websocket_manager.js`) 提供实时事件广播：
+
+```javascript
+// 客户端订阅示例
+const ws = new WebSocket('ws://localhost:3000/ws');
+ws.send(JSON.stringify({ action: 'subscribe', channel: 'log' }));
+ws.send(JSON.stringify({ action: 'subscribe', channel: 'metric' }));
+
+// 收到的消息格式
+{
+  "channel": "log",
+  "type": "log",
+  "data": { /* log entry */ },
+  "timestamp": "2024-01-01T00:00:00.000Z"
+}
+```
+
+**支持的频道：**
+- `log` - 日志事件
+- `metric` - 指标更新
+- `device_event` - 设备状态变更
+- `pipeline_update` - Pipeline 执行状态
+- `alert` - 告警通知
+
+### 7. Prometheus Metrics Endpoint
+
+系统提供 Prometheus 格式指标和 JSON API：
+
+#### 7.1 Endpoints
+
+| 端点 | 方法 | 描述 |
+|------|------|------|
+| `/metrics` | GET | Prometheus 文本格式指标 |
+| `/api/metrics` | GET | JSON 格式指标 |
+| `/api/metrics/counter` | POST | 增加计数器 |
+| `/api/metrics/gauge` | POST | 设置/增加/减少仪表 |
+| `/api/metrics/histogram` | POST | 记录直方图值 |
+
+#### 7.2 Metrics Manager Implementation
+
+指标管理器 (`metrics_manager.js`) 支持：
+
+- **Counters**: 单调递增计数器
+- **Gauges**: 可上下波动的仪表
+- **Histograms**: 值分布统计（含 p50/p95/p99）
+
+```bash
+# Prometheus 抓取配置
+scrape_configs:
+  - job_name: 'devops-toolkit'
+    static_configs:
+      - targets: ['localhost:3000']
+    metrics_path: '/metrics'
+```
+
+#### 7.3 环境变量配置
+
+```bash
+# 指标标签
+METRICS_SERVICE_NAME=devops-toolkit
+METRICS_VERSION=1.0.0
+```
+
+### 8. Alert Notification System
+
+告警通知管理器 (`alerts_notification_manager.js`) 提供多渠道告警路由：
+
+#### 8.1 支持的渠道
+
+| 渠道类型 | 配置项 | 说明 |
+|----------|--------|------|
+| `slack` | `webhookUrl`, `channel` | Slack webhook |
+| `webhook` | `url`, `headers` | 通用 HTTP webhook |
+| `email` | `recipients` | 邮件通知 (SMTP) |
+| `log` | - | 仅输出到日志 |
+
+#### 8.2 API Endpoints
+
+| 端点 | 方法 | 描述 |
+|------|------|------|
+| `/api/alerts/channels` | GET | 列出所有通知渠道 |
+| `/api/alerts/channels` | POST | 添加通知渠道 |
+| `/api/alerts/channels/:name` | DELETE | 删除渠道 |
+| `/api/alerts/history` | GET | 查询告警历史 |
+| `/api/alerts/stats` | GET | 告警统计 |
+| `/api/alerts/trigger` | POST | 触发告警 |
+
+#### 8.3 环境变量配置
+
+```bash
+# Slack 配置
+ALERT_SLACK_WEBHOOK=https://hooks.slack.com/services/xxx
+ALERT_SLACK_CHANNEL=#alerts
+
+# 通用 Webhook
+ALERT_WEBHOOK_URL=https://example.com/webhook
+```
+
+#### 8.4 速率限制
+
+默认配置：
+- 时间窗口: 60 秒
+- 最大告警数: 10 次/窗口
+
+可通过构造函数的 `windowMs` 和 `maxAlertsPerWindow` 属性调整。
+
 ## Architecture Overview
 
 ### Core Principles
