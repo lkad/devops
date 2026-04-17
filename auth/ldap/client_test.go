@@ -246,3 +246,36 @@ func TestIntegrationGetRoles(t *testing.T) {
 		t.Error("expected Operator role to be found")
 	}
 }
+
+// Performance tests
+
+func TestRateLimiterPerformance(t *testing.T) {
+	// Test rate limiter works correctly at configured rate
+	rl := NewRateLimiter(1000) // 1k requests per second
+
+	// First 1000 should be allowed
+	count := 0
+	for i := 0; i < 1000; i++ {
+		if rl.Allow() {
+			count++
+		}
+	}
+
+	// Should allow roughly the configured number of requests
+	if count < 900 || count > 1100 {
+		t.Errorf("expected ~1000 allowed requests, got %d", count)
+	}
+}
+
+func BenchmarkNormalizeDN(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		normalizeDN("CN=Admin,DC=Example,DC=COM")
+	}
+}
+
+func BenchmarkRateLimiterAllow(b *testing.B) {
+	rl := NewRateLimiter(10000)
+	for i := 0; i < b.N; i++ {
+		rl.Allow()
+	}
+}
