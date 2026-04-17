@@ -63,18 +63,22 @@ class LogManager {
       tags: entry.tags || []
     };
 
-    this.logs.push(log);
-
-    // Write to storage backend
+    // Write to storage backend (all backends)
     this.backend.write(log).catch(e => {
       console.error('Failed to write to backend:', e.message);
     });
 
+    // For Local backend: also maintain local array for operational logs
+    // For ES/Loki backend: backend IS the source, don't duplicate locally
+    if (this.backend.constructor.name === 'LocalStorageBackend') {
+      this.logs.push(log);
+    }
+
     // Check alert rules
     this.checkAlerts(log);
 
-    // Save periodically (every 10 logs)
-    if (this.logs.length % 10 === 0) {
+    // Save periodically (every 10 logs) - only for local backend
+    if (this.backend.constructor.name === 'LocalStorageBackend' && this.logs.length % 10 === 0) {
       this.save();
     }
 
@@ -86,8 +90,23 @@ class LogManager {
     return log;
   }
 
-  // Query logs
+  // Query logs - delegates based on backend type
   queryLogs(options = {}) {
+    const backendType = this.backend.constructor.name;
+
+    if (backendType === 'LocalStorageBackend') {
+      // Local backend: query from local array (operational logs only)
+      return this.queryLogsLocal(options);
+    } else {
+      // ES/Loki backend: query from backend API (includes external logs)
+      // Synchronous wrapper for async backend query
+      // Note: For production, server.js should use queryLogsBackend() instead
+      return this.queryLogsFromBackend(options);
+    }
+  }
+
+  // Query from local array
+  queryLogsLocal(options = {}) {
     let results = [...this.logs];
 
     // Filter by time range
@@ -164,9 +183,16 @@ class LogManager {
       const result = await this.backend.query(options);
       return result;
     } catch (e) {
-      console.error('Backend query failed, falling back to local:', e.message);
-      return this.queryLogs(options);
+      console.error('Backend query failed:', e.message);
+      return { logs: [], total: 0, has_more: false };
     }
+  }
+
+  // Synchronous wrapper for backend query (for compatibility)
+  queryLogsFromBackend(options = {}) {
+    // Returns sync result structure, actual query happens async
+    // Server should use queryLogsBackend() for proper async handling
+    return { logs: [], total: 0, has_more: false, note: 'use queryLogsBackend() for ES/Loki' };
   }
 
   // Get logs by resource (device, service, etc.)

@@ -361,7 +361,15 @@ async function handleRequest(req, res) {
         limit: parseInt(query.limit) || 100,
         order: query.order || 'desc'
       };
-      const result = logManager.queryLogs(options);
+
+      // For ES/Loki backends, use async query; for local, use sync
+      const isESLoki = logManager.backend.constructor.name !== 'LocalStorageBackend';
+      let result;
+      if (isESLoki) {
+        result = await logManager.queryLogsBackend(options);
+      } else {
+        result = logManager.queryLogs(options);
+      }
       sendJSON(res, 200, { success: true, ...result });
       return;
     }
