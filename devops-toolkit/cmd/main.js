@@ -29,12 +29,11 @@ async function main() {
       case 'register-device':
         const deviceId = args[2] || 'auto';
         const deviceManager = new DeviceManager();
-        await runAgent();
-        
-        const device = await deviceManager.registerDevice({
+
+        const device = deviceManager.registerDevice({
           id: deviceId,
-          type: config.deviceTypes.container,
-          labels: config.labels,
+          type: 'container',
+          labels: [{ env: config.env }],
           business_unit: args[3] || 'devops'
         });
         

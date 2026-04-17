@@ -1,0 +1,25 @@
+{
+  "devices": [
+    {
+      "id": "1e8f9259-d7d3-4fd0-b067-b0792410651d",
+      "type": "container",
+      "name": "server-web-01",
+      "labels": [
+        {
+          "env": "development"
+        },
+        {
+          "device_type": "web"
+        }
+      ],
+      "business_unit": "frontend",
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    }
+  ]
+}

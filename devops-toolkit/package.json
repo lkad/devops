@@ -5,9 +5,11 @@
   "main": "cmd/main.js",
   "scripts": {
     "start": "node cmd/main.js",
+    "start:server": "node server.js",
     "test": "jest --config=test/jest.config.js",
     "test:test-lab": "bash devices/scripts/run-tests.sh",
     "dev": "nodemon cmd/main.js",
+    "dev:server": "nodemon server.js",
     "docker:up": "docker-compose -f devices/docker/docker-compose.test.yml up -d",
     "docker:down": "docker-compose -f devices/docker/docker-compose.test.yml down",
     "test:full": "{ docker-compose -f devices/docker/docker-compose.test.yml up -d && test; docker-compose -f devices/docker/docker-compose.test.yml down }"
