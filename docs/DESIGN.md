@@ -199,6 +199,76 @@ Sources → Collectors → Aggregator → Storage → Query/Search
 - **云集成**: AWS CloudWatch、GCP Logging、Azure Monitor
 - **第三方**: Datadog、New Relic、Sentry
 
+## 3.8 存储后端集成 (Storage Backend Integration)
+
+系统支持多种日志存储后端，可通过环境变量配置：
+
+### 3.8.1 支持的后端
+
+| 后端 | 环境变量 | 默认端口 | 用途 |
+|------|----------|----------|------|
+| **Local** | `LOG_STORAGE_BACKEND=local` | - | 开发/测试环境，默认 |
+| **Elasticsearch** | `LOG_STORAGE_BACKEND=elasticsearch` | 9200 | 生产环境全文检索 |
+| **Loki** | `LOG_STORAGE_BACKEND=loki` | 3100 | Grafana 生态，日志聚合 |
+
+### 3.8.2 配置参数
+
+```bash
+# 通用配置
+LOG_STORAGE_BACKEND=elasticsearch  # local | elasticsearch | loki
+LOG_RETENTION_DAYS=30               # 日志保留天数，默认 30
+
+# Elasticsearch 配置
+ELASTICSEARCH_URL=http://localhost:9200
+ELASTICSEARCH_INDEX=devops-logs
+ELASTICSEARCH_USERNAME=
+ELASTICSEARCH_PASSWORD=
+
+# Loki 配置
+LOKI_URL=http://localhost:3100
+```
+
+### 3.8.3 API 接口
+
+| 接口 | 方法 | 描述 |
+|------|------|------|
+| `/api/logs/retention` | GET | 获取保留策略配置 |
+| `/api/logs/retention` | PUT | 更新保留策略配置 |
+| `/api/logs/retention/apply` | POST | 手动触发保留清理 |
+| `/api/logs/backend` | GET | 获取存储后端健康状态 |
+| `/api/logs` | GET | 查询日志 |
+| `/api/logs/stats` | GET | 获取日志统计 |
+
+### 3.8.4 后端特性对比
+
+| 特性 | Local | Elasticsearch | Loki |
+|------|-------|---------------|------|
+| **查询能力** | 简单过滤 | 全文检索，复杂查询 | LogQL 查询 |
+| **聚合统计** | 本地计算 | ES Aggregation | 有限 |
+| **保留管理** | 应用层控制 | ILM Policy | 配置驱动 |
+| **扩展性** | 单机 | 集群分片 | 水平扩展 |
+| **生态集成** | 无 | Kibana | Grafana |
+
+### 3.8.5 保留策略
+
+- **Local 后端**: 应用层定期清理，保留最近 N 天日志
+- **Elasticsearch**: 使用 Index Lifecycle Management (ILM)
+- **Loki**: 通过配置 `chunk_target_size` 和 `retention_period`
+
+### 3.8.6 Docker 开发环境
+
+```bash
+# 启动完整日志基础设施
+docker-compose -f docker-compose.dev.yml up -d
+
+# 服务端口
+# - Elasticsearch: http://localhost:9200
+# - Kibana:       http://localhost:5601
+# - Loki:        http://localhost:3100
+# - Grafana:     http://localhost:3001
+# - Prometheus:  http://localhost:9090
+```
+
 ### 4. Monitoring System
 
 ## 4.1 指标采集

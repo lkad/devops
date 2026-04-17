@@ -1,11 +1,13 @@
 /**
  * Log Manager
  * Manages log storage, indexing, and querying based on DESIGN.md Section 3
+ * Supports multiple storage backends: Local (JSON), Elasticsearch, Loki
  */
 
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { createStorageBackend, StorageConfig, BACKEND_TYPES } = require('./storage_backends');
 
 class LogManager {
   constructor(storagePath) {
@@ -13,6 +15,12 @@ class LogManager {
     this.logs = [];
     this.alerts = [];
     this.filters = [];
+
+    // Initialize storage backend from environment config
+    const config = new StorageConfig();
+    this.backend = createStorageBackend(config.type, config);
+    this.retentionDays = config.retention_days;
+
     this.load();
   }
 
@@ -57,12 +65,22 @@ class LogManager {
 
     this.logs.push(log);
 
+    // Write to storage backend
+    this.backend.write(log).catch(e => {
+      console.error('Failed to write to backend:', e.message);
+    });
+
     // Check alert rules
     this.checkAlerts(log);
 
     // Save periodically (every 10 logs)
     if (this.logs.length % 10 === 0) {
       this.save();
+    }
+
+    // Apply retention policy periodically
+    if (this.logs.length % 100 === 0) {
+      this.applyRetention();
     }
 
     return log;
@@ -140,6 +158,17 @@ class LogManager {
     };
   }
 
+  // Query logs using storage backend (Elasticsearch/Loki)
+  async queryLogsBackend(options = {}) {
+    try {
+      const result = await this.backend.query(options);
+      return result;
+    } catch (e) {
+      console.error('Backend query failed, falling back to local:', e.message);
+      return this.queryLogs(options);
+    }
+  }
+
   // Get logs by resource (device, service, etc.)
   getLogsByResource(resource, limit = 100) {
     return this.queryLogs({ resource, limit, order: 'desc' });
@@ -162,7 +191,8 @@ class LogManager {
       by_source: {},
       last_hour: 0,
       last_24h: 0,
-      error_rate: 0
+      error_rate: 0,
+      backend: this.backend.constructor.name.replace('Backend', '').toLowerCase()
     };
 
     for (const log of this.logs) {
@@ -191,7 +221,88 @@ class LogManager {
     return counts;
   }
 
-  // Alert management
+  // Get stats from backend
+  async getBackendStats() {
+    try {
+      return await this.backend.getStats();
+    } catch (e) {
+      console.error('Backend stats failed:', e.message);
+      return this.getLogStats();
+    }
+  }
+
+  // ===========================================
+  // Log Retention Management
+  // ===========================================
+
+  /**
+   * Apply retention policy - delete logs older than retention_days
+   * @returns {Promise<{deleted: number, retention_days: number}>}
+   */
+  async applyRetention() {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - this.retentionDays);
+    const beforeMs = cutoff.getTime();
+
+    const originalCount = this.logs.length;
+    this.logs = this.logs.filter(l => new Date(l.timestamp).getTime() >= beforeMs);
+    const deleted = originalCount - this.logs.length;
+
+    if (deleted > 0) {
+      this.save();
+      console.log(`[LogManager] Retention cleanup: deleted ${deleted} logs older than ${this.retentionDays} days`);
+
+      // Also cleanup in backend storage
+      try {
+        await this.backend.deleteOldLogs(cutoff.toISOString());
+      } catch (e) {
+        console.error('Backend retention cleanup failed:', e.message);
+      }
+    }
+
+    return { deleted, retention_days: this.retentionDays };
+  }
+
+  /**
+   * Get retention configuration
+   * @returns {Object} Retention config
+   */
+  getRetentionConfig() {
+    return {
+      retention_days: this.retentionDays,
+      backend: this.backend.constructor.name.replace('Backend', '').toLowerCase(),
+      backend_type: BACKEND_TYPES[this.backend.constructor.name.replace('Backend', '').toUpperCase()] || 'local'
+    };
+  }
+
+  /**
+   * Update retention configuration
+   * @param {Object} config - New retention config
+   * @returns {Object} Updated retention config
+   */
+  updateRetentionConfig(config) {
+    if (config.retention_days !== undefined) {
+      this.retentionDays = Math.max(1, Math.min(3650, parseInt(config.retention_days) || 30));
+    }
+    return this.getRetentionConfig();
+  }
+
+  /**
+   * Get storage backend health status
+   * @returns {Promise<{healthy: boolean, backend: string, version?: string, error?: string}>}
+   */
+  async getBackendHealth() {
+    try {
+      return await this.backend.healthCheck();
+    } catch (e) {
+      return { healthy: false, backend: 'unknown', error: e.message };
+    }
+  }
+
+  // ===========================================
+  // Alert Management
+  // ===========================================
+
   createAlertRule(rule) {
     const alertRule = {
       id: uuidv4(),
@@ -328,6 +439,17 @@ class LogManager {
 
     this.save();
     return { generated: count };
+  }
+
+  // Initialize backend
+  async initialize() {
+    try {
+      await this.backend.initialize();
+      return true;
+    } catch (e) {
+      console.error('Backend initialization failed:', e.message);
+      return false;
+    }
   }
 }
 

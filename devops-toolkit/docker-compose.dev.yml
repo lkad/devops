@@ -1,0 +1,216 @@
+version: '3.8'
+
+services:
+  # ===========================================
+  # DevOps Toolkit Application
+  # ===========================================
+  devops-toolkit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devops-toolkit
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - LOG_STORAGE_BACKEND=local
+      - LOG_RETENTION_DAYS=30
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config:/mnt/devops/config
+      - ./logs:/mnt/devops/logs
+    depends_on:
+      - elasticsearch
+      - loki
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # ===========================================
+  # LDAP Authentication
+  # ===========================================
+  ldap:
+    image: osixia/openldap:1.5.0
+    container_name: ldap-server
+    environment:
+      - LDAP_ORGANISATION=ExampleCorp
+      - LDAP_DOMAIN=example.com
+      - LDAP_ADMIN_PASSWORD=adminpassword
+      - LDAP_TLS=false
+      - LDAP_READONLY_USER=true
+      - LDAP_READONLY_USER_USERNAME=readonly
+      - LDAP_READONLY_USER_PASSWORD=readonlypassword
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ./bootstrap.ldif:/container/service/slapd/assets/config/bootstrap.ldif:ro
+      - ldap-data:/var/lib/ldap
+      - ldap-config:/etc/ldap/slapd.d
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # ===========================================
+  # Logging Infrastructure - Elasticsearch
+  # ===========================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - LOG_RETENTION_DAYS=30
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # ===========================================
+  # Logging Infrastructure - Loki (LogQL)
+  # ===========================================
+  loki:
+    image: grafana/loki:2.9.4
+    container_name: loki
+    environment:
+      - LOKI_MODE=dev
+      - LOG_RETENTION_DAYS=30
+    ports:
+      - "3100:3100"
+      - "3101:3101"
+    volumes:
+      - loki-data:/loki
+      - ./configs/loki.yml:/etc/loki/local-config.yaml:ro
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # ===========================================
+  # Logging Infrastructure - Kibana
+  # ===========================================
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.0
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - LOGGING_DIAGS_ENABLED=true
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # ===========================================
+  # Logging Infrastructure - Grafana
+  # ===========================================
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_ALERTING_ENABLED=true
+      - GF_LOG_MODE=console
+    ports:
+      - "3001:3001"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - elasticsearch
+      - loki
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # ===========================================
+  # Monitoring - Prometheus
+  # ===========================================
+  prometheus:
+    image: prom/prometheus:v0.71.0
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # ===========================================
+  # Monitoring - Node Exporter
+  # ===========================================
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - /:/host:ro
+    ports:
+      - "9100:9100"
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # ===========================================
+  # Pipeline Agent
+  # ===========================================
+  pipeline-agent:
+    image: ghcr.io/devops-system/pipeline-agent:v1.0.0
+    container_name: pipeline-agent
+    environment:
+      - DEVOPS_AGENT=true
+      - ENVIRONMENT=test
+    volumes:
+      - ./artifacts:/artifacts
+      - ./configs/pipeline:/configs
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+  # ===========================================
+  # Test Devices (Simulated)
+  # ===========================================
+  device-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.device-sim
+    container_name: device-simulator
+    environment:
+      - DEVOPS_SIMULATOR=true
+      - DEVICE_COUNT=5
+    networks:
+      - devops-net
+    restart: unless-stopped
+
+# ===========================================
+# Networks
+# ===========================================
+networks:
+  devops-net:
+    driver: bridge
+
+# ===========================================
+# Volumes
+# ===========================================
+volumes:
+  ldap-data:
+  ldap-config:
+  es-data:
+  loki-data:
+  grafana-data:
+  prometheus-data:

@@ -461,9 +461,44 @@ async function handleRequest(req, res) {
       return;
     }
 
-    // ============ End Log API Routes ============
+    // GET /api/logs/retention - Get retention configuration
+    if (method === 'GET' && pathname === '/api/logs/retention') {
+      const config = logManager.getRetentionConfig();
+      sendJSON(res, 200, { success: true, config });
+      return;
+    }
 
-    // ============ End Pipeline API Routes ============
+    // PUT /api/logs/retention - Update retention configuration
+    if (method === 'PUT' && pathname === '/api/logs/retention') {
+      try {
+        const body = await parseBody(req);
+        const config = logManager.updateRetentionConfig(body);
+        sendJSON(res, 200, { success: true, config });
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // POST /api/logs/retention/apply - Apply retention policy
+    if (method === 'POST' && pathname === '/api/logs/retention/apply') {
+      try {
+        const result = await logManager.applyRetention();
+        sendJSON(res, 200, { success: true, ...result });
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // GET /api/logs/backend - Get storage backend health
+    if (method === 'GET' && pathname === '/api/logs/backend') {
+      const health = await logManager.getBackendHealth();
+      sendJSON(res, 200, { success: true, health });
+      return;
+    }
+
+    // ============ End Log API Routes ============
 
     // Unknown API route
     sendJSON(res, 404, { success: false, error: 'API endpoint not found' });
