@@ -1,0 +1,266 @@
+{
+  "logs": [
+    {
+      "id": "fd0981f4-52bb-4b15-8f89-c99b4380b6b4",
+      "timestamp": "2026-04-17T07:24:15.311Z",
+      "level": "error",
+      "message": "Service unavailable",
+      "source": "database",
+      "resource": "device-1",
+      "metadata": {},
+      "tags": [
+        "database",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "dea67522-03f8-4a76-a3ff-fe93b1547320",
+      "timestamp": "2026-04-17T07:41:15.394Z",
+      "level": "debug",
+      "message": "Debug: connection pool size 10",
+      "source": "api-gateway",
+      "resource": "device-2",
+      "metadata": {},
+      "tags": [
+        "api-gateway",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "530f5dc8-08a4-485a-aed0-dc800c3f8141",
+      "timestamp": "2026-04-17T07:50:52.118Z",
+      "level": "debug",
+      "message": "Debug info: cache miss",
+      "source": "auth-service",
+      "resource": "device-5",
+      "metadata": {},
+      "tags": [
+        "auth-service",
+        "env:prod"
+      ]
+    },
+    {
+      "id": "91717a67-e9b4-4367-9bd6-25e6635add7e",
+      "timestamp": "2026-04-17T07:19:43.072Z",
+      "level": "debug",
+      "message": "Debug: request queued",
+      "source": "database",
+      "resource": "device-5",
+      "metadata": {},
+      "tags": [
+        "database",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "fc5e3084-24dd-4182-ac86-97ad5ce25d9a",
+      "timestamp": "2026-04-17T07:50:16.521Z",
+      "level": "info",
+      "message": "Health check passed",
+      "source": "web-server",
+      "resource": "device-1",
+      "metadata": {},
+      "tags": [
+        "web-server",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "8b7a2062-da19-4493-97bf-66c4058c5953",
+      "timestamp": "2026-04-17T07:20:00.098Z",
+      "level": "debug",
+      "message": "Debug info: cache miss",
+      "source": "database",
+      "resource": "device-4",
+      "metadata": {},
+      "tags": [
+        "database",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "da0ca6c0-24b4-4f53-ad0f-d9148c65f760",
+      "timestamp": "2026-04-17T07:39:26.387Z",
+      "level": "warn",
+      "message": "High memory usage detected",
+      "source": "api-gateway",
+      "resource": "device-5",
+      "metadata": {},
+      "tags": [
+        "api-gateway",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "4cfe91b1-790a-4016-83a4-31aeeb718cf5",
+      "timestamp": "2026-04-17T07:21:45.063Z",
+      "level": "info",
+      "message": "Health check passed",
+      "source": "database",
+      "resource": "device-1",
+      "metadata": {},
+      "tags": [
+        "database",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "086956d4-3809-4a25-bef8-9ab48c1a7902",
+      "timestamp": "2026-04-17T07:23:20.374Z",
+      "level": "info",
+      "message": "Service started",
+      "source": "database",
+      "resource": "device-2",
+      "metadata": {},
+      "tags": [
+        "database",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "61cae33a-8b0d-486e-a62f-18268178c524",
+      "timestamp": "2026-04-17T07:33:59.754Z",
+      "level": "error",
+      "message": "Service unavailable",
+      "source": "device-agent",
+      "resource": "device-3",
+      "metadata": {},
+      "tags": [
+        "device-agent",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "b14511de-e32f-46da-b7d1-d79e17ba5107",
+      "timestamp": "2026-04-17T07:58:30.420Z",
+      "level": "debug",
+      "message": "Debug info: cache miss",
+      "source": "api-gateway",
+      "resource": "device-4",
+      "metadata": {},
+      "tags": [
+        "api-gateway",
+        "env:prod"
+      ]
+    },
+    {
+      "id": "e44d0645-ec44-4e7d-8e6a-0a524cf6639c",
+      "timestamp": "2026-04-17T07:44:59.314Z",
+      "level": "error",
+      "message": "Connection refused",
+      "source": "auth-service",
+      "resource": "device-3",
+      "metadata": {},
+      "tags": [
+        "auth-service",
+        "env:prod"
+      ]
+    },
+    {
+      "id": "ffa58306-439f-4621-b230-f9182313b894",
+      "timestamp": "2026-04-17T07:58:43.400Z",
+      "level": "debug",
+      "message": "Debug: connection pool size 10",
+      "source": "device-agent",
+      "resource": "device-2",
+      "metadata": {},
+      "tags": [
+        "device-agent",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "bca12a3b-1181-4793-94f1-dfdeab47e04d",
+      "timestamp": "2026-04-17T07:27:06.455Z",
+      "level": "debug",
+      "message": "Debug info: cache miss",
+      "source": "database",
+      "resource": "device-5",
+      "metadata": {},
+      "tags": [
+        "database",
+        "env:prod"
+      ]
+    },
+    {
+      "id": "c55b757b-386d-4236-9a93-61ab059fb7ee",
+      "timestamp": "2026-04-17T07:52:07.623Z",
+      "level": "error",
+      "message": "Connection refused",
+      "source": "api-gateway",
+      "resource": "device-2",
+      "metadata": {},
+      "tags": [
+        "api-gateway",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "189d8e4d-1ba4-4adf-91f7-01c71e8fc712",
+      "timestamp": "2026-04-17T07:24:50.445Z",
+      "level": "error",
+      "message": "Request timeout",
+      "source": "auth-service",
+      "resource": "device-5",
+      "metadata": {},
+      "tags": [
+        "auth-service",
+        "env:prod"
+      ]
+    },
+    {
+      "id": "677aa483-81a4-4bf7-af2c-dc7f4a79143e",
+      "timestamp": "2026-04-17T07:50:36.888Z",
+      "level": "debug",
+      "message": "Debug info: cache miss",
+      "source": "device-agent",
+      "resource": "device-2",
+      "metadata": {},
+      "tags": [
+        "device-agent",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "3cd4a49b-d9df-4bf9-ae26-8ebfe3b7c259",
+      "timestamp": "2026-04-17T07:37:26.717Z",
+      "level": "debug",
+      "message": "Debug info: cache miss",
+      "source": "web-server",
+      "resource": "device-4",
+      "metadata": {},
+      "tags": [
+        "web-server",
+        "env:prod"
+      ]
+    },
+    {
+      "id": "7d64032d-039a-4f97-9233-5e467d9d4084",
+      "timestamp": "2026-04-17T07:29:32.297Z",
+      "level": "warn",
+      "message": "Connection pool near capacity",
+      "source": "database",
+      "resource": "device-4",
+      "metadata": {},
+      "tags": [
+        "database",
+        "env:dev"
+      ]
+    },
+    {
+      "id": "5a57fb58-4609-443a-9062-939f805866b1",
+      "timestamp": "2026-04-17T07:41:36.731Z",
+      "level": "warn",
+      "message": "Slow query detected",
+      "source": "database",
+      "resource": "device-4",
+      "metadata": {},
+      "tags": [
+        "database",
+        "env:prod"
+      ]
+    }
+  ],
+  "alerts": [],
+  "filters": []
+}

@@ -125,6 +125,21 @@
     .log-entry { padding: 4px 0; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border-subtle); }
     .log-entry:last-child { border-bottom: none; }
     .log-timestamp { color: var(--color-text-muted); margin-right: 8px; }
+    .log-level-badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 500; margin-right: 8px; }
+    .log-level-badge.debug { background: rgba(59,130,246,0.15); color: var(--color-info); }
+    .log-level-badge.info { background: rgba(34,197,94,0.15); color: var(--color-success); }
+    .log-level-badge.warn { background: rgba(245,158,11,0.15); color: var(--color-warning); }
+    .log-level-badge.error { background: rgba(239,68,68,0.15); color: var(--color-error); }
+    .log-source { color: var(--color-primary); font-family: var(--font-mono); font-size: 0.75rem; }
+    .log-message { color: var(--color-text); }
+    .log-item { background: var(--color-bg); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 8px; }
+    .log-item:hover { border-color: var(--color-border); background: var(--color-surface-elevated); }
+    .log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .log-meta { font-size: 0.75rem; color: var(--color-text-muted); }
+    .alert-rule { background: var(--color-bg); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 8px; }
+    .alert-rule.enabled { border-color: var(--color-warning); }
+    .alert-rule .name { font-weight: 500; margin-bottom: 4px; }
+    .alert-rule .pattern { font-family: var(--font-mono); font-size: 0.8rem; color: var(--color-text-secondary); }
 
     /* Modal */
     .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; z-index: 1000; }
@@ -211,6 +226,7 @@
       <button class="tab active" onclick="switchView('devices')" id="nav-devices">设备管理</button>
       <button class="tab" onclick="switchView('pipelines')" id="nav-pipelines">流水线</button>
       <button class="tab" onclick="switchView('runs')" id="nav-runs">执行记录</button>
+      <button class="tab" onclick="switchView('logs')" id="nav-logs">日志</button>
     </div>
 
     <!-- Devices View -->
@@ -293,6 +309,51 @@
         </div>
       </div>
     </div><!-- End Runs View -->
+
+    <!-- Logs View -->
+    <div id="view-logs" class="view" style="display: none;">
+      <div class="stats-grid">
+        <div class="stat-card"><div class="label">总日志</div><div class="value total" id="log-total">0</div></div>
+        <div class="stat-card"><div class="label">最近1小时</div><div class="value active" id="log-last-hour">0</div></div>
+        <div class="stat-card"><div class="label">错误率</div><div class="value error" id="log-error-rate">0%</div></div>
+        <div class="stat-card"><div class="label">告警规则</div><div class="value warning" id="log-alert-count">0</div></div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <h2 class="section-title">日志查询</h2>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary btn-sm" onclick="generateLogs()">生成示例日志</button>
+            <button class="btn btn-primary btn-sm" onclick="openAlertModal()">+ 创建告警</button>
+          </div>
+        </div>
+
+        <div class="filters">
+          <div class="filter-group">
+            <label>级别:</label>
+            <select id="log-level" onchange="loadLogs()">
+              <option value="">全部</option>
+              <option value="debug">Debug</option>
+              <option value="info">Info</option>
+              <option value="warn">Warn</option>
+              <option value="error">Error</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>来源:</label>
+            <input type="text" id="log-source" placeholder="例如: web-server" oninput="loadLogs()">
+          </div>
+          <div class="filter-group">
+            <label>搜索:</label>
+            <input type="text" id="log-search" placeholder="搜索日志内容..." oninput="loadLogs()">
+          </div>
+        </div>
+
+        <div class="log-list" id="log-list">
+          <div class="empty-state"><p>暂无日志</p></div>
+        </div>
+      </div>
+    </div><!-- End Logs View -->
   </main>
 
   <!-- 添加设备弹窗 -->
@@ -585,6 +646,7 @@
 
       if (viewName === 'pipelines') loadPipelines();
       if (viewName === 'runs') loadRuns();
+      if (viewName === 'logs') loadLogs();
     }
 
     // Pipeline functions
@@ -717,6 +779,105 @@
           alert(`流水线详情:\n\n名称: ${data.pipeline.name}\n描述: ${data.pipeline.description || '无'}\n阶段: ${data.pipeline.stages?.join(' → ') || ''}${runs}`);
         }
       } catch (e) { console.error(e); }
+    }
+
+    // Log functions
+    let logData = { logs: [], total: 0 };
+
+    async function loadLogs() {
+      try {
+        const level = document.getElementById('log-level').value;
+        const source = document.getElementById('log-source').value;
+        const search = document.getElementById('log-search').value;
+
+        let url = '/api/logs?limit=100&order=desc';
+        if (level) url += `&level=${level}`;
+        if (source) url += `&source=${encodeURIComponent(source)}`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+
+        const res = await fetch(url);
+        const data = await res.json();
+        logData = { logs: data.logs || [], total: data.total || 0 };
+        renderLogs();
+        await loadLogStats();
+      } catch (e) { console.error('Failed to load logs:', e); }
+    }
+
+    async function loadLogStats() {
+      try {
+        const res = await fetch('/api/logs/stats');
+        const data = await res.json();
+        if (data.stats) {
+          document.getElementById('log-total').textContent = data.stats.total || 0;
+          document.getElementById('log-last-hour').textContent = data.stats.last_hour || 0;
+          document.getElementById('log-error-rate').textContent = (data.stats.error_rate || 0) + '%';
+        }
+
+        const alertRes = await fetch('/api/logs/alerts');
+        const alertData = await alertRes.json();
+        document.getElementById('log-alert-count').textContent = (alertData.alerts || []).length;
+      } catch (e) { console.error('Failed to load log stats:', e); }
+    }
+
+    function renderLogs() {
+      const list = document.getElementById('log-list');
+      if (logData.logs.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p>暂无日志</p></div>';
+        return;
+      }
+
+      list.innerHTML = logData.logs.map(log => `
+        <div class="log-item">
+          <div class="log-header">
+            <div>
+              <span class="log-level-badge ${log.level}">${log.level.toUpperCase()}</span>
+              <span class="log-source">${log.source || 'unknown'}</span>
+            </div>
+            <div class="log-meta">${formatTime(log.timestamp)}</div>
+          </div>
+          <div class="log-message">${escapeHtml(log.message)}</div>
+          ${log.resource ? `<div class="log-meta" style="margin-top: 4px;">资源: ${log.resource}</div>` : ''}
+        </div>
+      `).join('');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    async function generateLogs() {
+      try {
+        const res = await fetch('/api/logs/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 50 }) });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`已生成 ${data.generated} 条示例日志`, 'success');
+          loadLogs();
+        }
+      } catch (e) { showToast('生成日志失败', 'error'); }
+    }
+
+    async function openAlertModal() {
+      const name = prompt('告警规则名称:');
+      if (!name) return;
+      const pattern = prompt('匹配模式 (正则或关键字):');
+      if (!pattern) return;
+      const level = prompt('日志级别 (debug, info, warn, error):', 'error');
+      if (!level) return;
+
+      try {
+        const res = await fetch('/api/logs/alerts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, pattern, level })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('告警规则创建成功', 'success');
+          loadLogStats();
+        }
+      } catch (e) { showToast('创建告警失败', 'error'); }
     }
   </script>
 </body>

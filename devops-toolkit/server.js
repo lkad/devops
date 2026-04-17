@@ -13,10 +13,12 @@ const url = require('url');
 // DeviceManager for actual device operations
 const DeviceManager = require('./devices/device_manager');
 const PipelineManager = require('./pipelines/pipeline_manager');
+const LogManager = require('./logs/log_manager');
 
 // Initialize managers
 const deviceManager = new DeviceManager(path.join(__dirname, 'config/devices'));
 const pipelineManager = new PipelineManager(path.join(__dirname, 'config/pipelines.json'));
+const logManager = new LogManager(path.join(__dirname, 'config/logs.json'));
 
 // MIME types
 const MIME_TYPES = {
@@ -340,6 +342,126 @@ async function handleRequest(req, res) {
       sendJSON(res, 200, { success: true, runs });
       return;
     }
+
+    // ============ Log API Routes ============
+
+    // GET /api/logs - Query logs
+    if (method === 'GET' && pathname === '/api/logs') {
+      const query = parsedUrl.query;
+      const options = {
+        level: query.level || null,
+        levels: query.levels ? query.levels.split(',') : null,
+        source: query.source || null,
+        resource: query.resource || null,
+        search: query.search || null,
+        start_time: query.start_time || null,
+        end_time: query.end_time || null,
+        tags: query.tags ? query.tags.split(',') : null,
+        offset: parseInt(query.offset) || 0,
+        limit: parseInt(query.limit) || 100,
+        order: query.order || 'desc'
+      };
+      const result = logManager.queryLogs(options);
+      sendJSON(res, 200, { success: true, ...result });
+      return;
+    }
+
+    // GET /api/logs/stats - Get log statistics
+    if (method === 'GET' && pathname === '/api/logs/stats') {
+      const stats = logManager.getLogStats();
+      sendJSON(res, 200, { success: true, stats });
+      return;
+    }
+
+    // POST /api/logs - Add log entry
+    if (method === 'POST' && pathname === '/api/logs') {
+      try {
+        const body = await parseBody(req);
+        const log = logManager.addLog(body);
+        sendJSON(res, 201, { success: true, log });
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // POST /api/logs/generate - Generate sample logs (for demo)
+    if (method === 'POST' && pathname === '/api/logs/generate') {
+      const body = await parseBody(req).catch(() => ({}));
+      const count = body.count || 50;
+      const result = logManager.generateSampleLogs(count);
+      sendJSON(res, 200, { success: true, ...result });
+      return;
+    }
+
+    // GET /api/logs/alerts - Get alert rules
+    if (method === 'GET' && pathname === '/api/logs/alerts') {
+      const alerts = logManager.getAlertRules();
+      sendJSON(res, 200, { success: true, alerts });
+      return;
+    }
+
+    // POST /api/logs/alerts - Create alert rule
+    if (method === 'POST' && pathname === '/api/logs/alerts') {
+      try {
+        const body = await parseBody(req);
+        const alert = logManager.createAlertRule(body);
+        sendJSON(res, 201, { success: true, alert });
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // PUT /api/logs/alerts/:id - Update alert rule
+    if (method === 'PUT' && pathname.match(/^\/api\/logs\/alerts\/[^/]+$/)) {
+      const id = pathname.split('/')[4];
+      try {
+        const body = await parseBody(req);
+        const alert = logManager.updateAlertRule(id, body);
+        if (alert) {
+          sendJSON(res, 200, { success: true, alert });
+        } else {
+          sendJSON(res, 404, { success: false, error: 'Alert not found' });
+        }
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // DELETE /api/logs/alerts/:id - Delete alert rule
+    if (method === 'DELETE' && pathname.match(/^\/api\/logs\/alerts\/[^/]+$/)) {
+      const id = pathname.split('/')[4];
+      const result = logManager.deleteAlertRule(id);
+      if (result) {
+        sendJSON(res, 200, { success: true });
+      } else {
+        sendJSON(res, 404, { success: false, error: 'Alert not found' });
+      }
+      return;
+    }
+
+    // GET /api/logs/filters - Get saved filters
+    if (method === 'GET' && pathname === '/api/logs/filters') {
+      const filters = logManager.getSavedFilters();
+      sendJSON(res, 200, { success: true, filters });
+      return;
+    }
+
+    // POST /api/logs/filters - Save filter
+    if (method === 'POST' && pathname === '/api/logs/filters') {
+      try {
+        const body = await parseBody(req);
+        const filter = logManager.saveFilter(body);
+        sendJSON(res, 201, { success: true, filter });
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // ============ End Log API Routes ============
 
     // ============ End Pipeline API Routes ============
 
