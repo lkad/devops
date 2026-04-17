@@ -147,6 +147,79 @@ async function handleRequest(req, res) {
       return;
     }
 
+    // GET /api/devices/:id/metrics - Get device metrics
+    if (method === 'GET' && pathname.match(/^\/api\/devices\/[^/]+\/metrics$/)) {
+      const id = pathname.split('/')[3];
+      const device = deviceManager.getDevice(id);
+      if (device) {
+        // 返回模拟的监控数据
+        const metrics = {
+          device_id: id,
+          timestamp: new Date().toISOString(),
+          cpu: { usage: Math.random() * 100, cores: 4 },
+          memory: { used: Math.floor(Math.random() * 16), total: 16, unit: 'GB' },
+          network: { rx: Math.floor(Math.random() * 1000), tx: Math.floor(Math.random() * 1000), unit: 'MB/s' },
+          disk: { used: Math.floor(Math.random() * 500), total: 1000, unit: 'GB' }
+        };
+        sendJSON(res, 200, { success: true, metrics });
+      } else {
+        sendJSON(res, 404, { success: false, error: 'Device not found' });
+      }
+      return;
+    }
+
+    // GET /api/devices/:id/events - Get device events
+    if (method === 'GET' && pathname.match(/^\/api\/devices\/[^/]+\/events$/)) {
+      const id = pathname.split('/')[3];
+      const device = deviceManager.getDevice(id);
+      if (device) {
+        // 返回模拟的事件日志
+        const events = [
+          { id: 1, type: 'status_change', message: '设备上线', timestamp: new Date(Date.now() - 3600000).toISOString() },
+          { id: 2, type: 'config_update', message: '配置已更新', timestamp: new Date(Date.now() - 7200000).toISOString() },
+          { id: 3, type: 'heartbeat', message: '心跳检测成功', timestamp: new Date(Date.now() - 10800000).toISOString() },
+        ];
+        sendJSON(res, 200, { success: true, events });
+      } else {
+        sendJSON(res, 404, { success: false, error: 'Device not found' });
+      }
+      return;
+    }
+
+    // POST /api/devices/:id/actions - Execute device action
+    if (method === 'POST' && pathname.match(/^\/api\/devices\/[^/]+\/actions$/)) {
+      const id = pathname.split('/')[3];
+      const device = deviceManager.getDevice(id);
+      if (!device) {
+        sendJSON(res, 404, { success: false, error: 'Device not found' });
+        return;
+      }
+      try {
+        const body = await parseBody(req);
+        const { action } = body;
+
+        // 模拟操作执行
+        const actions = ['restart', 'stop', 'pause', 'resume'];
+        if (!actions.includes(action)) {
+          sendJSON(res, 400, { success: false, error: 'Invalid action' });
+          return;
+        }
+
+        // 返回操作结果
+        const result = {
+          success: true,
+          action,
+          device_id: id,
+          status: 'executed',
+          executed_at: new Date().toISOString()
+        };
+        sendJSON(res, 200, result);
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
     // Unknown API route
     sendJSON(res, 404, { success: false, error: 'API endpoint not found' });
     return;
