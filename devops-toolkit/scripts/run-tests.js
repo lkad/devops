@@ -152,7 +152,7 @@ async function testRetention() {
 
     await expectTrue('GET /api/logs/retention returns config', async () => {
         const res = await request('GET', '/api/logs/retention');
-        return res.status === 200 && res.data.config;
+        return res.status === 200 && res.data.success === true && !!res.data.config;
     });
 
     await expectTrue('PUT /api/logs/retention updates retention_days', async () => {

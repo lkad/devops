@@ -110,7 +110,98 @@ Implement a Go‑based LDAP client that authenticates users and resolves their s
 
 ---
 
-## 10. Timeline (Estimated)
+## 10. Logging & Storage Backend Integration
+
+The LDAP client audit logs are integrated with the DevOps Toolkit's centralized logging system, supporting multiple storage backends.
+
+### 10.1 Supported Storage Backends
+
+| Backend | Environment Variable | Default Port | Use Case |
+|---------|---------------------|--------------|----------|
+| **Local** | `LOG_STORAGE_BACKEND=local` | - | Development/testing, default |
+| **Elasticsearch** | `LOG_STORAGE_BACKEND=elasticsearch` | 9200 | Production full-text search |
+| **Loki** | `LOG_STORAGE_BACKEND=loki` | 3100 | Grafana ecosystem, log aggregation |
+
+### 10.2 Configuration
+
+```bash
+# Common configuration
+LOG_STORAGE_BACKEND=elasticsearch  # local | elasticsearch | loki
+LOG_RETENTION_DAYS=30              # Log retention in days, default 30
+
+# Elasticsearch configuration
+ELASTICSEARCH_URL=http://localhost:9200
+ELASTICSEARCH_INDEX=devops-logs
+ELASTICSEARCH_USERNAME=
+ELASTICSEARCH_PASSWORD=
+
+# Loki configuration
+LOKI_URL=http://localhost:3100
+```
+
+### 10.3 Log Query Delegation
+
+The system uses a query delegation pattern based on storage backend type:
+
+- **Local backend**: Queries operational logs from local JSON array
+- **Elasticsearch/Loki backend**: Delegates queries to backend API for external logs (device/container logs collected by Filebeat)
+
+```javascript
+// Query routing in LogManager
+queryLogs(options = {}) {
+  const backendType = this.backend.constructor.name;
+  if (backendType === 'LocalStorageBackend') {
+    return this.queryLogsLocal(options);
+  } else {
+    return this.queryLogsFromBackend(options);
+  }
+}
+```
+
+### 10.4 Log Types
+
+| Log Type | Source | Storage | Query Method |
+|----------|--------|---------|--------------|
+| **Operational Logs** | Application via LogManager | Local or Backend | Direct query |
+| **Device/Container Logs** | External collectors (Filebeat) | Elasticsearch/Loki | Backend API delegation |
+| **Audit Logs** | LDAP client events | Backend | Backend API delegation |
+
+### 10.5 Retention Policy
+
+| Backend | Retention Method |
+|---------|-----------------|
+| **Local** | Application-level periodic cleanup |
+| **Elasticsearch** | Index Lifecycle Management (ILM) Policy |
+| **Loki** | Configure `chunk_target_size` and `retention_period` |
+
+### 10.6 API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/logs/retention` | GET | Get retention policy configuration |
+| `/api/logs/retention` | PUT | Update retention policy |
+| `/api/logs/retention/apply` | POST | Manually trigger retention cleanup |
+| `/api/logs/backend` | GET | Get storage backend health status |
+| `/api/logs` | GET | Query logs |
+| `/api/logs/stats` | GET | Get log statistics |
+
+### 10.7 Docker Development Environment
+
+```bash
+# Start full logging infrastructure
+docker-compose -f docker-compose.dev.yml up -d
+
+# Service ports
+# - Elasticsearch: http://localhost:9200
+# - Kibana:       http://localhost:5601
+# - Loki:         http://localhost:3100
+# - Grafana:      http://localhost:3001
+# - Prometheus:   http://localhost:9090
+```
+
+---
+
+## 11. Timeline (Estimated)
 
 | Milestone | Date | Owner |
 |-----------|------|-------|

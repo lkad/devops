@@ -17,8 +17,8 @@ passed=0
 failed=0
 
 info() { echo -e "${YELLOW}[INFO]${NC} $1"; }
-pass() { echo -e "${GREEN}[PASS]${NC} $1"; ((passed++)); }
-fail() { echo -e "${RED}[FAIL]${NC} $1"; ((failed++)); }
+pass() { echo -e "${GREEN}[PASS]${NC} $1"; passed=$((passed + 1)); }
+fail() { echo -e "${RED}[FAIL]${NC} $1"; failed=$((failed + 1)); }
 
 wait_server() {
     info "Waiting for server at $BASE_URL..."
