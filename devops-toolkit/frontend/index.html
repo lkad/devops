@@ -104,6 +104,28 @@
 
     .empty-state { text-align: center; padding: 60px 20px; color: var(--color-text-muted); }
 
+    /* Pipeline */
+    .pipeline-list, .run-list { display: grid; gap: 12px; }
+    .pipeline-item, .run-item { background: var(--color-bg); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); padding: 16px 20px; transition: all 0.15s; }
+    .pipeline-item:hover, .run-item:hover { border-color: var(--color-border); background: var(--color-surface-elevated); }
+    .pipeline-info, .run-info { display: flex; justify-content: space-between; align-items: center; }
+    .pipeline-info h3, .run-info h3 { font-size: 0.95rem; font-weight: 500; margin-bottom: 4px; }
+    .pipeline-info p, .run-info p { font-size: 0.8rem; color: var(--color-text-muted); font-family: var(--font-mono); }
+    .pipeline-meta, .run-meta { display: flex; gap: 15px; align-items: center; }
+    .pipeline-status, .run-status { display: inline-block; padding: 4px 10px; border-radius: var(--radius-sm); font-size: 0.75rem; font-weight: 500; }
+    .pipeline-stages { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .stage-badge { padding: 4px 8px; background: var(--color-surface-elevated); border-radius: var(--radius-sm); font-size: 0.7rem; color: var(--color-text-secondary); }
+    .stage-badge.success { background: rgba(34,197,94,0.15); color: var(--color-success); }
+    .stage-badge.failed { background: rgba(239,68,68,0.15); color: var(--color-error); }
+    .stage-badge.running { background: rgba(34,211,238,0.15); color: var(--color-primary); }
+    .stage-badge.pending { background: rgba(100,116,139,0.15); color: var(--color-text-muted); }
+
+    /* Run Log */
+    .run-logs { background: var(--color-bg); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); padding: 16px; margin-top: 16px; max-height: 300px; overflow-y: auto; font-family: var(--font-mono); font-size: 0.8rem; }
+    .log-entry { padding: 4px 0; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border-subtle); }
+    .log-entry:last-child { border-bottom: none; }
+    .log-timestamp { color: var(--color-text-muted); margin-right: 8px; }
+
     /* Modal */
     .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; z-index: 1000; }
     .modal-overlay.active { display: flex; }
@@ -178,18 +200,27 @@
 <body>
   <header>
     <div class="container">
-      <h1>DevOps Toolkit - 设备管理</h1>
-      <p>统一管理物理机、容器、网络设备和云实例</p>
+      <h1>DevOps Toolkit</h1>
+      <p>统一设备管理与 CI/CD 自动化平台</p>
     </div>
   </header>
 
   <main class="container">
-    <div class="stats-grid">
-      <div class="stat-card"><div class="label">总设备数</div><div class="value total" id="stat-total">0</div></div>
-      <div class="stat-card"><div class="label">在线设备</div><div class="value active" id="stat-active">0</div></div>
-      <div class="stat-card"><div class="label">待注册</div><div class="value pending" id="stat-pending">0</div></div>
-      <div class="stat-card"><div class="label">异常设备</div><div class="value error" id="stat-error">0</div></div>
+    <!-- Navigation Tabs -->
+    <div class="nav-tabs" style="display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--color-border);">
+      <button class="tab active" onclick="switchView('devices')" id="nav-devices">设备管理</button>
+      <button class="tab" onclick="switchView('pipelines')" id="nav-pipelines">流水线</button>
+      <button class="tab" onclick="switchView('runs')" id="nav-runs">执行记录</button>
     </div>
+
+    <!-- Devices View -->
+    <div id="view-devices" class="view active">
+      <div class="stats-grid">
+        <div class="stat-card"><div class="label">总设备数</div><div class="value total" id="stat-total">0</div></div>
+        <div class="stat-card"><div class="label">在线设备</div><div class="value active" id="stat-active">0</div></div>
+        <div class="stat-card"><div class="label">待注册</div><div class="value pending" id="stat-pending">0</div></div>
+        <div class="stat-card"><div class="label">异常设备</div><div class="value error" id="stat-error">0</div></div>
+      </div>
 
     <div class="section">
       <div class="section-header">
@@ -229,6 +260,39 @@
         <div class="empty-state"><p>暂无设备</p></div>
       </div>
     </div>
+    </div><!-- End Devices View -->
+
+    <!-- Pipelines View -->
+    <div id="view-pipelines" class="view" style="display: none;">
+      <div class="stats-grid">
+        <div class="stat-card"><div class="label">流水线</div><div class="value total" id="pipeline-count">0</div></div>
+        <div class="stat-card"><div class="label">运行中</div><div class="value active" id="pipeline-running">0</div></div>
+        <div class="stat-card"><div class="label">成功</div><div class="value active" id="pipeline-success">0</div></div>
+        <div class="stat-card"><div class="label">失败</div><div class="value error" id="pipeline-failed">0</div></div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <h2 class="section-title">流水线列表</h2>
+          <button class="btn btn-primary" onclick="openPipelineModal()">+ 创建流水线</button>
+        </div>
+        <div class="pipeline-list" id="pipeline-list">
+          <div class="empty-state"><p>暂无流水线</p></div>
+        </div>
+      </div>
+    </div><!-- End Pipelines View -->
+
+    <!-- Runs View -->
+    <div id="view-runs" class="view" style="display: none;">
+      <div class="section">
+        <div class="section-header">
+          <h2 class="section-title">最近执行记录</h2>
+        </div>
+        <div class="run-list" id="run-list">
+          <div class="empty-state"><p>暂无执行记录</p></div>
+        </div>
+      </div>
+    </div><!-- End Runs View -->
   </main>
 
   <!-- 添加设备弹窗 -->
@@ -511,6 +575,149 @@
     function deleteDevice(id) { if (confirm('确定要删除这个设备吗?')) { devices = devices.filter(d => d.id !== id); renderDevices(); updateStats(); showToast('设备已删除', 'success'); fetch(`/api/devices/${id}`, { method: 'DELETE' }).catch(() => {}); } }
 
     function showToast(message, type = 'success') { const toast = document.getElementById('toast'); toast.textContent = message; toast.className = `toast ${type} show`; setTimeout(() => { toast.classList.remove('show'); }, 3000); }
+
+    // View switching
+    function switchView(viewName) {
+      document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.getElementById(`view-${viewName}`).style.display = 'block';
+      document.getElementById(`nav-${viewName}`).classList.add('active');
+
+      if (viewName === 'pipelines') loadPipelines();
+      if (viewName === 'runs') loadRuns();
+    }
+
+    // Pipeline functions
+    let pipelines = [];
+    let runs = [];
+
+    async function loadPipelines() {
+      try {
+        const res = await fetch('/api/pipelines');
+        const data = await res.json();
+        pipelines = data.pipelines || [];
+        renderPipelines();
+        updatePipelineStats();
+      } catch (e) { console.error('Failed to load pipelines:', e); }
+    }
+
+    async function loadRuns() {
+      try {
+        const res = await fetch('/api/runs');
+        const data = await res.json();
+        runs = data.runs || [];
+        renderRuns();
+      } catch (e) { console.error('Failed to load runs:', e); }
+    }
+
+    function renderPipelines() {
+      const list = document.getElementById('pipeline-list');
+      if (pipelines.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p>暂无流水线</p></div>';
+        return;
+      }
+      list.innerHTML = pipelines.map(p => `
+        <div class="pipeline-item">
+          <div class="pipeline-info">
+            <div>
+              <h3>${p.name}</h3>
+              <p>${p.description || '无描述'} | ${p.stages?.join(' → ') || ''}</p>
+            </div>
+            <div class="pipeline-meta">
+              <button class="btn btn-primary btn-sm" onclick="executePipeline('${p.id}')">执行</button>
+              <button class="btn btn-secondary btn-sm" onclick="openPipelineDetail('${p.id}')">详情</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderRuns() {
+      const list = document.getElementById('run-list');
+      if (runs.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p>暂无执行记录</p></div>';
+        return;
+      }
+      list.innerHTML = runs.map(r => `
+        <div class="run-item">
+          <div class="run-info">
+            <div>
+              <h3>${r.pipeline_name}</h3>
+              <p>${r.id.slice(0,8)}... | ${formatTime(r.started_at)}</p>
+            </div>
+            <div class="run-meta">
+              <span class="run-status status-${r.status}">${getStatusText(r.status)}</span>
+              <button class="btn btn-ghost btn-sm" onclick="viewRunLogs('${r.id}')">日志</button>
+            </div>
+          </div>
+          <div class="pipeline-stages">
+            ${(r.stages || []).map(s => `<span class="stage-badge ${s.status}">${s.name}: ${getStatusText(s.status)}</span>`).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function updatePipelineStats() {
+      document.getElementById('pipeline-count').textContent = pipelines.length;
+    }
+
+    async function executePipeline(id) {
+      try {
+        const res = await fetch(`/api/pipelines/${id}/execute`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ triggered_by: 'ui' }) });
+        const data = await res.json();
+        if (data.success) {
+          showToast('流水线已启动', 'success');
+          loadPipelines();
+          loadRuns();
+        }
+      } catch (e) { showToast('执行失败', 'error'); }
+    }
+
+    async function viewRunLogs(runId) {
+      try {
+        const res = await fetch(`/api/runs`);
+        const data = await res.json();
+        const run = (data.runs || []).find(r => r.id === runId);
+        if (run) {
+          alert(`执行日志:\n${run.logs.map(l => `[${l.timestamp}] [${l.stage}] ${l.message}`).join('\n')}`);
+        }
+      } catch (e) { console.error(e); }
+    }
+
+    function getStatusText(status) {
+      const map = { pending: '等待', running: '运行中', success: '成功', failed: '失败', cancelled: '取消' };
+      return map[status] || status;
+    }
+
+    function openPipelineModal() {
+      const name = prompt('流水线名称:');
+      if (!name) return;
+      const desc = prompt('描述 (可选):') || '';
+      const stages = prompt('阶段 (逗号分隔，如: validate,build,test,deploy):') || 'validate,build,test,deploy';
+      const pipeline = {
+        name, description: desc,
+        stages: stages.split(',').map(s => s.trim()),
+        repository: 'git@example.com/demo.git',
+        branch: 'main'
+      };
+      fetch('/api/pipelines', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pipeline) })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) { showToast('流水线创建成功', 'success'); loadPipelines(); }
+        })
+        .catch(() => showToast('创建失败', 'error'));
+    }
+
+    async function openPipelineDetail(id) {
+      try {
+        const res = await fetch(`/api/pipelines/${id}`);
+        const data = await res.json();
+        if (data.pipeline) {
+          const runs = data.stats ? '' : `\n成功: ${data.stats?.success_count || 0}\n失败: ${data.stats?.failed_count || 0}`;
+          alert(`流水线详情:\n\n名称: ${data.pipeline.name}\n描述: ${data.pipeline.description || '无'}\n阶段: ${data.pipeline.stages?.join(' → ') || ''}${runs}`);
+        }
+      } catch (e) { console.error(e); }
+    }
   </script>
 </body>
 </html>

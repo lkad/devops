@@ -12,9 +12,11 @@ const url = require('url');
 
 // DeviceManager for actual device operations
 const DeviceManager = require('./devices/device_manager');
+const PipelineManager = require('./pipelines/pipeline_manager');
 
-// Initialize device manager
+// Initialize managers
 const deviceManager = new DeviceManager(path.join(__dirname, 'config/devices'));
+const pipelineManager = new PipelineManager(path.join(__dirname, 'config/pipelines.json'));
 
 // MIME types
 const MIME_TYPES = {
@@ -213,6 +215,133 @@ async function handleRequest(req, res) {
       }
       return;
     }
+
+    // ============ Pipeline API Routes ============
+
+    // GET /api/pipelines - List all pipelines
+    if (method === 'GET' && pathname === '/api/pipelines') {
+      const pipelines = pipelineManager.getAllPipelines();
+      sendJSON(res, 200, { success: true, pipelines });
+      return;
+    }
+
+    // POST /api/pipelines - Create pipeline
+    if (method === 'POST' && pathname === '/api/pipelines') {
+      try {
+        const body = await parseBody(req);
+        const pipeline = pipelineManager.createPipeline(body);
+        sendJSON(res, 201, { success: true, pipeline });
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // GET /api/pipelines/:id - Get pipeline
+    if (method === 'GET' && pathname.match(/^\/api\/pipelines\/[^/]+$/)) {
+      const id = pathname.split('/')[3];
+      const pipeline = pipelineManager.getPipeline(id);
+      if (pipeline) {
+        const stats = pipelineManager.getPipelineStats(id);
+        sendJSON(res, 200, { success: true, pipeline, stats });
+      } else {
+        sendJSON(res, 404, { success: false, error: 'Pipeline not found' });
+      }
+      return;
+    }
+
+    // PUT /api/pipelines/:id - Update pipeline
+    if (method === 'PUT' && pathname.match(/^\/api\/pipelines\/[^/]+$/)) {
+      const id = pathname.split('/')[3];
+      try {
+        const body = await parseBody(req);
+        const pipeline = pipelineManager.updatePipeline(id, body);
+        if (pipeline) {
+          sendJSON(res, 200, { success: true, pipeline });
+        } else {
+          sendJSON(res, 404, { success: false, error: 'Pipeline not found' });
+        }
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // DELETE /api/pipelines/:id - Delete pipeline
+    if (method === 'DELETE' && pathname.match(/^\/api\/pipelines\/[^/]+$/)) {
+      const id = pathname.split('/')[3];
+      const result = pipelineManager.deletePipeline(id);
+      if (result) {
+        sendJSON(res, 200, { success: true });
+      } else {
+        sendJSON(res, 404, { success: false, error: 'Pipeline not found' });
+      }
+      return;
+    }
+
+    // POST /api/pipelines/:id/execute - Execute pipeline
+    if (method === 'POST' && pathname.match(/^\/api\/pipelines\/[^/]+\/execute$/)) {
+      const id = pathname.split('/')[3];
+      try {
+        const body = await parseBody(req);
+        const run = pipelineManager.executePipeline(id, {
+          type: 'manual',
+          triggered_by: body.triggered_by || 'api',
+          ...body
+        });
+        if (run) {
+          sendJSON(res, 201, { success: true, run });
+        } else {
+          sendJSON(res, 404, { success: false, error: 'Pipeline not found' });
+        }
+      } catch (error) {
+        sendJSON(res, 400, { success: false, error: error.message });
+      }
+      return;
+    }
+
+    // GET /api/pipelines/:id/runs - Get pipeline runs
+    if (method === 'GET' && pathname.match(/^\/api\/pipelines\/[^/]+\/runs$/)) {
+      const id = pathname.split('/')[3];
+      const runs = pipelineManager.getPipelineRuns(id);
+      sendJSON(res, 200, { success: true, runs });
+      return;
+    }
+
+    // GET /api/pipelines/:id/runs/:runId - Get run details
+    if (method === 'GET' && pathname.match(/^\/api\/pipelines\/[^/]+\/runs\/[^/]+$/)) {
+      const parts = pathname.split('/');
+      const runId = parts[parts.length - 1];
+      const run = pipelineManager.getRun(runId);
+      if (run) {
+        sendJSON(res, 200, { success: true, run });
+      } else {
+        sendJSON(res, 404, { success: false, error: 'Run not found' });
+      }
+      return;
+    }
+
+    // POST /api/pipelines/:id/runs/:runId/cancel - Cancel running pipeline
+    if (method === 'POST' && pathname.match(/^\/api\/pipelines\/[^/]+\/runs\/[^/]+\/cancel$/)) {
+      const parts = pathname.split('/');
+      const runId = parts[parts.length - 2];
+      const run = pipelineManager.cancelRun(runId);
+      if (run) {
+        sendJSON(res, 200, { success: true, run });
+      } else {
+        sendJSON(res, 404, { success: false, error: 'Run not found' });
+      }
+      return;
+    }
+
+    // GET /api/runs - Get all recent runs
+    if (method === 'GET' && pathname === '/api/runs') {
+      const runs = pipelineManager.getRecentRuns(50);
+      sendJSON(res, 200, { success: true, runs });
+      return;
+    }
+
+    // ============ End Pipeline API Routes ============
 
     // Unknown API route
     sendJSON(res, 404, { success: false, error: 'API endpoint not found' });
