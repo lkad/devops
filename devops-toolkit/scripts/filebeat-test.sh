@@ -183,25 +183,16 @@ processors:
 output.logstash:
   hosts: ["localhost:5044"]
 
-# Loki via promtail-compatible HTTP
-filebeat.outputs:
-  - type: loki
-    enabled: true
-    host: "$LOKI_URL"
-    port: 3100
-    labels:
-      app: devops-toolkit
-      environment: \${NODE_ENV:-development}
-      job: filebeat
-    timeout: 10
-
-# Alternative: plain http output to Loki
+# Loki output via HTTP (promtail-compatible)
+# Note: Filebeat doesn't have native Loki output, using HTTP output to Loki's push API
 output.http:
   enabled: true
   hosts: ["$LOKI_URL"]
   path: "/loki/api/v1/push"
   method: POST
   content_type: "application/json"
+  headers:
+    - 'Content-Type: application/json'
 
 logging.level: info
 logging.to_files: true

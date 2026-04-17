@@ -269,6 +269,27 @@ docker-compose -f docker-compose.dev.yml up -d
 # - Prometheus:  http://localhost:9090
 ```
 
+### 3.8.7 Filebeat 日志收集
+
+外部收集器（如 Filebeat）用于收集设备、容器等日志到后端存储：
+
+```bash
+# 使用 filebeat-test.sh 脚本测试 Filebeat 日志收集
+cd devops-toolkit
+./scripts/filebeat-test.sh setup              # 创建配置目录和示例日志
+./scripts/filebeat-test.sh elasticsearch       # 配置 Filebeat 输出到 Elasticsearch
+./scripts/filebeat-test.sh start               # 启动 Filebeat
+./scripts/filebeat-test.sh test                # 运行测试
+
+# 或使用 Loki
+./scripts/filebeat-test.sh loki                # 配置 Filebeat 输出到 Loki
+./scripts/filebeat-test.sh test --backend loki
+```
+
+**日志类型分离：**
+- **操作日志**: 通过 LogManager 写入后端（应用直接写入）
+- **设备/容器日志**: 通过 Filebeat 收集后写入后端（外部收集器）
+
 ### 4. Monitoring System
 
 ## 4.1 指标采集
