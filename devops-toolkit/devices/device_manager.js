@@ -59,30 +59,30 @@ class DeviceManager {
   
   // 获取设备
   getDevice(id) {
-    return this.devices.get(id) || this.getDeviceByTag(id);
+    return this.devices.get(id);
   }
-  
-  // 批量获取设备
+
+  // 批量获取设备 (AND逻辑 - 设备必须匹配所有标签)
   getDevicesByTags(tags) {
     const result = [];
-    
+
     for (const device of this.devices.values()) {
-      let matched = false;
-      
+      let matchedAll = true;
+
       for (const tag of tags) {
-        for (const label of device.labels) {
-          if (label[tag.split(':')[0]] === tag.split(':')[1]) {
-            matched = true;
-            break;
-          }
+        const [key, value] = tag.split(':');
+        const labelMatches = device.labels.some(label => label[key] === value);
+        if (!labelMatches) {
+          matchedAll = false;
+          break;
         }
       }
-      
-      if (matched) {
+
+      if (matchedAll) {
         result.push(device);
       }
     }
-    
+
     return result;
   }
   
@@ -109,7 +109,7 @@ class DeviceManager {
   }
   
   // 批量操作
-  bulkOperation(operation, devices) {
+  async bulkOperation(operation, devices) {
     const results = [];
     
     for (const devId of devices) {

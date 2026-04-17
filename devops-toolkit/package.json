@@ -14,5 +14,11 @@
   },
   "keywords": ["devops","device-management","ci-cd"],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
 }

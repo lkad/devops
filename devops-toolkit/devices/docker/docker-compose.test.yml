@@ -18,6 +18,12 @@ services:
     networks:
       - devops-test-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   server-web-02:
     image: nginx:alpine
@@ -34,6 +40,12 @@ services:
     networks:
       - devops-test-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   server-app-01:
     image: node:18-alpine
@@ -42,10 +54,14 @@ services:
     environment:
       - DEVOPS_AGENT=true
       - NODE_ENV=development
+      - DB_HOST=devops-db-mysql
+      - DB_PORT=3306
+      - REDIS_HOST=devops-cache-redis
+      - REDIS_PORT=6379
     ports:
       - "3000:3000"
     volumes:
-      - devops-configs-server-01:/app/config
+      - devops-configs-server-01:/app/config:ro
     labels:
       - env=development
       - device_type=app
@@ -53,6 +69,17 @@ services:
     networks:
       - devops-test-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      devops-db-mysql:
+        condition: service_healthy
+      devops-cache-redis:
+        condition: service_healthy
 
   # === 数据库容器 ===
   devops-db-mysql:
@@ -67,9 +94,16 @@ services:
       - "3306:3306"
     volumes:
       - devops-data-db:/var/lib/mysql
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
     networks:
       - devops-test-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pdevops_demo_123"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   # === 缓存容器 ===
   devops-cache-redis:
@@ -82,45 +116,45 @@ services:
     networks:
       - devops-test-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # === 网络设备层 ===
-  router-devops:
-    image: jess/gluetun:latest
-    container_name: router-devops
-    environment:
-      - TZ=Asia/Shanghai
-      - WIREGUARD_PRIVATE_KEY=demo_key_for_testing
-      - WIREGUARD_PUBLIC_KEY=demo_key_for_testing
-      - WIREGUARD_ADDRESS=10.8.0.1/32
-    ports:
-      - "222:22/tcp"
-    networks:
-      - devops-test-net
-
   loadbalancer-devops:
-    image: haproxy:28-alpine
+    image: haproxy:2.8-alpine
     container_name: loadbalancer-devops
     ports:
       - "8080:80"
+      - "8443:443"
     volumes:
-      - /devops/devops-toolkit/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     networks:
       - devops-test-net
-      - devops-fwd-net
-    depends_on:
-      - server-app-01
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - server-web-01
+      - server-web-02
 
   # === 监控层 ===
   devops-node-exporter:
-    image: prom/node-exporter:latest
+    image: prom/node-exporter:v1.7.0
     container_name: devops-node-exporter
     command:
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
       - '--collector.filesystem'
+      - '--collector.netdev'
     volumes:
-      - /:/host:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
     ports:
@@ -128,38 +162,61 @@ services:
     networks:
       - devops-test-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
-  devops-filebeat:
-    build:
-      context: .
-      dockerfile: filebeat.dockerfile
-    container_name: devops-filebeat
+  devops-prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: devops-prometheus
+    ports:
+      - "9090:9090"
     volumes:
-      - /var/log:
-          - /etc/filebeat.yml:ro
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
     networks:
       - devops-test-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
-  devops-beats-inputs:
-    image: docker.elastic.co/beats/filebeat:8.9.2
-    container_name: devops-beats-inputs
+  devops-grafana:
+    image: grafana/grafana:10.2.2
+    container_name: devops-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
     ports:
-      - "5044:5044"
+      - "3030:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
     networks:
       - devops-test-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 networks:
   devops-test-net:
     driver: bridge
     name: devops-test-network
-  devops-fwd-net:
-    external: true
-    name: devops-fwd-net
 
 volumes:
   devops-configs-server-01:
-  devops-configs-server-02:
   devops-data-db:
-    external: false
   devops-data-redis:
+  prometheus-data:
+  grafana-data:
