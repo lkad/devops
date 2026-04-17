@@ -20,6 +20,20 @@
         "version": "1.0",
         "sync_at": null
       }
+    },
+    {
+      "id": "85f341dd-5084-4a57-becf-200fe45f29f0",
+      "type": "container",
+      "name": "test-server",
+      "labels": [],
+      "business_unit": "test",
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
     }
   ]
 }

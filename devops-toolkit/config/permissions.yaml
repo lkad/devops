@@ -1,0 +1,141 @@
+# Device Management Permissions Configuration
+# Based on PERMISSION_MODEL.md design
+
+# AD Group to System Role Mapping
+group_mappings:
+  IT_Ops:
+    system_role: Operator
+    permissions:
+      - deploy
+      - config-manage
+      - device:read
+      - device:write
+      - device:restart
+
+  DevTeam_Payments:
+    system_role: Developer
+    permissions:
+      - device:read
+      - device:write
+      - deploy:test
+
+  Security_Auditors:
+    system_role: Auditor
+    permissions:
+      - device:read
+      - audit-read
+
+  SRE_Lead:
+    system_role: SuperAdmin
+    permissions:
+      - device:read
+      - device:write
+      - device:restart
+      - device:force-restart
+      - deploy
+      - config-manage
+      - audit-read
+      - admin
+
+# Label Group Permissions Matrix
+label_permissions:
+  env:prod:
+    groups:
+      - ops:admin
+      - ops:prod
+      - SuperAdmin
+    requires_role: Operator
+
+  env:dev:
+    groups:
+      - dev:admin
+      - dev:ops
+      - Developer
+
+  env:test:
+    groups:
+      - dev:admin
+      - dev:ops
+      - Developer
+
+  biz:core:
+    groups:
+      - ops:admin
+      - ops:core
+      - SuperAdmin
+
+  biz:payments:
+    groups:
+      - ops:admin
+      - ops:payments
+      - SuperAdmin
+
+# Business Group Hierarchy
+business_hierarchy:
+  biz:core:
+    children:
+      - biz:core-api
+      - biz:core-infrastructure
+      - biz:core-security
+    parents: []
+
+  biz:payments:
+    children:
+      - biz:payments-api
+      - biz:payments-db
+    parents:
+      - biz:core  # Payments can access core resources
+
+# Device Tags Definition (example)
+device_tags:
+  - device_id: server-prod-001
+    labels:
+      - env:prod
+      - region:us-east
+      - biz:core
+      - tier:critical
+
+  - device_id: server-dev-001
+    labels:
+      - env:dev
+      - biz:payments
+
+# Operation to Required Permission Mapping
+operations:
+  device:read:
+    description: "View device information"
+    requires_auth: true
+
+  device:write:
+    description: "Modify device configuration"
+    requires_role: Developer
+
+  device:restart:
+    description: "Restart device (non-force)"
+    requires_role: Operator
+    env_restrictions:
+      env:prod: Operator  # Operator can restart non-prod
+
+  device:force-restart:
+    description: "Force restart device"
+    requires_role: SuperAdmin
+
+  deploy:
+    description: "Deploy to device"
+    requires_role: Operator
+
+  deploy:test:
+    description: "Deploy to test environment"
+    requires_role: Developer
+
+  config-manage:
+    description: "Manage device configuration"
+    requires_role: Operator
+
+  audit-read:
+    description: "Read audit logs"
+    requires_role: Auditor
+
+  admin:
+    description: "Administrative access"
+    requires_role: SuperAdmin

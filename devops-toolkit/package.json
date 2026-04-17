@@ -14,10 +14,15 @@
     "docker:down": "docker-compose -f devices/docker/docker-compose.test.yml down",
     "test:full": "{ docker-compose -f devices/docker/docker-compose.test.yml up -d && test; docker-compose -f devices/docker/docker-compose.test.yml down }"
   },
-  "keywords": ["devops","device-management","ci-cd"],
+  "keywords": [
+    "devops",
+    "device-management",
+    "ci-cd"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "js-yaml": "^4.1.1",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
