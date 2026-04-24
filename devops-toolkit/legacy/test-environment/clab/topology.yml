@@ -1,0 +1,113 @@
+# Containerlab Dual-Datacenter High Availability Topology
+# =========================================================
+# DC1: Left datacenter
+# DC2: Right datacenter
+
+name: devops-dc-ha
+mgmt:
+  network: clab-dc-ha
+  ipv4-subnet: 172.30.30.0/24
+
+# Topology definition
+topology:
+  kinds:
+    linux:
+      image: docker.io/library/ubuntu:20.04
+
+  nodes:
+    # DC1 - Left Datacenter
+    dc1-sw1:
+      kind: linux
+      mgmt-ipv4: 172.30.30.11
+      binds:
+        - /mnt/devops/devops-toolkit/test-environment/clab/configs/switch/snmpd.conf:/etc/snmp/snmpd.conf:ro
+      exec:
+        - bash -c "apt-get update && apt-get install -y snmpd snmp net-tools iproute2 vim && rm -rf /var/lib/apt/lists/*"
+        - bash -c "sed -i 's/agentAddress .*/agentAddress udp:161/' /etc/snmp/snmpd.conf || true"
+        - bash -c "mkdir -p /var/run/snmpd && /usr/sbin/snmpd -f -Lo -c /etc/snmp/snmpd.conf"
+
+    dc1-sw2:
+      kind: linux
+      mgmt-ipv4: 172.30.30.12
+      binds:
+        - /mnt/devops/devops-toolkit/test-environment/clab/configs/switch/snmpd.conf:/etc/snmp/snmpd.conf:ro
+      exec:
+        - bash -c "apt-get update && apt-get install -y snmpd snmp net-tools iproute2 vim && rm -rf /var/lib/apt/lists/*"
+        - bash -c "sed -i 's/agentAddress .*/agentAddress udp:161/' /etc/snmp/snmpd.conf || true"
+        - bash -c "mkdir -p /var/run/snmpd && /usr/sbin/snmpd -f -Lo -c /etc/snmp/snmpd.conf"
+
+    dc1-web:
+      kind: linux
+      mgmt-ipv4: 172.30.30.21
+      exec:
+        - bash -c "apt-get update && apt-get install -y openssh-server net-tools iproute2 vim && rm -rf /var/lib/apt/lists/*"
+        - bash -c "mkdir -p /var/run/sshd"
+        - bash -c "echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config"
+        - bash -c "echo 'root:hadoop123' | chpasswd"
+        - bash -c "/usr/sbin/sshd"
+
+    dc1-db:
+      kind: linux
+      mgmt-ipv4: 172.30.30.22
+      exec:
+        - bash -c "apt-get update && apt-get install -y openssh-server net-tools iproute2 vim && rm -rf /var/lib/apt/lists/*"
+        - bash -c "mkdir -p /var/run/sshd"
+        - bash -c "echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config"
+        - bash -c "echo 'root:hadoop123' | chpasswd"
+        - bash -c "/usr/sbin/sshd"
+
+    # DC2 - Right Datacenter
+    dc2-sw1:
+      kind: linux
+      mgmt-ipv4: 172.30.30.31
+      binds:
+        - /mnt/devops/devops-toolkit/test-environment/clab/configs/switch/snmpd.conf:/etc/snmp/snmpd.conf:ro
+      exec:
+        - bash -c "apt-get update && apt-get install -y snmpd snmp net-tools iproute2 vim && rm -rf /var/lib/apt/lists/*"
+        - bash -c "sed -i 's/agentAddress .*/agentAddress udp:161/' /etc/snmp/snmpd.conf || true"
+        - bash -c "mkdir -p /var/run/snmpd && /usr/sbin/snmpd -f -Lo -c /etc/snmp/snmpd.conf"
+
+    dc2-sw2:
+      kind: linux
+      mgmt-ipv4: 172.30.30.32
+      binds:
+        - /mnt/devops/devops-toolkit/test-environment/clab/configs/switch/snmpd.conf:/etc/snmp/snmpd.conf:ro
+      exec:
+        - bash -c "apt-get update && apt-get install -y snmpd snmp net-tools iproute2 vim && rm -rf /var/lib/apt/lists/*"
+        - bash -c "sed -i 's/agentAddress .*/agentAddress udp:161/' /etc/snmp/snmpd.conf || true"
+        - bash -c "mkdir -p /var/run/snmpd && /usr/sbin/snmpd -f -Lo -c /etc/snmp/snmpd.conf"
+
+    dc2-web:
+      kind: linux
+      mgmt-ipv4: 172.30.30.41
+      exec:
+        - bash -c "apt-get update && apt-get install -y openssh-server net-tools iproute2 vim && rm -rf /var/lib/apt/lists/*"
+        - bash -c "mkdir -p /var/run/sshd"
+        - bash -c "echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config"
+        - bash -c "echo 'root:hadoop123' | chpasswd"
+        - bash -c "/usr/sbin/sshd"
+
+    dc2-db:
+      kind: linux
+      mgmt-ipv4: 172.30.30.42
+      exec:
+        - bash -c "apt-get update && apt-get install -y openssh-server net-tools iproute2 vim && rm -rf /var/lib/apt/lists/*"
+        - bash -c "mkdir -p /var/run/sshd"
+        - bash -c "echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config"
+        - bash -c "echo 'root:hadoop123' | chpasswd"
+        - bash -c "/usr/sbin/sshd"
+
+  links:
+    # DC1 Internal
+    - endpoints: ["dc1-sw1:eth1", "dc1-sw2:eth1"]
+    - endpoints: ["dc1-sw2:eth2", "dc1-web:eth1"]
+    - endpoints: ["dc1-sw2:eth3", "dc1-db:eth1"]
+
+    # DC2 Internal
+    - endpoints: ["dc2-sw1:eth1", "dc2-sw2:eth1"]
+    - endpoints: ["dc2-sw2:eth2", "dc2-web:eth1"]
+    - endpoints: ["dc2-sw2:eth3", "dc2-db:eth1"]
+
+    # Inter-DC High Availability Links (Dual trunk)
+    - endpoints: ["dc1-sw1:eth2", "dc2-sw1:eth2"]
+    - endpoints: ["dc1-sw1:eth3", "dc2-sw1:eth3"]

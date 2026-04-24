@@ -1,0 +1,29 @@
+{
+  "date": "2026-04-17",
+  "url": "http://localhost:3002",
+  "healthScore": 94,
+  "issues": [
+    {
+      "id": "ISSUE-001",
+      "title": "Missing regression test for metrics recording",
+      "severity": "medium",
+      "category": "testing"
+    },
+    {
+      "id": "ISSUE-002",
+      "title": "SPA hash-based navigation not working",
+      "severity": "low",
+      "category": "ux"
+    }
+  ],
+  "categoryScores": {
+    "console": 100,
+    "links": 100,
+    "visual": 100,
+    "functional": 90,
+    "ux": 90,
+    "performance": 95,
+    "content": 100,
+    "accessibility": 85
+  }
+}

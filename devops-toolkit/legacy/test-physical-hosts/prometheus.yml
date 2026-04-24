@@ -1,0 +1,33 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Load rules once and periodically evaluate them
+rule_files: []
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus 自身监控
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # 模拟物理主机 (通过 mock agent 暴露的 metrics)
+  - job_name: 'physical-hosts'
+    static_configs:
+      - targets: ['mock-telegraf-agent:8090']
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # InfluxDB 监控 (如果可用)
+  - job_name: 'influxdb'
+    static_configs:
+      - targets: ['influxdb:8086']
+    metrics_path: /metrics
+    scrape_interval: 30s

@@ -1,0 +1,177 @@
+# Test Environment Docker Compose
+# Simulates production infrastructure for post-release testing
+version: '3.8'
+
+services:
+  # Physical Hosts (SSH servers)
+  physical-host-1:
+    build:
+      context: ./config/ssh
+      dockerfile: Dockerfile.physical-host
+    container_name: physical-host-1
+    hostname: prod-web-server-01
+    ports:
+      - "2221:22"
+    networks:
+      - physical-net
+    privileged: true
+    restart: unless-stopped
+
+  physical-host-2:
+    build:
+      context: ./config/ssh
+      dockerfile: Dockerfile.physical-host
+    container_name: physical-host-2
+    hostname: prod-db-server-01
+    ports:
+      - "2222:22"
+    networks:
+      - physical-net
+    privileged: true
+    restart: unless-stopped
+
+  physical-host-3:
+    build:
+      context: ./config/ssh
+      dockerfile: Dockerfile.physical-host
+    container_name: physical-host-3
+    hostname: prod-cache-server-01
+    ports:
+      - "2223:22"
+    networks:
+      - physical-net
+    privileged: true
+    restart: unless-stopped
+
+  # Network Devices (SNMP agents)
+  snmp-switch:
+    build:
+      context: .
+      dockerfile: Dockerfile.snmp-device
+    container_name: snmp-switch
+    hostname: core-switch-01
+    ports:
+      - "8161:161/udp"
+    networks:
+      - physical-net
+    restart: unless-stopped
+
+  snmp-router:
+    build:
+      context: .
+      dockerfile: Dockerfile.snmp-device
+    container_name: snmp-router
+    hostname: edge-router-01
+    ports:
+      - "8162:161/udp"
+    networks:
+      - physical-net
+    restart: unless-stopped
+
+  snmp-firewall:
+    build:
+      context: .
+      dockerfile: Dockerfile.snmp-device
+    container_name: snmp-firewall
+    hostname: fw-gateway-01
+    ports:
+      - "8163:161/udp"
+    networks:
+      - physical-net
+    restart: unless-stopped
+
+  # Load Balancer
+  haproxy-lb-1:
+    image: haproxy:2.7
+    container_name: haproxy-lb-1
+    hostname: web-lb-01
+    ports:
+      - "8000:8080"
+      - "8400:8400"
+    volumes:
+      - ./config/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - physical-net
+    depends_on:
+      - physical-host-1
+      - physical-host-2
+    restart: unless-stopped
+
+  # Time Series Databases
+  devops-influxdb:
+    image: influxdb:2.7
+    container_name: devops-influxdb
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword
+      - DOCKER_INFLUXDB_INIT_ORG=devops
+      - DOCKER_INFLUXDB_INIT_BUCKET=telegraf
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=devops-token
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    networks:
+      - physical-net
+    restart: unless-stopped
+
+  devops-prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: devops-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - physical-net
+    restart: unless-stopped
+
+  devops-grafana:
+    image: grafana/grafana:10.1.0
+    container_name: devops-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - physical-net
+    depends_on:
+      - devops-prometheus
+      - devops-influxdb
+    restart: unless-stopped
+
+  # Mock Telegraf Agent (optional - for full stack testing)
+  mock-telegraf-agent:
+    build:
+      context: ./config/telegraf
+      dockerfile: Dockerfile.mock-agent
+    container_name: mock-telegraf-agent
+    ports:
+      - "8090:8090"
+      - "8092:8092"
+    networks:
+      - physical-net
+    restart: unless-stopped
+
+networks:
+  physical-net:
+    name: test-environment_physical-net
+    driver: bridge
+
+volumes:
+  influxdb-data:
+  influxdb-config:
+  prometheus-data:
+  grafana-data:

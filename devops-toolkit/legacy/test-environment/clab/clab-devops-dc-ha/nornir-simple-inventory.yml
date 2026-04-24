@@ -1,0 +1,41 @@
+---
+dc1-db:
+    username: 
+    password: 
+    platform: linux
+    hostname: 172.30.30.22
+dc1-sw1:
+    username: 
+    password: 
+    platform: linux
+    hostname: 172.30.30.11
+dc1-sw2:
+    username: 
+    password: 
+    platform: linux
+    hostname: 172.30.30.12
+dc1-web:
+    username: 
+    password: 
+    platform: linux
+    hostname: 172.30.30.21
+dc2-db:
+    username: 
+    password: 
+    platform: linux
+    hostname: 172.30.30.42
+dc2-sw1:
+    username: 
+    password: 
+    platform: linux
+    hostname: 172.30.30.31
+dc2-sw2:
+    username: 
+    password: 
+    platform: linux
+    hostname: 172.30.30.32
+dc2-web:
+    username: 
+    password: 
+    platform: linux
+    hostname: 172.30.30.41

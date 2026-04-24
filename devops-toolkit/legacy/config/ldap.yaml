@@ -1,0 +1,22 @@
+# LDAP Configuration
+# Used by devops-toolkit/auth/ldap_auth.js
+
+# Connection
+url: "ldap://localhost:389"
+bind_dn: "cn=admin,dc=example,dc=com"
+bind_password: "admin"
+
+# Search
+search_base: "dc=example,dc=com"
+user_search_filter: "(uid={{username}})"
+
+# Group search
+group_search_base: "ou=Groups,dc=example,dc=com"
+group_search_filter: "(member={{user_dn}})"
+
+# Role mapping: LDAP Group DN -> System Role
+role_mapping:
+  "cn=IT_Ops,ou=Groups,dc=example,dc=com": "Operator"
+  "cn=DevTeam_Payments,ou=Groups,dc=example,dc=com": "Developer"
+  "cn=Security_Auditors,ou=Groups,dc=example,dc=com": "Auditor"
+  "cn=SRE_Lead,ou=Groups,dc=example,dc=com": "SuperAdmin"

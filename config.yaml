@@ -1,0 +1,20 @@
+server:
+  port: 3000
+  host: "0.0.0.0"
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "devops"
+  password: "devops"
+  name: "devops_toolkit"
+  sslmode: "disable"
+
+logs:
+  backend: "local"
+  retention_days: 30
+  path: "./data/logs"
+
+k8s:
+  provider: "k3d"
+  kubeconfig_path: "./data/kubeconfig"

@@ -1,0 +1,278 @@
+{
+  "devices": [
+    {
+      "id": "1e8f9259-d7d3-4fd0-b067-b0792410651d",
+      "type": "container",
+      "name": "server-web-01",
+      "labels": [
+        {
+          "env": "development"
+        },
+        {
+          "device_type": "web"
+        }
+      ],
+      "business_unit": "frontend",
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "85f341dd-5084-4a57-becf-200fe45f29f0",
+      "type": "container",
+      "name": "test-server",
+      "labels": [],
+      "business_unit": "test",
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776413989625",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415553708",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415593444",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415752043",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415817996",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415919690",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "test-device-1776415992740",
+      "type": "server",
+      "name": "Test Device",
+      "labels": [
+        "env:test"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "qa-test-device",
+      "type": "server",
+      "name": "QA Test Device",
+      "labels": [
+        "env:test",
+        "qa:yes"
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "qa-test-device-2",
+      "type": "server",
+      "name": "QA Test Device 2",
+      "labels": [],
+      "business_unit": null,
+      "compute_cluster": null,
+      "status": "pending",
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null
+      }
+    },
+    {
+      "id": "host-1",
+      "type": "physical_host",
+      "name": "prod-web-server-01",
+      "labels": [
+        {
+          "env": "monitored"
+        }
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "parent_id": null,
+      "child_ids": [],
+      "status": "pending",
+      "state_history": [
+        {
+          "from": null,
+          "to": "pending",
+          "timestamp": "2026-04-18T06:28:45.900Z"
+        }
+      ],
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null,
+        "variables": {}
+      },
+      "metadata": {},
+      "registered_at": "2026-04-18T06:28:45.900Z",
+      "last_seen": null,
+      "last_config_sync": null
+    },
+    {
+      "id": "host-2",
+      "type": "physical_host",
+      "name": "prod-db-server-01",
+      "labels": [
+        {
+          "env": "monitored"
+        }
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "parent_id": null,
+      "child_ids": [],
+      "status": "pending",
+      "state_history": [
+        {
+          "from": null,
+          "to": "pending",
+          "timestamp": "2026-04-18T06:28:45.910Z"
+        }
+      ],
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null,
+        "variables": {}
+      },
+      "metadata": {},
+      "registered_at": "2026-04-18T06:28:45.910Z",
+      "last_seen": null,
+      "last_config_sync": null
+    },
+    {
+      "id": "host-3",
+      "type": "physical_host",
+      "name": "prod-cache-server-01",
+      "labels": [
+        {
+          "env": "monitored"
+        }
+      ],
+      "business_unit": null,
+      "compute_cluster": null,
+      "parent_id": null,
+      "child_ids": [],
+      "status": "pending",
+      "state_history": [
+        {
+          "from": null,
+          "to": "pending",
+          "timestamp": "2026-04-18T06:28:45.917Z"
+        }
+      ],
+      "config": {
+        "template": null,
+        "version": "1.0",
+        "sync_at": null,
+        "variables": {}
+      },
+      "metadata": {},
+      "registered_at": "2026-04-18T06:28:45.917Z",
+      "last_seen": null,
+      "last_config_sync": null
+    }
+  ]
+}

@@ -1,0 +1,397 @@
+{
+  "name": "devops-dc-ha",
+  "type": "clab",
+  "clab": {
+    "config": {
+      "prefix": "clab",
+      "mgmt": {
+        "network": "clab-dc-ha",
+        "bridge": "br-8502ff2ab2c1",
+        "ipv4-subnet": "172.30.30.0/24",
+        "ipv4-gw": "172.30.30.1",
+        "external-access": true
+      }
+    }
+  },
+  "ssh-pub-keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDKpLaYL1b7XW/KrTIJOderh27jY4iRj3Yx956opA3AwVmFQuHetH1FAI5NL/ZfEMQ8Q6JwvDdA6jHz61Sm5W3tc92SIo3azMgReKTBt+Hyg2hF4NeFaQhXALkDkS7EiBlcjqNryBIAGomkf4tRkW8ZhaOiYuQojGuUkBUI5OwCHjV5NjyJC0rCnj7cxiqNEIfPp9Uu0VvaIRLx5kJ7tNtNANo2PoaQ+UgsWNlvK9QDH4vnbZrExVzZVf49KH1HYE8wXgpu1HmpalayXSATs0PfeYXGkETkifhCfkJfZKV8cPiSCWBFeR0ttwodqQGCzr4kryhV2gfuc/Oa/uiKq13V","ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDVpKXn09V940wAdJztaaseCZOA+XyFqbUSm9TV5mSPj9s2fVe6vJLv1IrL2THsdCa/kMdw6yD5sWRfl6+Gb0KvWOFLn88q9g/HUuMk0q9GfFJOOvwcz4YsAt/nc1dyzOrItassrOBKIkzbCPN5LEKuAcQiG7CAM81OFjXWqIoYkH9Jl1uZbEkEq+x5FP7lMiEjPlB4m5x9k8xZSFW8mCsmDZleeoTEkJNEptesTVQJ12XTO1N1Si6OTJic/3EDV2d4oINwqbyHPj1APW/JTnkOrvYOGepl8Ck7xzKOxuuqqCo1diKyTIvHfUWkhtK68dOEO6gqWKH91hMgPs2pQWFG7bb0YZ8o0Z8B1+mQY6afzeYuzmM6QKJm/dvBhMfRwoMj4ngdAM3+aF89Uds66jG9h/bQWZxPNt7NVzTfPnYuULSHQhgxOqwbGG0ufUPNa1pPAymR47EMtXY8lFtb/zOOhcjlerHDOa6Yqdgq4jcn7OM2v4uhroVTQo2GtQ+fsQU="],
+  "nodes": {
+    "dc1-db": {
+      "index": "0",
+      "shortname": "dc1-db",
+      "longname": "clab-devops-dc-ha-dc1-db",
+      "fqdn": "dc1-db.devops-dc-ha.io",
+      "group": "",
+      "labdir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc1-db",
+      "kind": "linux",
+      "image": "docker.io/library/ubuntu:20.04",
+      "mgmt-net": "",
+      "mgmt-intf": "",
+      "mgmt-ipv4-address": "172.30.30.22",
+      "mgmt-ipv4-prefix-length": 24,
+      "mgmt-ipv6-address": "",
+      "mgmt-ipv6-prefix-length": 0,
+      "mac-address": "",
+      "labels": {
+        "clab-mgmt-net-bridge": "br-8502ff2ab2c1",
+        "clab-node-group": "",
+        "clab-node-kind": "linux",
+        "clab-node-lab-dir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc1-db",
+        "clab-node-longname": "clab-devops-dc-ha-dc1-db",
+        "clab-node-name": "dc1-db",
+        "clab-node-type": "",
+        "clab-owner": "vagrant",
+        "clab-topo-file": "/mnt/devops/devops-toolkit/test-environment/clab/topology.yml",
+        "containerlab": "devops-dc-ha"
+      },
+      "port-bindings": [
+      ]
+    },
+    "dc1-sw1": {
+      "index": "1",
+      "shortname": "dc1-sw1",
+      "longname": "clab-devops-dc-ha-dc1-sw1",
+      "fqdn": "dc1-sw1.devops-dc-ha.io",
+      "group": "",
+      "labdir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc1-sw1",
+      "kind": "linux",
+      "image": "docker.io/library/ubuntu:20.04",
+      "mgmt-net": "",
+      "mgmt-intf": "",
+      "mgmt-ipv4-address": "172.30.30.11",
+      "mgmt-ipv4-prefix-length": 24,
+      "mgmt-ipv6-address": "",
+      "mgmt-ipv6-prefix-length": 0,
+      "mac-address": "",
+      "labels": {
+        "clab-mgmt-net-bridge": "br-8502ff2ab2c1",
+        "clab-node-group": "",
+        "clab-node-kind": "linux",
+        "clab-node-lab-dir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc1-sw1",
+        "clab-node-longname": "clab-devops-dc-ha-dc1-sw1",
+        "clab-node-name": "dc1-sw1",
+        "clab-node-type": "",
+        "clab-owner": "vagrant",
+        "clab-topo-file": "/mnt/devops/devops-toolkit/test-environment/clab/topology.yml",
+        "containerlab": "devops-dc-ha"
+      },
+      "port-bindings": [
+      ]
+    },
+    "dc1-sw2": {
+      "index": "2",
+      "shortname": "dc1-sw2",
+      "longname": "clab-devops-dc-ha-dc1-sw2",
+      "fqdn": "dc1-sw2.devops-dc-ha.io",
+      "group": "",
+      "labdir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc1-sw2",
+      "kind": "linux",
+      "image": "docker.io/library/ubuntu:20.04",
+      "mgmt-net": "",
+      "mgmt-intf": "",
+      "mgmt-ipv4-address": "172.30.30.12",
+      "mgmt-ipv4-prefix-length": 24,
+      "mgmt-ipv6-address": "",
+      "mgmt-ipv6-prefix-length": 0,
+      "mac-address": "",
+      "labels": {
+        "clab-mgmt-net-bridge": "br-8502ff2ab2c1",
+        "clab-node-group": "",
+        "clab-node-kind": "linux",
+        "clab-node-lab-dir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc1-sw2",
+        "clab-node-longname": "clab-devops-dc-ha-dc1-sw2",
+        "clab-node-name": "dc1-sw2",
+        "clab-node-type": "",
+        "clab-owner": "vagrant",
+        "clab-topo-file": "/mnt/devops/devops-toolkit/test-environment/clab/topology.yml",
+        "containerlab": "devops-dc-ha"
+      },
+      "port-bindings": [
+      ]
+    },
+    "dc1-web": {
+      "index": "3",
+      "shortname": "dc1-web",
+      "longname": "clab-devops-dc-ha-dc1-web",
+      "fqdn": "dc1-web.devops-dc-ha.io",
+      "group": "",
+      "labdir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc1-web",
+      "kind": "linux",
+      "image": "docker.io/library/ubuntu:20.04",
+      "mgmt-net": "",
+      "mgmt-intf": "",
+      "mgmt-ipv4-address": "172.30.30.21",
+      "mgmt-ipv4-prefix-length": 24,
+      "mgmt-ipv6-address": "",
+      "mgmt-ipv6-prefix-length": 0,
+      "mac-address": "",
+      "labels": {
+        "clab-mgmt-net-bridge": "br-8502ff2ab2c1",
+        "clab-node-group": "",
+        "clab-node-kind": "linux",
+        "clab-node-lab-dir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc1-web",
+        "clab-node-longname": "clab-devops-dc-ha-dc1-web",
+        "clab-node-name": "dc1-web",
+        "clab-node-type": "",
+        "clab-owner": "vagrant",
+        "clab-topo-file": "/mnt/devops/devops-toolkit/test-environment/clab/topology.yml",
+        "containerlab": "devops-dc-ha"
+      },
+      "port-bindings": [
+      ]
+    },
+    "dc2-db": {
+      "index": "4",
+      "shortname": "dc2-db",
+      "longname": "clab-devops-dc-ha-dc2-db",
+      "fqdn": "dc2-db.devops-dc-ha.io",
+      "group": "",
+      "labdir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc2-db",
+      "kind": "linux",
+      "image": "docker.io/library/ubuntu:20.04",
+      "mgmt-net": "",
+      "mgmt-intf": "",
+      "mgmt-ipv4-address": "172.30.30.42",
+      "mgmt-ipv4-prefix-length": 24,
+      "mgmt-ipv6-address": "",
+      "mgmt-ipv6-prefix-length": 0,
+      "mac-address": "",
+      "labels": {
+        "clab-mgmt-net-bridge": "br-8502ff2ab2c1",
+        "clab-node-group": "",
+        "clab-node-kind": "linux",
+        "clab-node-lab-dir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc2-db",
+        "clab-node-longname": "clab-devops-dc-ha-dc2-db",
+        "clab-node-name": "dc2-db",
+        "clab-node-type": "",
+        "clab-owner": "vagrant",
+        "clab-topo-file": "/mnt/devops/devops-toolkit/test-environment/clab/topology.yml",
+        "containerlab": "devops-dc-ha"
+      },
+      "port-bindings": [
+      ]
+    },
+    "dc2-sw1": {
+      "index": "5",
+      "shortname": "dc2-sw1",
+      "longname": "clab-devops-dc-ha-dc2-sw1",
+      "fqdn": "dc2-sw1.devops-dc-ha.io",
+      "group": "",
+      "labdir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc2-sw1",
+      "kind": "linux",
+      "image": "docker.io/library/ubuntu:20.04",
+      "mgmt-net": "",
+      "mgmt-intf": "",
+      "mgmt-ipv4-address": "172.30.30.31",
+      "mgmt-ipv4-prefix-length": 24,
+      "mgmt-ipv6-address": "",
+      "mgmt-ipv6-prefix-length": 0,
+      "mac-address": "",
+      "labels": {
+        "clab-mgmt-net-bridge": "br-8502ff2ab2c1",
+        "clab-node-group": "",
+        "clab-node-kind": "linux",
+        "clab-node-lab-dir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc2-sw1",
+        "clab-node-longname": "clab-devops-dc-ha-dc2-sw1",
+        "clab-node-name": "dc2-sw1",
+        "clab-node-type": "",
+        "clab-owner": "vagrant",
+        "clab-topo-file": "/mnt/devops/devops-toolkit/test-environment/clab/topology.yml",
+        "containerlab": "devops-dc-ha"
+      },
+      "port-bindings": [
+      ]
+    },
+    "dc2-sw2": {
+      "index": "6",
+      "shortname": "dc2-sw2",
+      "longname": "clab-devops-dc-ha-dc2-sw2",
+      "fqdn": "dc2-sw2.devops-dc-ha.io",
+      "group": "",
+      "labdir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc2-sw2",
+      "kind": "linux",
+      "image": "docker.io/library/ubuntu:20.04",
+      "mgmt-net": "",
+      "mgmt-intf": "",
+      "mgmt-ipv4-address": "172.30.30.32",
+      "mgmt-ipv4-prefix-length": 24,
+      "mgmt-ipv6-address": "",
+      "mgmt-ipv6-prefix-length": 0,
+      "mac-address": "",
+      "labels": {
+        "clab-mgmt-net-bridge": "br-8502ff2ab2c1",
+        "clab-node-group": "",
+        "clab-node-kind": "linux",
+        "clab-node-lab-dir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc2-sw2",
+        "clab-node-longname": "clab-devops-dc-ha-dc2-sw2",
+        "clab-node-name": "dc2-sw2",
+        "clab-node-type": "",
+        "clab-owner": "vagrant",
+        "clab-topo-file": "/mnt/devops/devops-toolkit/test-environment/clab/topology.yml",
+        "containerlab": "devops-dc-ha"
+      },
+      "port-bindings": [
+      ]
+    },
+    "dc2-web": {
+      "index": "7",
+      "shortname": "dc2-web",
+      "longname": "clab-devops-dc-ha-dc2-web",
+      "fqdn": "dc2-web.devops-dc-ha.io",
+      "group": "",
+      "labdir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc2-web",
+      "kind": "linux",
+      "image": "docker.io/library/ubuntu:20.04",
+      "mgmt-net": "",
+      "mgmt-intf": "",
+      "mgmt-ipv4-address": "172.30.30.41",
+      "mgmt-ipv4-prefix-length": 24,
+      "mgmt-ipv6-address": "",
+      "mgmt-ipv6-prefix-length": 0,
+      "mac-address": "",
+      "labels": {
+        "clab-mgmt-net-bridge": "br-8502ff2ab2c1",
+        "clab-node-group": "",
+        "clab-node-kind": "linux",
+        "clab-node-lab-dir": "/mnt/devops/devops-toolkit/test-environment/clab/clab-devops-dc-ha/dc2-web",
+        "clab-node-longname": "clab-devops-dc-ha-dc2-web",
+        "clab-node-name": "dc2-web",
+        "clab-node-type": "",
+        "clab-owner": "vagrant",
+        "clab-topo-file": "/mnt/devops/devops-toolkit/test-environment/clab/topology.yml",
+        "containerlab": "devops-dc-ha"
+      },
+      "port-bindings": [
+      ]
+    }
+  },
+  "links": [
+    {
+      "endpoints": {
+        "a": {
+          "node": "dc1-sw1",
+          "interface": "eth1",
+          "mac": "aa:c1:ab:60:c5:f2",
+          "peer": "z"
+        },
+        "z": {
+          "node": "dc1-sw2",
+          "interface": "eth1",
+          "mac": "aa:c1:ab:2f:a1:2c",
+          "peer": "a"
+        }
+      }
+    },
+    {
+      "endpoints": {
+        "a": {
+          "node": "dc1-sw2",
+          "interface": "eth2",
+          "mac": "aa:c1:ab:6f:85:2a",
+          "peer": "z"
+        },
+        "z": {
+          "node": "dc1-web",
+          "interface": "eth1",
+          "mac": "aa:c1:ab:4f:6d:51",
+          "peer": "a"
+        }
+      }
+    },
+    {
+      "endpoints": {
+        "a": {
+          "node": "dc1-sw2",
+          "interface": "eth3",
+          "mac": "aa:c1:ab:c9:23:55",
+          "peer": "z"
+        },
+        "z": {
+          "node": "dc1-db",
+          "interface": "eth1",
+          "mac": "aa:c1:ab:89:40:20",
+          "peer": "a"
+        }
+      }
+    },
+    {
+      "endpoints": {
+        "a": {
+          "node": "dc2-sw1",
+          "interface": "eth1",
+          "mac": "aa:c1:ab:1a:e4:fe",
+          "peer": "z"
+        },
+        "z": {
+          "node": "dc2-sw2",
+          "interface": "eth1",
+          "mac": "aa:c1:ab:0b:ec:db",
+          "peer": "a"
+        }
+      }
+    },
+    {
+      "endpoints": {
+        "a": {
+          "node": "dc2-sw2",
+          "interface": "eth2",
+          "mac": "aa:c1:ab:de:23:2d",
+          "peer": "z"
+        },
+        "z": {
+          "node": "dc2-web",
+          "interface": "eth1",
+          "mac": "aa:c1:ab:b1:f5:b3",
+          "peer": "a"
+        }
+      }
+    },
+    {
+      "endpoints": {
+        "a": {
+          "node": "dc2-sw2",
+          "interface": "eth3",
+          "mac": "aa:c1:ab:06:34:7c",
+          "peer": "z"
+        },
+        "z": {
+          "node": "dc2-db",
+          "interface": "eth1",
+          "mac": "aa:c1:ab:a1:9f:b1",
+          "peer": "a"
+        }
+      }
+    },
+    {
+      "endpoints": {
+        "a": {
+          "node": "dc1-sw1",
+          "interface": "eth2",
+          "mac": "aa:c1:ab:3a:57:f6",
+          "peer": "z"
+        },
+        "z": {
+          "node": "dc2-sw1",
+          "interface": "eth2",
+          "mac": "aa:c1:ab:91:02:05",
+          "peer": "a"
+        }
+      }
+    },
+    {
+      "endpoints": {
+        "a": {
+          "node": "dc1-sw1",
+          "interface": "eth3",
+          "mac": "aa:c1:ab:96:d6:40",
+          "peer": "z"
+        },
+        "z": {
+          "node": "dc2-sw1",
+          "interface": "eth3",
+          "mac": "aa:c1:ab:d3:1c:a4",
+          "peer": "a"
+        }
+      }
+    }
+  ]
+}

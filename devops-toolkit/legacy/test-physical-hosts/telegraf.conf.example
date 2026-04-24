@@ -1,0 +1,46 @@
+[agent]
+  interval = "10s"
+  flush_interval = "10s"
+  hostname = "${HOSTNAME}"
+  omit_hostname = false
+
+# CPU metrics
+[[inputs.cpu]]
+  percpu = true
+  totalcpu = true
+
+# Memory metrics
+[[inputs.mem]]
+
+# Disk metrics
+[[inputs.disk]]
+  ignore_fs = ["tmpfs", "devtmpfs", "devpts", "sysfs", "proc", "cgroup"]
+
+# System uptime
+[[inputs.uptime]]
+
+# Disk IO (if available)
+[[inputs.diskio]]
+
+# Network metrics
+[[inputs.net]]
+  interfaces = ["eth*", "ens*", "enp*"]
+
+# System metrics
+[[inputs.system]]
+
+# Output to InfluxDB v2
+[[outputs.influxdb_v2]]
+  urls = ["${INFLUXDB_URL}"]
+  token = "${INFLUXDB_TOKEN}"
+  organization = "${INFLUXDB_ORG}"
+  bucket = "${INFLUXDB_BUCKET}"
+  content_encoding = "identity"
+  timeout = "5s"
+
+# Optional: HTTP output for local testing (绕过 InfluxDB 直接发送)
+# [[outputs.http]]
+#   url = "http://devops-server:3000/api/telegraf/receive"
+#   method = "POST"
+#   data_format = "json"
+#   content_encoding = "identity"

@@ -1,0 +1,12 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy mock agent
+COPY mock_agent.js .
+
+# Expose port
+EXPOSE 8090
+
+# Run
+CMD ["node", "mock_agent.js"]

@@ -1,0 +1,18 @@
+FROM ubuntu:20.04
+
+# Install SNMP daemon
+RUN apt-get update && apt-get install -y \
+    snmpd \
+    snmp \
+    net-snmp-utils \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure SNMP
+COPY config/snmp/snmpd.conf /etc/snmp/snmpd.conf
+
+# Expose SNMP ports
+EXPOSE 161/udp 162/udp
+
+# Start SNMP daemon
+CMD ["snmpd", "-f", "-Lo", "-C", "-c", "/etc/snmp/snmpd.conf"]

@@ -1,0 +1,136 @@
+version: '3.3'
+
+services:
+  # ============================================================
+  # SSH Simulation Containers (模拟物理主机)
+  # ============================================================
+  host-1:
+    build: .
+    container_name: physical-host-1
+    hostname: prod-web-server-01
+    ports:
+      - "2221:22"
+    networks:
+      - physical-net
+    restart: unless-stopped
+
+  host-2:
+    build: .
+    container_name: physical-host-2
+    hostname: prod-db-server-01
+    ports:
+      - "2222:22"
+    networks:
+      - physical-net
+    restart: unless-stopped
+
+  host-3:
+    build: .
+    container_name: physical-host-3
+    hostname: prod-cache-server-01
+    ports:
+      - "2223:22"
+    networks:
+      - physical-net
+    restart: unless-stopped
+
+  # ============================================================
+  # Time Series Databases
+  # ============================================================
+
+  # InfluxDB - Telegraf 后端存储
+  influxdb:
+    image: influxdb:2.7
+    container_name: devops-influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminadmin
+      - DOCKER_INFLUXDB_INIT_ORG=devops
+      - DOCKER_INFLUXDB_INIT_BUCKET=telegraf
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=devops-token
+    networks:
+      - physical-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus - 时序数据库 + Web UI
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: devops-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - physical-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Grafana - 指标可视化
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: devops-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - physical-net
+    depends_on:
+      - prometheus
+      - influxdb
+    restart: unless-stopped
+
+  # ============================================================
+  # Mock Telegraf Agent (用于测试,模拟真实 agent)
+  # ============================================================
+  mock-telegraf-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock-agent
+    container_name: mock-telegraf-agent
+    ports:
+      - "8090:8090"  # Mock agent HTTP server
+    networks:
+      - physical-net
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=devops-token
+      - INFLUXDB_ORG=devops
+      - INFLUXDB_BUCKET=telegraf
+      - METRICS_INTERVAL=10000
+      - TARGET_HOSTS=host-1:2221,host-2:2222,host-3:2223
+
+networks:
+  physical-net:
+    driver: bridge
+
+volumes:
+  influxdb-data:
+  prometheus-data:
+  grafana-data:

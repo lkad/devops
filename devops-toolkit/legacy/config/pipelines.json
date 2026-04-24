@@ -1,0 +1,287 @@
+{
+  "pipelines": [
+    [
+      "19269fb3-9108-4656-a31f-7763cdb258a3",
+      {
+        "id": "19269fb3-9108-4656-a31f-7763cdb258a3",
+        "name": "Web Deploy",
+        "description": "Frontend deployment pipeline",
+        "repository": "",
+        "branch": "main",
+        "stages": [
+          "validate",
+          "build",
+          "test",
+          "deploy"
+        ],
+        "config": {},
+        "created_at": "2026-04-17T07:56:36.780Z",
+        "updated_at": "2026-04-17T07:56:36.780Z"
+      }
+    ]
+  ],
+  "runs": [
+    [
+      "f67a6e51-54f1-4303-87c7-1884be11e2fb",
+      {
+        "id": "f67a6e51-54f1-4303-87c7-1884be11e2fb",
+        "pipeline_id": "19269fb3-9108-4656-a31f-7763cdb258a3",
+        "pipeline_name": "Web Deploy",
+        "status": "success",
+        "stages": [
+          {
+            "name": "validate",
+            "status": "success",
+            "started_at": "2026-04-17T07:56:41.494Z",
+            "finished_at": "2026-04-17T07:56:42.099Z",
+            "logs": [],
+            "error": null
+          },
+          {
+            "name": "build",
+            "status": "success",
+            "started_at": "2026-04-17T07:56:42.099Z",
+            "finished_at": "2026-04-17T07:56:42.703Z",
+            "logs": [],
+            "error": null
+          },
+          {
+            "name": "test",
+            "status": "success",
+            "started_at": "2026-04-17T07:56:42.703Z",
+            "finished_at": "2026-04-17T07:56:43.307Z",
+            "logs": [],
+            "error": null
+          },
+          {
+            "name": "deploy",
+            "status": "success",
+            "started_at": "2026-04-17T07:56:43.307Z",
+            "finished_at": "2026-04-17T07:56:43.910Z",
+            "logs": [],
+            "error": null
+          }
+        ],
+        "trigger": {
+          "type": "manual",
+          "triggered_by": "api"
+        },
+        "started_at": "2026-04-17T07:56:41.494Z",
+        "finished_at": "2026-04-17T07:56:43.910Z",
+        "logs": [
+          {
+            "timestamp": "2026-04-17T07:56:41.495Z",
+            "stage": "validate",
+            "message": "Checking pipeline configuration..."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:41.596Z",
+            "stage": "validate",
+            "message": "Validating repository access..."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:41.697Z",
+            "stage": "validate",
+            "message": "Repository access verified."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:41.798Z",
+            "stage": "validate",
+            "message": "Configuration validated successfully."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:42.099Z",
+            "stage": "build",
+            "message": "Pulling dependencies..."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:42.200Z",
+            "stage": "build",
+            "message": "Building application..."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:42.300Z",
+            "stage": "build",
+            "message": "Build completed successfully."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:42.401Z",
+            "stage": "build",
+            "message": "Image size: 125MB"
+          },
+          {
+            "timestamp": "2026-04-17T07:56:42.703Z",
+            "stage": "test",
+            "message": "Running unit tests..."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:42.804Z",
+            "stage": "test",
+            "message": "Running integration tests..."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:42.905Z",
+            "stage": "test",
+            "message": "All tests passed (42/42)."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:43.005Z",
+            "stage": "test",
+            "message": "Code coverage: 85%"
+          },
+          {
+            "timestamp": "2026-04-17T07:56:43.307Z",
+            "stage": "deploy",
+            "message": "Preparing deployment..."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:43.408Z",
+            "stage": "deploy",
+            "message": "Deploying to target environment..."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:43.509Z",
+            "stage": "deploy",
+            "message": "Health checks passed."
+          },
+          {
+            "timestamp": "2026-04-17T07:56:43.609Z",
+            "stage": "deploy",
+            "message": "Deployment successful."
+          }
+        ]
+      }
+    ],
+    [
+      "16ae7837-37a7-44ca-b8e3-b98c6b352b81",
+      {
+        "id": "16ae7837-37a7-44ca-b8e3-b98c6b352b81",
+        "pipeline_id": "19269fb3-9108-4656-a31f-7763cdb258a3",
+        "pipeline_name": "Web Deploy",
+        "status": "success",
+        "stages": [
+          {
+            "name": "validate",
+            "status": "success",
+            "started_at": "2026-04-18T07:18:28.433Z",
+            "finished_at": "2026-04-18T07:18:29.036Z",
+            "logs": [],
+            "error": null
+          },
+          {
+            "name": "build",
+            "status": "success",
+            "started_at": "2026-04-18T07:18:29.036Z",
+            "finished_at": "2026-04-18T07:18:29.639Z",
+            "logs": [],
+            "error": null
+          },
+          {
+            "name": "test",
+            "status": "success",
+            "started_at": "2026-04-18T07:18:29.639Z",
+            "finished_at": "2026-04-18T07:18:30.241Z",
+            "logs": [],
+            "error": null
+          },
+          {
+            "name": "deploy",
+            "status": "success",
+            "started_at": "2026-04-18T07:18:30.242Z",
+            "finished_at": "2026-04-18T07:18:30.844Z",
+            "logs": [],
+            "error": null
+          }
+        ],
+        "trigger": {
+          "type": "manual",
+          "triggered_by": "ui"
+        },
+        "started_at": "2026-04-18T07:18:28.432Z",
+        "finished_at": "2026-04-18T07:18:30.844Z",
+        "logs": [
+          {
+            "timestamp": "2026-04-18T07:18:28.433Z",
+            "stage": "validate",
+            "message": "Checking pipeline configuration..."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:28.534Z",
+            "stage": "validate",
+            "message": "Validating repository access..."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:28.634Z",
+            "stage": "validate",
+            "message": "Repository access verified."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:28.735Z",
+            "stage": "validate",
+            "message": "Configuration validated successfully."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:29.037Z",
+            "stage": "build",
+            "message": "Pulling dependencies..."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:29.137Z",
+            "stage": "build",
+            "message": "Building application..."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:29.238Z",
+            "stage": "build",
+            "message": "Build completed successfully."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:29.338Z",
+            "stage": "build",
+            "message": "Image size: 125MB"
+          },
+          {
+            "timestamp": "2026-04-18T07:18:29.639Z",
+            "stage": "test",
+            "message": "Running unit tests..."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:29.740Z",
+            "stage": "test",
+            "message": "Running integration tests..."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:29.840Z",
+            "stage": "test",
+            "message": "All tests passed (42/42)."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:29.941Z",
+            "stage": "test",
+            "message": "Code coverage: 85%"
+          },
+          {
+            "timestamp": "2026-04-18T07:18:30.242Z",
+            "stage": "deploy",
+            "message": "Preparing deployment..."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:30.342Z",
+            "stage": "deploy",
+            "message": "Deploying to target environment..."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:30.443Z",
+            "stage": "deploy",
+            "message": "Health checks passed."
+          },
+          {
+            "timestamp": "2026-04-18T07:18:30.543Z",
+            "stage": "deploy",
+            "message": "Deployment successful."
+          }
+        ]
+      }
+    ]
+  ]
+}

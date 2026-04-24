@@ -1,0 +1,40 @@
+{
+  "name": "devops-toolkit",
+  "version": "1.0.0",
+  "description": "DevOps system with device management, CI/CD, logging, monitoring, and alerting",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:server": "node server.js",
+    "dev": "nodemon server.js",
+    "dev:server": "nodemon server.js",
+    "test": "jest --config=test/jest.config.js",
+    "test:unit": "jest --config=test/jest.config.js --testPathPattern='(device_manager|pipeline_manager|metrics_manager)'",
+    "test:integration": "bash scripts/integration-test.sh",
+    "test:watch": "jest --config=test/jest.config.js --watch",
+    "test:coverage": "jest --config=test/jest.config.js --coverage",
+    "lint": "eslint .",
+    "docker:up": "docker-compose -f docker-compose.dev.yml up -d",
+    "docker:down": "docker-compose -f docker-compose.dev.yml down"
+  },
+  "keywords": [
+    "devops",
+    "device-management",
+    "ci-cd",
+    "monitoring",
+    "logging"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.1.1",
+    "ldapjs": "^3.0.7",
+    "ssh2": "^1.17.0",
+    "uuid": "^9.0.0",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2"
+  }
+}

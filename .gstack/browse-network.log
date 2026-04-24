@@ -1,0 +1,5 @@
+[2026-04-21T02:15:34.358Z] GET http://localhost:3000/ → 200 (1ms, 68626B)
+[2026-04-21T02:15:34.361Z] GET https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap → pending (?ms, ?B)
+[2026-04-21T02:15:35.990Z] GET https://fonts.gstatic.com/s/geist/v4/gyByhwUxId8gMEwcGFU.woff2 → pending (?ms, ?B)
+[2026-04-21T02:15:35.992Z] GET http://localhost:3000/api/devices → 503 (1ms, 27B)
+[2026-04-21T02:15:36.011Z] GET https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwg.woff2 → pending (?ms, ?B)
