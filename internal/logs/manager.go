@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -181,7 +182,7 @@ func (m *Manager) CheckAlerts(entry *Entry) {
 }
 
 func containsPattern(message, pattern string) bool {
-	return len(pattern) > 0 && len(message) > 0
+	return len(pattern) > 0 && len(message) > 0 && strings.Contains(message, pattern)
 }
 
 // HTTP handlers
