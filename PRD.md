@@ -1,7 +1,7 @@
 # DevOps Toolkit - Product Requirements & Design Document
 
-**Version:** 1.3
-**Last Updated:** 2026-04-19
+**Version:** 1.4
+**Last Updated:** 2026-04-24
 
 ---
 
@@ -19,6 +19,7 @@
 10. [Permission Model](#10-permission-model)
 11. [Architecture Overview](#11-architecture-overview)
 12. [API Design](#12-api-design)
+13. [Project Management Module](#13-project-management-module)
 
 ---
 
@@ -1161,3 +1162,74 @@ docker-compose -f docker-compose.dev.yml up -d
 
 **Document Status**: Active
 **Owner**: DevOps Team
+
+---
+
+## 13. Project Management Module
+
+### 13.1 Overview
+
+The Project Management module provides an organizational hierarchy (Business Line → System → Project) that groups DevOps resources for FinOps reporting. The Operations Director uses this to submit monthly resource usage reports to Finance.
+
+### 13.2 Hierarchy
+
+```
+Business Line (事业群/产品线)
+└── System (系统)
+    └── Project (项目)
+        ├── frontend (前端项目)
+        └── backend (后端项目)
+```
+
+### 13.3 Resource Linking
+
+Projects link to DevOps resources:
+- `device` → Physical/virtual machines
+- `pipeline` → CI/CD pipelines
+- `log_source` → Log aggregation sources
+- `alert_channel` → Alert notification channels
+- `physical_host` → SSH-monitored hosts
+
+### 13.4 Permission Model
+
+- **viewer** — read hierarchy and linked resources
+- **editor** — edit hierarchy and link resources
+- **admin** — delete hierarchy and manage permissions
+
+Permission inheritance: Business Line → System → Project. Editor on Business Line can edit all under it.
+
+**Note:** LDAP for authentication only. Permissions are managed locally in DevOps, not synced to LDAP.
+
+### 13.5 FinOps Reporting
+
+CSV export via `GET /api/org/reports/finops?period=2026-04`
+
+```csv
+Business Line,System,Project Type,Project,Resource Type,Count,Unit
+电商事业部,订单系统,Backend,order-backend,VM,3,nodes
+电商事业部,订单系统,Backend,order-backend,Storage,500,GB
+```
+
+### 13.6 API Summary
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/org/business-lines` | GET/POST | List/create business lines |
+| `/api/org/business-lines/:id` | GET/PUT/DELETE | Get/update/delete business line |
+| `/api/org/business-lines/:bl_id/systems` | GET/POST | List/create systems |
+| `/api/org/systems/:id` | GET/PUT/DELETE | Get/update/delete system |
+| `/api/org/systems/:sys_id/projects` | GET/POST | List/create projects |
+| `/api/org/projects/:id` | GET/PUT/DELETE | Get/update/delete project |
+| `/api/org/projects/:id/resources` | GET/POST | List/link resources |
+| `/api/org/projects/:id/resources/:resource_id` | DELETE | Unlink resource |
+| `/api/org/projects/:id/permissions` | GET/POST | List/grant permissions |
+| `/api/org/permissions/:perm_id` | DELETE | Revoke permission |
+| `/api/org/reports/finops` | GET | FinOps CSV export |
+
+### 13.7 Data Model
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for full data model details.
+
+### 13.8 Design Document
+
+Full design: `~/.gstack/projects/devops-toolkit/vagrant-main-design-20260424.md`

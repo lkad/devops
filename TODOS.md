@@ -1,6 +1,6 @@
 # DevOps Toolkit - TODO
 
-**Last Updated:** 2026-04-19
+**Last Updated:** 2026-04-24
 
 ## Status Overview
 
@@ -16,6 +16,29 @@
 | Permission Model | ✅ Done | Middleware, enforcement, label-based access |
 | K8s Multi-Cluster | ✅ Done | k3d集群管理, 多集群健康检查 |
 | Physical Host Manager | ✅ Done | SSH连接管理, 状态监控, 指标采集 |
+| Project Management | 📋 Pending | Business Line → System → Project hierarchy, FinOps |
+
+---
+
+## 📋 Pending Features
+
+### Project Management Module
+
+Organizational hierarchy for FinOps reporting. See [ARCHITECTURE.md](ARCHITECTURE.md) for full design.
+
+**Features:**
+- [ ] Business Line CRUD (`/api/org/business-lines`)
+- [ ] System CRUD (`/api/org/business-lines/:id/systems`)
+- [ ] Project CRUD (`/api/org/systems/:id/projects`)
+- [ ] Resource linking (`/api/org/projects/:id/resources`)
+- [ ] RBAC permissions per level (viewer, editor, admin)
+- [ ] FinOps CSV export (`/api/org/reports/finops?period=YYYY-MM`)
+- [ ] PostgreSQL migrations
+
+**Data Model:**
+- BusinessLine → System → Project (3-level hierarchy)
+- ProjectResource (link table for logs, alerts, devices, pipelines, hosts)
+- ProjectPermission (local RBAC, LDAP for auth only)
 
 ---
 
