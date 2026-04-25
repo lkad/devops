@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -24,6 +25,16 @@ import (
 	"github.com/devops-toolkit/internal/websocket"
 	"github.com/gorilla/mux"
 )
+
+type statusCodeWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *statusCodeWriter) WriteHeader(code int) {
+	w.statusCode = code
+	w.ResponseWriter.WriteHeader(code)
+}
 
 func main() {
 	// Load configuration
@@ -64,6 +75,23 @@ func main() {
 
 	// Create router
 	r := mux.NewRouter()
+
+	// HTTP metrics middleware
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			path := r.URL.Path
+			method := r.Method
+
+			// Wrap response writer to capture status code
+			wrapped := &statusCodeWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			next.ServeHTTP(wrapped, r)
+
+			duration := time.Since(start).Milliseconds()
+			status := fmt.Sprintf("%d", wrapped.statusCode)
+			metricsMgr.RecordHTTPRequest(path, method, status, float64(duration))
+		})
+	})
 
 	// Health check
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
