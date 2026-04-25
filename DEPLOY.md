@@ -28,9 +28,23 @@ git push origin main
    - `DEVOPS_DATABASE_NAME=devops_toolkit`
 
 ### Step 3: Add PostgreSQL Database
-Koyeb free tier doesn't include a persistent database. Options:
-- Use free PostgreSQL from [Supabase](https://supabase.com) or [Neon](https://neon.tech)
-- Set up PostgreSQL on Oracle Cloud Always Free
+Koyeb free tier doesn't include a persistent database. Use Supabase free tier:
+
+1. Create account at https://app.supabase.com
+2. Create new project (free tier: 500MB database, 2GB storage)
+3. Go to **Settings → Database** for connection details:
+   - Host: `db.[your-project-ref].supabase.co`
+   - Port: `5432`
+   - User: `postgres`
+   - Password: your Supabase DB password
+   - Database: `postgres`
+
+4. In Koyeb environment variables, add:
+   - `DEVOPS_DATABASE_HOST=db.[your-project-ref].supabase.co`
+   - `DEVOPS_DATABASE_PORT=5432`
+   - `DEVOPS_DATABASE_USER=postgres`
+   - `DEVOPS_DATABASE_PASSWORD=your_supabase_password`
+   - `DEVOPS_DATABASE_NAME=postgres`
 
 ---
 
