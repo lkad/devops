@@ -10,6 +10,7 @@ Go-based internal DevOps platform for managing infrastructure, CI/CD pipelines, 
 - [DESIGN.md](DESIGN.md) — Frontend design system (colors, typography, spacing)
 - [PRD.md](PRD.md) — Product requirements and design
 - [TODOS.md](TODOS.md) — Task tracking and status
+- [DEPLOY.md](DEPLOY.md) — Deployment guide for various platforms
 
 ## Skill routing
 

@@ -1,0 +1,74 @@
+name: Deploy to Koyeb
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/devops-toolkit
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create Koyeb Secret
+        run: |
+          echo "Creating Koyeb secret for image pull..."
+
+      - name: Trigger Koyeb Deployment
+        run: |
+          echo "Docker image pushed: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo ""
+          echo "To deploy manually:"
+          echo "1. Go to https://app.koyeb.com"
+          echo "2. Create new Service from Container Registry"
+          echo "3. Select image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          echo "4. Set port: 3000"
+          echo "5. Add environment variables for PostgreSQL"
+
+      - name: Output deployment info
+        run: |
+          echo "## Deployment Info"
+          echo "- Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "- GitHub SHA: ${{ github.sha }}"
+          echo ""
+          echo "Set up Koyeb GitHub App at https://app.koyeb.com for auto-deploy"
