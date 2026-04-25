@@ -50,19 +50,15 @@ func TestProjectAPI_BusinessLines_CreateAndList(t *testing.T) {
 
 	// Create a business line
 	createPayload := `{"name":"test-bl-integration","description":"integration test business line"}`
-	resp, err := http.DefaultClient.Do(&http.Request{
-		Method: "POST",
-		URL:    mustParseURL(baseURL + "/api/org/business-lines"),
-		Body:   io.NopCloser(strings.NewReader(createPayload)),
-		Header: map[string][]string{"Content-Type": {"application/json"}},
-	})
+	resp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(createPayload))
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected 201 or 200, got %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("Expected 201 or 200, got %d. Body: %s", resp.StatusCode, string(body))
 	}
 
 	// Extract ID from response
@@ -110,20 +106,21 @@ func TestProjectAPI_BusinessLines_Get(t *testing.T) {
 
 	// Create a business line first
 	createPayload := `{"name":"test-bl-get","description":"test get"}`
-	resp, err := http.DefaultClient.Do(&http.Request{
-		Method: "POST",
-		URL:    mustParseURL(baseURL + "/api/org/business-lines"),
-		Body:   io.NopCloser(strings.NewReader(createPayload)),
-		Header: map[string][]string{"Content-Type": {"application/json"}},
-	})
+	resp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(createPayload))
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
 	}
-	resp.Body.Close()
 
 	var created map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&created)
-	blID := created["id"].(string)
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	resp.Body.Close()
+
+	blID, ok := created["id"].(string)
+	if !ok || blID == "" {
+		t.Fatal("Expected non-empty id in response")
+	}
 
 	// Get the business line
 	resp, err = http.Get(baseURL + "/api/org/business-lines/" + blID)
@@ -152,28 +149,23 @@ func TestProjectAPI_Systems_CRUD(t *testing.T) {
 
 	// First create a business line
 	blPayload := `{"name":"test-bl-for-system","description":"test"}`
-	blResp, err := http.DefaultClient.Do(&http.Request{
-		Method: "POST",
-		URL:    mustParseURL(baseURL + "/api/org/business-lines"),
-		Body:   io.NopCloser(strings.NewReader(blPayload)),
-		Header: map[string][]string{"Content-Type": {"application/json"}},
-	})
+	blResp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(blPayload))
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
 	}
 	var createdBL map[string]interface{}
-	json.NewDecoder(blResp.Body).Decode(&createdBL)
+	if err := json.NewDecoder(blResp.Body).Decode(&createdBL); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 	blResp.Body.Close()
-	blID := createdBL["id"].(string)
+	blID, ok := createdBL["id"].(string)
+	if !ok || blID == "" {
+		t.Fatal("Failed to get business line ID")
+	}
 
 	// Create a system
 	sysPayload := fmt.Sprintf(`{"name":"test-system","description":"integration test system","business_line_id":"%s"}`, blID)
-	sysResp, err := http.DefaultClient.Do(&http.Request{
-		Method: "POST",
-		URL:    mustParseURL(baseURL + "/api/org/business-lines/" + blID + "/systems"),
-		Body:   io.NopCloser(strings.NewReader(sysPayload)),
-		Header: map[string][]string{"Content-Type": {"application/json"}},
-	})
+	sysResp, err := http.Post(baseURL+"/api/org/business-lines/"+blID+"/systems", "application/json", strings.NewReader(sysPayload))
 	if err != nil {
 		t.Fatalf("Failed to create system: %v", err)
 	}
@@ -203,37 +195,38 @@ func TestProjectAPI_Projects_CRUD(t *testing.T) {
 
 	// Create business line -> system -> project hierarchy
 	blPayload := `{"name":"test-bl-hierarchy","description":"test"}`
-	blResp, _ := http.DefaultClient.Do(&http.Request{
-		Method: "POST",
-		URL:    mustParseURL(baseURL + "/api/org/business-lines"),
-		Body:   io.NopCloser(strings.NewReader(blPayload)),
-		Header: map[string][]string{"Content-Type": {"application/json"}},
-	})
+	blResp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(blPayload))
+	if err != nil {
+		t.Fatalf("Failed to create business line: %v", err)
+	}
 	var createdBL map[string]interface{}
-	json.NewDecoder(blResp.Body).Decode(&createdBL)
+	if err := json.NewDecoder(blResp.Body).Decode(&createdBL); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 	blResp.Body.Close()
-	blID := createdBL["id"].(string)
+	blID, ok := createdBL["id"].(string)
+	if !ok || blID == "" {
+		t.Fatal("Failed to get business line ID")
+	}
 
 	sysPayload := fmt.Sprintf(`{"name":"test-sys-hierarchy","description":"test","business_line_id":"%s"}`, blID)
-	sysResp, _ := http.DefaultClient.Do(&http.Request{
-		Method: "POST",
-		URL:    mustParseURL(baseURL + "/api/org/business-lines/" + blID + "/systems"),
-		Body:   io.NopCloser(strings.NewReader(sysPayload)),
-		Header: map[string][]string{"Content-Type": {"application/json"}},
-	})
+	sysResp, err := http.Post(baseURL+"/api/org/business-lines/"+blID+"/systems", "application/json", strings.NewReader(sysPayload))
+	if err != nil {
+		t.Fatalf("Failed to create system: %v", err)
+	}
 	var createdSys map[string]interface{}
-	json.NewDecoder(sysResp.Body).Decode(&createdSys)
+	if err := json.NewDecoder(sysResp.Body).Decode(&createdSys); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 	sysResp.Body.Close()
-	sysID := createdSys["id"].(string)
+	sysID, ok := createdSys["id"].(string)
+	if !ok || sysID == "" {
+		t.Fatal("Failed to get system ID")
+	}
 
 	// Create a project
 	projPayload := fmt.Sprintf(`{"name":"test-project","type":"backend","description":"integration test","system_id":"%s"}`, sysID)
-	projResp, err := http.DefaultClient.Do(&http.Request{
-		Method: "POST",
-		URL:    mustParseURL(baseURL + "/api/org/systems/" + sysID + "/projects"),
-		Body:   io.NopCloser(strings.NewReader(projPayload)),
-		Header: map[string][]string{"Content-Type": {"application/json"}},
-	})
+	projResp, err := http.Post(baseURL+"/api/org/systems/"+sysID+"/projects", "application/json", strings.NewReader(projPayload))
 	if err != nil {
 		t.Fatalf("Failed to create project: %v", err)
 	}

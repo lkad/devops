@@ -2,6 +2,7 @@ package device
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -64,7 +65,10 @@ func (r *Repository) Create(d *Device) error {
 		INSERT INTO devices (id, type, name, status, labels, business_unit, compute_cluster, parent_id, config, metadata, registered_at, last_seen, last_config_sync)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
-	_, err := r.db.Exec(query, d.ID, d.Type, d.Name, d.Status, d.Labels, d.BusinessUnit, d.ComputeCluster, d.ParentID, d.Config, d.Metadata, d.RegisteredAt, d.LastSeen, d.LastConfigSync)
+	labelsJSON, _ := json.Marshal(d.Labels)
+	configJSON, _ := json.Marshal(d.Config)
+	metadataJSON, _ := json.Marshal(d.Metadata)
+	_, err := r.db.Exec(query, d.ID, d.Type, d.Name, d.Status, labelsJSON, d.BusinessUnit, d.ComputeCluster, d.ParentID, configJSON, metadataJSON, d.RegisteredAt, d.LastSeen, d.LastConfigSync)
 	return err
 }
 
@@ -84,6 +88,9 @@ func (r *Repository) GetByID(id string) (*Device, error) {
 	if err != nil {
 		return nil, err
 	}
+	json.Unmarshal(labels, &d.Labels)
+	json.Unmarshal(config, &d.Config)
+	json.Unmarshal(metadata, &d.Metadata)
 	return d, nil
 }
 
@@ -105,7 +112,10 @@ func (r *Repository) List() ([]*Device, error) {
 		if err := rows.Scan(&d.ID, &d.Type, &d.Name, &d.Status, &labels, &d.BusinessUnit, &d.ComputeCluster, &d.ParentID, &config, &metadata, &d.RegisteredAt, &d.LastSeen, &d.LastConfigSync, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, err
 		}
-		devices = append(devices, d)
+		json.Unmarshal(labels, &d.Labels)
+			json.Unmarshal(config, &d.Config)
+			json.Unmarshal(metadata, &d.Metadata)
+			devices = append(devices, d)
 	}
 	return devices, nil
 }
@@ -117,7 +127,10 @@ func (r *Repository) Update(d *Device) error {
 		WHERE id = $1
 	`
 	d.UpdatedAt = time.Now()
-	_, err := r.db.Exec(query, d.ID, d.Type, d.Name, d.Status, d.Labels, d.BusinessUnit, d.ComputeCluster, d.ParentID, d.Config, d.Metadata, d.LastSeen, d.LastConfigSync, d.UpdatedAt)
+	labelsJSON, _ := json.Marshal(d.Labels)
+	configJSON, _ := json.Marshal(d.Config)
+	metadataJSON, _ := json.Marshal(d.Metadata)
+	_, err := r.db.Exec(query, d.ID, d.Type, d.Name, d.Status, labelsJSON, d.BusinessUnit, d.ComputeCluster, d.ParentID, configJSON, metadataJSON, d.LastSeen, d.LastConfigSync, d.UpdatedAt)
 	return err
 }
 
@@ -157,7 +170,10 @@ func (r *Repository) SearchByLabels(labels map[string]string) ([]*Device, error)
 		if err := rows.Scan(&d.ID, &d.Type, &d.Name, &d.Status, &labels, &d.BusinessUnit, &d.ComputeCluster, &d.ParentID, &config, &metadata, &d.RegisteredAt, &d.LastSeen, &d.LastConfigSync, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, err
 		}
-		devices = append(devices, d)
+		json.Unmarshal(labels, &d.Labels)
+			json.Unmarshal(config, &d.Config)
+			json.Unmarshal(metadata, &d.Metadata)
+			devices = append(devices, d)
 	}
 	return devices, nil
 }

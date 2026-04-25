@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 )
 
 type Manager struct {
@@ -179,7 +180,7 @@ func (m *Manager) CreateDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) GetDeviceHTTP(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get(":id")
+	id := mux.Vars(r)["id"]
 	device, err := m.GetDevice(id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -194,7 +195,7 @@ func (m *Manager) GetDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) UpdateDeviceHTTP(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get(":id")
+	id := mux.Vars(r)["id"]
 	var updates map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -211,7 +212,7 @@ func (m *Manager) UpdateDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) DeleteDeviceHTTP(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get(":id")
+	id := mux.Vars(r)["id"]
 	if err := m.DeleteDevice(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

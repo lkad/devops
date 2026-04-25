@@ -1,0 +1,56 @@
+# Binaries and executables
+devops-toolkit
+devops-toolkit.exe
+*.exe
+
+# Build outputs
+devops-toolkit/frontend/node_modules/
+devops-toolkit/frontend/dist/
+devops-toolkit/frontend/.vite/
+
+# Docker
+.docker/
+Dockerfile
+docker-compose.override.yml
+docker-pull.sh
+
+# IDE and editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# gstack (AI tool artifacts)
+.gstack/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# Test coverage
+coverage.out
+coverage.html
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Database dumps
+*.sql
+*.dump
+
+# Vendor (if using go vendor)
+vendor/
