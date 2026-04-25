@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/devops-toolkit/internal/k8s"
 	"github.com/devops-toolkit/internal/discovery"
 	"github.com/devops-toolkit/internal/physicalhost"
+	"github.com/devops-toolkit/internal/project"
 	"github.com/devops-toolkit/internal/websocket"
 	"github.com/gorilla/mux"
 )
@@ -41,6 +43,11 @@ func main() {
 	if err != nil {
 		log.Printf("Warning: Device manager unavailable (DB connection failed): %v", err)
 		deviceMgr = nil
+	}
+	projectMgr, err := project.NewManagerWithDSN(cfg.Database.DSN())
+	if err != nil {
+		log.Printf("Warning: Project manager unavailable (DB connection failed): %v", err)
+		projectMgr = nil
 	}
 	logMgr := logs.NewManager(logs.LogsConfig{
 		Backend:       cfg.Logs.Backend,
@@ -162,6 +169,11 @@ func main() {
 		}
 	})
 	r.HandleFunc("/api/k8s/clusters/{name}/health", k8sMgr.HealthCheckHTTP)
+	r.HandleFunc("/api/k8s/clusters/{cluster}/nodes", k8sMgr.GetNodesHTTP)
+	r.HandleFunc("/api/k8s/clusters/{cluster}/namespaces", k8sMgr.GetNamespacesHTTP)
+	r.HandleFunc("/api/k8s/clusters/{cluster}/pods", k8sMgr.GetPodsHTTP)
+	r.HandleFunc("/api/k8s/clusters/{cluster}/pods/{pod}/logs", k8sMgr.GetPodLogsHTTP)
+	r.HandleFunc("/api/k8s/maintenance", k8sMgr.MaintenanceOpHTTP)
 
 	// Physical host routes
 	r.HandleFunc("/api/physical-hosts", func(w http.ResponseWriter, r *http.Request) {
@@ -183,11 +195,107 @@ func main() {
 	r.HandleFunc("/api/discovery/status", discoveryMgr.GetStatusHTTP)
 	r.HandleFunc("/api/discovery/scan", discoveryMgr.ScanHTTP)
 
+	// Project management routes (if available)
+	if projectMgr != nil {
+		// Business Lines
+		r.HandleFunc("/api/org/business-lines", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListBusinessLinesHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.CreateBusinessLineHTTP(w, r)
+			}
+		})
+		r.HandleFunc("/api/org/business-lines/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.GetBusinessLineHTTP(w, r)
+			} else if r.Method == "PUT" {
+				projectMgr.UpdateBusinessLineHTTP(w, r)
+			} else if r.Method == "DELETE" {
+				projectMgr.DeleteBusinessLineHTTP(w, r)
+			}
+		})
+
+		// Systems
+		r.HandleFunc("/api/org/business-lines/{bl_id}/systems", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListSystemsHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.CreateSystemHTTP(w, r)
+			}
+		})
+		r.HandleFunc("/api/org/systems/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.GetSystemHTTP(w, r)
+			} else if r.Method == "PUT" {
+				projectMgr.UpdateSystemHTTP(w, r)
+			} else if r.Method == "DELETE" {
+				projectMgr.DeleteSystemHTTP(w, r)
+			}
+		})
+
+		// Projects
+		r.HandleFunc("/api/org/systems/{sys_id}/projects", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListProjectsHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.CreateProjectHTTP(w, r)
+			}
+		})
+		r.HandleFunc("/api/org/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.GetProjectHTTP(w, r)
+			} else if r.Method == "PUT" {
+				projectMgr.UpdateProjectHTTP(w, r)
+			} else if r.Method == "DELETE" {
+				projectMgr.DeleteProjectHTTP(w, r)
+			}
+		})
+
+		// Resource linking
+		r.HandleFunc("/api/org/projects/{id}/resources", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListProjectResourcesHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.LinkResourceHTTP(w, r)
+			}
+		})
+		r.HandleFunc("/api/org/projects/{id}/resources/{resource_id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "DELETE" {
+				projectMgr.UnlinkResourceHTTP(w, r)
+			}
+		})
+
+		// Permissions
+		r.HandleFunc("/api/org/projects/{id}/permissions", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListProjectPermissionsHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.GrantPermissionHTTP(w, r)
+			}
+		})
+		r.HandleFunc("/api/org/permissions/{perm_id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "DELETE" {
+				projectMgr.RevokePermissionHTTP(w, r)
+			}
+		})
+
+		// FinOps export
+		r.HandleFunc("/api/org/reports/finops", projectMgr.ExportFinOpsHTTP)
+	}
+
 	// Static files (frontend)
-	frontendDir := "./devops-toolkit/frontend"
+	exePath, _ := os.Executable()
+	exeDir := filepath.Dir(exePath)
+	frontendDir := filepath.Join(exeDir, "frontend")
 	if _, err := os.Stat(frontendDir); err == nil {
 		r.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendDir)))
 		log.Printf("Serving static files from %s", frontendDir)
+	} else {
+		// Fallback: try relative path from current working directory
+		if _, err := os.Stat("./devops-toolkit/frontend"); err == nil {
+			r.PathPrefix("/").Handler(http.FileServer(http.Dir("./devops-toolkit/frontend")))
+			log.Printf("Serving static files from ./devops-toolkit/frontend")
+		}
 	}
 
 	// Start server

@@ -1,78 +1,131 @@
-# Test LDAP Setup
+# DevOps Toolkit
 
-This repository contains a minimal test LDAP environment using the osixia/openldap Docker image. It prepopulates a small directory structure with example groups and users to help you develop and test your Go LDAP client.
+Go-based internal platform for managing infrastructure, CI/CD pipelines, logs, alerts, and physical hosts.
 
-## How it works
+## Quick Start
 
-The `docker-compose.yml` defines a single LDAP service:
+```bash
+# Clone and build
+git clone https://github.com/devops-toolkit/devops-toolkit.git
+cd devops-toolkit
+go build -o devops-toolkit ./cmd/devops-toolkit
 
-- **Image**: `osixia/openldap:1.5.0`
-- **Environment**:
-  - `LDAP_ORGANISATION`: Organization name
-  - `LDAP_DOMAIN`: Base domain
-  - `LDAP_ADMIN_PASSWORD`: Password for the `admin` DN
-  - `LDAP_READONLY_USER`: Enables a read‑only user
-  - `LDAP_READONLY_USER_USERNAME`: Username for the read‑only user
-  - `LDAP_READONLY_USER_PASSWORD`: Password for the read‑only user
-- **Ports**:
-  - `389`: LDAP
-  - `636`: LDAPS (disabled in this test config)
-- **Volumes**:
-  - `./bootstrap.ldif` is mounted into the container to preconfigure the directory
-- **Restart**: `unless-stopped`
+# Configure (optional - defaults work for local dev)
+cp config.yaml config.local.yaml
+# Edit config.local.yaml as needed
 
-The `bootstrap.ldif` file creates the following structure:
+# Start the server
+./devops-toolkit
 
-```
-dc=example,dc=com
-  ├── ou=Groups
-  │     ├── cn=IT_Ops
-  │     │     └── member: cn=John,cn=Sarah
-  │     ├── cn=DevTeam_Payments
-  │     │     └── member: cn=Alice,cn=Bob
-  │     ├── cn=Security_Auditors
-  │     │     └── member: cn=Sarah
-  │     └── cn=SRE_Lead
-  │           └── member: cn=John
-  └── ou=Users
-        ├── cn=Alice
-        ├── cn=Bob
-        ├── cn=John
-        └── cn=Sarah
+# Verify it's running
+curl http://localhost:3000/health
+# Expected: {"status":"healthy"}
 ```
 
-Each user has a simple plaintext password (e.g., `alicepassword`). In a real environment you would store hashed passwords.
+## Features
 
-## How to use it
+- **Devices** - Device state machine with PostgreSQL persistence
+- **Pipelines** - CI/CD orchestration with stage runner
+- **Logs** - Multi-backend log management (local/Elasticsearch/Loki)
+- **Metrics** - Prometheus collector with `/metrics` endpoint
+- **Alerts** - Notification channels with rate limiting
+- **Kubernetes** - Cluster management (k3d/kind for testing, standard k8s for production)
+- **Physical Hosts** - SSH monitoring and metrics collection
+- **Projects** - Organizational hierarchy (Business Line → System → Project) with FinOps reporting
+- **WebSocket** - Real-time event pub/sub
 
-1. **Start the LDAP server**
-   ```bash
-   docker compose up -d
-   ```
-   This will create a container named `ldap-test` listening on `389`.
+## Configuration
 
-2. **Test connectivity**
-   ```bash
-   ldapsearch -x -H ldap://localhost:389 -D "cn=admin,dc=example,dc=com" -w adminpassword -b "dc=example,dc=com"
-   ```
+Configuration is via `config.yaml` with environment variable overrides.
 
-3. **Connect from Go**
-   Use the `go-ldap` library to bind with `cn=admin,dc=example,dc=com` or any of the group DNs. The next step will be to implement the Go LDAP client.
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 3000
 
-4. **Stop the server**
-   ```bash
-   docker compose down
-   ```
+database:
+  host: "localhost"
+  port: 5432
+  user: "devops"
+  password: "devops"
+  name: "devops"
 
-## Extending the setup
+ldap:
+  host: "ldap.example.com"
+  port: 389
+  base_dn: "dc=example,dc=com"
+  bind_dn: "cn=admin,dc=example,dc=com"
+  bind_password: "admin"
+  super_admin_group: "cn=SRE_Lead,ou=Groups,dc=example,dc=com"
+```
 
-You can modify `bootstrap.ldif` to add more users, groups, or attributes. If you need to change the LDAP schema, adjust the Docker Compose environment variables accordingly.
+Environment variable overrides: `DEVOPS_DATABASE_HOST`, `DEVOPS_LDAP_HOST`, etc.
 
-## Security note
+## Development
 
-- **Do not expose this LDAP server to production traffic.** It is intended only for local testing.
-- Change `LDAP_ADMIN_PASSWORD` to a strong secret before using in any environment that requires security.
+```bash
+# Run tests (unit + integration with real k3d clusters)
+go test ./...
 
----
+# Run tests only for a specific package
+go test ./internal/k8s/...
 
-For any questions or issues, feel free to open an issue or pull request.
+# Start with hot-reload (requires fresh)
+go run ./cmd/devops-toolkit
+```
+
+### K8s Integration Tests
+
+Integration tests connect to real k3d clusters. They skip automatically if no cluster is configured.
+
+```bash
+# Set up a test cluster
+k3d cluster create dev-cluster-1
+
+# Tests will auto-detect and run against it
+go test ./internal/k8s/... -v
+```
+
+## API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /api/devices` | List devices |
+| `GET /api/pipelines` | List pipelines |
+| `GET /api/logs` | Query logs |
+| `GET /api/k8s/clusters` | List K8s clusters |
+| `GET /api/org/business-lines` | List business lines |
+| `WS /ws` | WebSocket for real-time events |
+
+All API paths are relative (e.g., `api/k8s/clusters`) to support reverse proxy deployment.
+
+## Project Structure
+
+```
+.
+├── cmd/devops-toolkit/     # Main HTTP server
+├── internal/
+│   ├── config/             # YAML + env config loader
+│   ├── device/             # Device state machine
+│   ├── pipeline/           # CI/CD orchestration
+│   ├── logs/               # Log manager (local/ES/Loki)
+│   ├── metrics/            # Prometheus collector
+│   ├── alerts/             # Notification channels
+│   ├── k8s/                # Kubernetes cluster management
+│   ├── physicalhost/       # SSH host monitoring
+│   ├── project/            # Organizational hierarchy
+│   └── websocket/          # Real-time events
+├── scripts/                # Utility scripts
+└── config.yaml             # Configuration
+```
+
+## Documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Backend architecture, data models, API structure
+- [DESIGN.md](DESIGN.md) - Frontend design system
+- [PRD.md](PRD.md) - Product requirements
+
+## Deployment
+
+See [ARCHITECTURE.md](ARCHITECTURE.md#deployment) for deployment options including systemd, Docker, and Kubernetes.

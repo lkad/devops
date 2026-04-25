@@ -1,245 +1,214 @@
-# DevOps Toolkit - TODO
+# DevOps Toolkit - 待办事项
 
-**Last Updated:** 2026-04-24
+**最后更新:** 2026-04-24
 
-## Status Overview
+## 状态总览
 
-| Component | Status | Notes |
+| 组件 | 状态 | 说明 |
 |-----------|--------|-------|
-| Logging System | ✅ Done | Local/ES/Loki backends, query delegation |
-| Prometheus Metrics | ✅ Done | /metrics endpoint, counters/gauges/histograms |
-| Alert Notification | ✅ Done | Slack/webhook/email/log channels, rate limiting |
-| WebSocket | ✅ Done | Real-time event broadcasting |
-| CI/CD Pipeline | ✅ Done | Execution engine, stage simulation, run history |
-| Device Management | ✅ Done | State machine, groups, hierarchy, templates |
-| LDAP Auth | ✅ Done | Authentication, group-to-role mapping |
-| Permission Model | ✅ Done | Middleware, enforcement, label-based access |
-| K8s Multi-Cluster | ✅ Done | k3d集群管理, 多集群健康检查 |
-| Physical Host Manager | ✅ Done | SSH连接管理, 状态监控, 指标采集 |
-| Project Management | 📋 Pending | Business Line → System → Project hierarchy, FinOps |
+| 日志系统 | ✅ 完成 | Local/ES/Loki 后端，查询委托 |
+| Prometheus 指标 | ✅ 完成 | /metrics 端点，计数器/仪表/直方图 |
+| 告警通知 | ✅ 完成 | Slack/webhook/email/log 通道，限流 |
+| WebSocket | ✅ 完成 | 实时事件广播 |
+| CI/CD 流水线 | ✅ 完成 | 执行引擎，阶段模拟，运行历史 |
+| 设备管理 | ✅ 完成 | 状态机，设备组，层级关系，配置模板 |
+| LDAP 认证 | ✅ 完成 | LDAP 认证，组角色映射 |
+| 权限模型 | ✅ 完成 | 中间件强制执行，基于标签的访问控制 |
+| K8s 多集群 | ✅ 完成 | k3d集群管理，多集群健康检查 |
+| 物理主机管理 | ✅ 完成 | SSH连接管理，状态监控，指标采集 |
+| 项目管理 | ✅ 完成 | 事业群 → 系统 → 项目层级，FinOps 报表 |
 
 ---
 
-## 📋 Pending Features
+## ✅ 已完成功能
 
-### Project Management Module
+### 项目管理模块
+- [x] 事业群 CRUD (`/api/org/business-lines`)
+- [x] 系统 CRUD (`/api/org/business-lines/:id/systems`)
+- [x] 项目 CRUD (`/api/org/systems/:id/projects`)
+- [x] 资源链接 (`/api/org/projects/:id/resources`)
+- [x] 级别RBAC权限 (viewer, editor, admin)
+- [x] FinOps CSV 导出 (`/api/org/reports/finops?period=YYYY-MM`)
+- [x] PostgreSQL 迁移
 
-Organizational hierarchy for FinOps reporting. See [ARCHITECTURE.md](ARCHITECTURE.md) for full design.
+**数据模型:**
+- BusinessLine → System → Project (3级层级)
+- ProjectResource (链接表，关联日志、告警、设备、流水线、主机)
+- ProjectPermission (本地RBAC，LDAP仅用于认证)
 
-**Features:**
-- [ ] Business Line CRUD (`/api/org/business-lines`)
-- [ ] System CRUD (`/api/org/business-lines/:id/systems`)
-- [ ] Project CRUD (`/api/org/systems/:id/projects`)
-- [ ] Resource linking (`/api/org/projects/:id/resources`)
-- [ ] RBAC permissions per level (viewer, editor, admin)
-- [ ] FinOps CSV export (`/api/org/reports/finops?period=YYYY-MM`)
-- [ ] PostgreSQL migrations
+### 日志系统
+- [x] 本地存储后端 (默认)
+- [x] Elasticsearch 后端
+- [x] Loki 后端
+- [x] 基于存储类型的查询委托
+- [x] 日志保留策略
+- [x] 日志统计和过滤
+- [x] Filebeat 集成脚本
 
-**Data Model:**
-- BusinessLine → System → Project (3-level hierarchy)
-- ProjectResource (link table for logs, alerts, devices, pipelines, hosts)
-- ProjectPermission (local RBAC, LDAP for auth only)
+### Prometheus 指标
+- [x] /metrics 端点 (Prometheus 格式)
+- [x] /api/metrics 端点 (JSON)
+- [x] Counter、Gauge、Histogram 支持
+- [x] HTTP 请求指标中间件
+- [x] 设备事件指标
 
----
-
-## ✅ Completed Features
-
-### Logging System
-- [x] Local storage backend (default)
-- [x] Elasticsearch backend
-- [x] Loki backend
-- [x] Query delegation based on storage type
-- [x] Log retention policies
-- [x] Log stats and filtering
-- [x] Filebeat integration scripts
-
-### Prometheus Metrics
-- [x] /metrics endpoint (Prometheus format)
-- [x] /api/metrics endpoint (JSON)
-- [x] Counter, Gauge, Histogram support
-- [x] HTTP request metrics middleware
-- [x] Device event metrics
-
-### Alert Notifications
-- [x] Channel management (slack, webhook, email, log)
-- [x] Alert trigger API
-- [x] Rate limiting (10 alerts/min per name)
-- [x] Alert history and stats
+### 告警通知
+- [x] 通道管理 (slack, webhook, email, log)
+- [x] 告警触发 API
+- [x] 限流 (每名称 10条/分钟)
+- [x] 告警历史和统计
 
 ### WebSocket
-- [x] /ws endpoint
-- [x] Channel subscriptions (log, metric, device_event, pipeline_update, alert)
-- [x] Real-time event broadcasting
-- [x] Callback integration with log/alert managers
+- [x] /ws 端点
+- [x] 通道订阅 (log, metric, device_event, pipeline_update, alert)
+- [x] 实时事件广播
+- [x] 日志/告警管理器的回调集成
 
-### CI/CD Pipeline
-- [x] Pipeline CRUD operations
-- [x] Stage execution engine (simulated)
-- [x] Run history tracking
-- [x] Pipeline statistics
-- [x] Cancel run support
+### CI/CD 流水线
+- [x] 流水线 CRUD 操作
+- [x] 阶段执行引擎 (模拟)
+- [x] 运行历史追踪
+- [x] 流水线统计
+- [x] 取消运行支持
 
-### Device Management
-- [x] Device state machine (PENDING → AUTHENTICATED → REGISTERED → ACTIVE → MAINTENANCE/SUSPENDED → RETIRE)
-- [x] State transition validation
-- [x] Device registration and authentication
-- [x] Parent-child relationships (hierarchy)
-- [x] Device groups (hierarchical/dynamic)
-- [x] Bulk operations by tags
-- [x] Configuration templates (basic)
+### 设备管理
+- [x] 设备状态机 (PENDING → AUTHENTICATED → REGISTERED → ACTIVE → MAINTENANCE/SUSPENDED → RETIRE)
+- [x] 状态转换验证
+- [x] 设备注册和认证
+- [x] 父子关系 (层级)
+- [x] 设备组 (层级/动态)
+- [x] 按标签批量操作
+- [x] 配置模板 (基础)
 
-### LDAP Authentication
-- [x] User authentication against LDAP server
-- [x] Group membership retrieval
-- [x] Group-to-role mapping
-- [x] Connection pooling
-- [x] Health check
+### LDAP 认证
+- [x] LDAP 服务器用户认证
+- [x] 组 membership 获取
+- [x] 组到角色映射
+- [x] 连接池
+- [x] 健康检查
 
-### Permission Model
-- [x] Role-based access control middleware
-- [x] Device permission checks
-- [x] Label-based access control
-- [x] Environment restrictions (prod/dev/test)
-- [x] Business hierarchy inheritance
-- [x] SuperAdmin/Operator/Developer/Auditor roles
+### 权限模型
+- [x] 基于角色的访问控制中间件
+- [x] 设备权限检查
+- [x] 基于标签的访问控制
+- [x] 环境限制 (prod/dev/test)
+- [x] 业务层级继承
+- [x] SuperAdmin/Operator/Developer/Auditor 角色
 
-### K8s Multi-Cluster Management
-- [x] Multi-cluster Kubernetes management via k3d
-- [x] Cluster health checking (nodes, deployments)
-- [x] Workload deployment and scaling
-- [x] Metrics collection (CPU/memory)
-- [x] Pod logs retrieval
-- [x] Cross-cluster operations
-- [x] k3d-setup.sh environment script
+### K8s 多集群管理
+- [x] 通过 k3d 实现多集群 Kubernetes 管理
+- [x] 集群健康检查 (节点, 部署)
+- [x] 工作负载部署和扩缩容
+- [x] 指标采集 (CPU/内存)
+- [x] Pod 日志获取
+- [x] 跨集群操作
+- [x] k3d-setup.sh 环境脚本
 
-### Physical Host Manager
-- [x] SSH connection management with connection pooling
-- [x] Host registration and removal
-- [x] State monitoring via heartbeat mechanism
-- [x] Metrics collection (CPU, memory, disk, uptime)
-- [x] Service monitoring (systemctl/service)
-- [x] Configuration push via SSH
-- [x] Event emission for state changes
+### 物理主机管理
+- [x] SSH 连接管理和连接池
+- [x] 主机注册和移除
+- [x] 心跳机制状态监控
+- [x] 指标采集 (CPU, 内存, 磁盘, 运行时间)
+- [x] 服务监控 (systemctl/service)
+- [x] 通过 SSH 推送配置
+- [x] 状态变化事件发送
 
 ---
 
-## Test Scripts
+## 测试脚本
 
-| Script | Description |
+| 脚本 | 说明 |
 |--------|-------------|
-| `scripts/run-tests.sh` | Run unit tests with options |
-| `scripts/integration-test.sh` | Run integration tests against live server |
-| `scripts/run-ci-tests.sh` | CI pipeline test runner |
-| `scripts/test-logs.sh` | Log system tests |
-| `scripts/k3d-setup.sh` | Setup k3d multi-cluster environment |
+| `scripts/run-tests.sh` | 运行单元测试 |
+| `scripts/integration-test.sh` | 对实时服务器运行集成测试 |
+| `scripts/run-ci-tests.sh` | CI 流水线测试运行器 |
+| `scripts/test-logs.sh` | 日志系统测试 |
+| `scripts/k3d-setup.sh` | 设置 k3d 多集群环境 |
 
-### Test Commands
+### 测试命令
 ```bash
-# Unit tests
-npm test --prefix devops-toolkit
+# Go 单元测试
+go test ./...
 
-# Unit tests with coverage
-npm run test:coverage --prefix devops-toolkit
+# Go 单元测试 (详细)
+go test ./... -v
 
-# Integration tests
-bash devops-toolkit/scripts/integration-test.sh
+# 前端测试
+node devops-toolkit/frontend/frontend.test.js
 
-# Watch mode
-npm run test:watch --prefix devops-toolkit
+# Go 编译检查
+go build ./...
 ```
 
 ---
 
-## Test Coverage
+## 测试覆盖率
 
-**Current Status:** 355 tests passing, coverage ~31% (threshold 10%)
+**当前状态:** 450+ tests passing (含K8s集成测试)
 
-### Test Files
-- `tests/device_state_machine.test.js` - 19 tests (device states)
-- `tests/device_manager.test.js` - 16 tests (device CRUD)
-- `tests/permission_middleware.test.js` - 21 tests (RBAC)
-- `tests/ldap_auth.test.js` - 24 tests (LDAP config)
-- `tests/auth_integration.test.js` - 24 tests (auth boundaries)
-- `tests/pipeline_manager.test.js` - 26 tests (CI/CD stages)
-- `tests/ldap_retry.test.js` - 20 tests (LDAP retry logic)
-- `tests/metrics_manager.test.js` - 23 tests (Prometheus metrics)
-- `tests/alerts_notification_manager.test.js` - 21 tests (alert channels/rate limiting)
-- `tests/websocket_manager.test.js` - 17 tests (WebSocket events)
-- `tests/agent.test.js` - 21 tests (device agent)
-- `tests/storage_backends.test.js` - 27 tests (Local/ES/Loki backends)
-- `tests/k8s_cluster_manager.test.js` - 25 tests (K8s cluster management)
-- `tests/k8s_multi_cluster.test.js` - 20 tests (multi-cluster operations)
-- `tests/physical_host_manager.test.js` - 33 tests (SSH host management)
-- `tests/network_discovery.test.js` - 23 tests (network discovery, SNMP/SSH scanning)
-- `tests/log_manager.test.js` - 47 tests (log storage, query, alerts, retention)
+### Go 测试文件 (internal/)
+- `internal/device/` - 8 tests (设备状态机, CRUD)
+- `internal/pipeline/` - tests (CI/CD 阶段)
+- `internal/logs/` - tests (日志存储, 查询, 告警, 保留)
+- `internal/metrics/` - tests (Prometheus 指标)
+- `internal/alerts/` - tests (告警通道, 限流)
+- `internal/websocket/` - tests (WebSocket 事件)
+- `internal/k8s/` - 16 tests (K8s 集群管理，包含真实k3d集群集成测试)
+- `internal/discovery/` - tests (网络发现)
+- `internal/physicalhost/` - tests (SSH 主机管理)
+- `internal/auth/ldap/` - tests (LDAP 认证)
+- `internal/project/` - 24 tests (项目管理)
 
-### PRD Requirements
-- [x] CI/CD smoke_test stage tests
-- [x] Post-deployment verification stage tests
-- [x] LDAP connection retry logic tests
-- [x] Health check verification tests
-- [x] Metrics manager tests (counters, gauges, histograms, Prometheus export)
-- [x] Alert notification manager tests (channels, rate limiting, history)
-- [x] WebSocket manager tests (subscribe, broadcast, channels)
-- [x] Device agent tests (state, connection, configuration)
-- [x] Storage backend tests (Local, Elasticsearch, Loki)
-- [x] Network discovery tests (SNMP/SSH device scanning)
-- [x] Log manager tests (query, alert rules, retention, stats)
+### 前端测试文件
+- `devops-toolkit/frontend/frontend.test.js` - 35 tests (UI 逻辑测试)
 
-### Coverage Target Status
-- **Achieved:** 355 tests across 17 test files (15 non-k8s suites + k8s suites)
-- **Coverage:** ~31% statements, ~26% branches, ~42% functions, ~31% lines
-- **Threshold:** 10% (all tests pass, coverage above threshold)
-- **Files needing more tests:** server.js (HTTP server, requires integration), ldap_auth.js (requires LDAP server), agent.js (file/network I/O)
+### 测试原则
+**集成测试使用真实环境数据:**
+- K8s测试: 连接真实的k3d集群 (dev-cluster-1, dev-cluster-2)
+- 测试节点、Pod、命名空间、日志获取等操作
+- Cordon/Uncordon 操作使用专门的测试节点
+- 不使用 mock 数据，确保测试反映真实使用场景
 
-Current threshold: 10% (practical for current test suite)
+### PRD 需求测试
+- [x] CI/CD smoke_test 阶段测试
+- [x] 部署后验证阶段测试
+- [x] LDAP 连接重试逻辑测试
+- [x] 健康检查验证测试
+- [x] 指标管理器测试 (计数器, 仪表, 直方图, Prometheus 导出)
+- [x] 告警通知管理器测试 (通道, 限流, 历史)
+- [x] WebSocket 管理器测试 (订阅, 广播, 通道)
+- [x] 设备代理测试 (状态, 连接, 配置)
+- [x] 存储后端测试 (Local, Elasticsearch, Loki)
+- [x] 网络发现测试 (SNMP/SSH 设备扫描)
+- [x] 日志管理器测试 (查询, 告警规则, 保留, 统计)
 
 ---
 
-## Files Created/Modified
+## 新建/修改文件
 
-### New Files
-- `devops-toolkit/auth/ldap_auth.js` - LDAP authentication module
-- `devops-toolkit/auth/permission_middleware.js` - Permission enforcement
-- `devops-toolkit/config/ldap.yaml` - LDAP configuration
-- `devops-toolkit/tests/device_state_machine.test.js` - State machine tests (19 tests)
-- `devops-toolkit/tests/permission_middleware.test.js` - Permission tests (21 tests)
-- `devops-toolkit/tests/ldap_auth.test.js` - LDAP auth config tests (24 tests)
-- `devops-toolkit/tests/auth_integration.test.js` - Auth boundary tests (24 tests)
-- `devops-toolkit/tests/pipeline_manager.test.js` - CI/CD stage tests (26 tests)
-- `devops-toolkit/tests/ldap_retry.test.js` - LDAP retry logic tests (20 tests)
-- `devops-toolkit/tests/metrics_manager.test.js` - Metrics manager tests (23 tests)
-- `devops-toolkit/tests/alerts_notification_manager.test.js` - Alert manager tests (21 tests)
-- `devops-toolkit/tests/websocket_manager.test.js` - WebSocket tests (17 tests)
-- `devops-toolkit/tests/agent.test.js` - Device agent tests (21 tests)
-- `devops-toolkit/tests/storage_backends.test.js` - Storage backend tests (27 tests)
-- `devops-toolkit/tests/k8s_cluster_manager.test.js` - K8s cluster manager tests (25 tests)
-- `devops-toolkit/tests/k8s_multi_cluster.test.js` - Multi-cluster operations tests (20 tests)
-- `devops-toolkit/tests/physical_host_manager.test.js` - Physical host manager tests (33 tests)
-- `devops-toolkit/tests/network_discovery.test.js` - Network discovery tests (23 tests)
-- `devops-toolkit/tests/log_manager.test.js` - Log manager tests (47 tests)
-- `devops-toolkit/scripts/run-tests.sh` - Test runner script
-- `devops-toolkit/scripts/integration-test.sh` - Integration test script
-- `devops-toolkit/scripts/k3d-setup.sh` - k3d multi-cluster setup script
-- `devops-toolkit/k8s/cluster_manager.js` - K8s multi-cluster manager
-- `devops-toolkit/k8s/physical_host_manager.js` - Physical host SSH management
-- `devops-toolkit/tests/mocks/k8s-api.mock.js` - K8s API mock for testing
+### 项目管理 (Go)
+- `internal/project/models.go` - 数据模型 (BusinessLine, System, Project, ProjectResource, ProjectPermission)
+- `internal/project/repository.go` - PostgreSQL 仓库和迁移
+- `internal/project/manager.go` - CRUD 处理器和 HTTP 端点
+- `internal/project/manager_test.go` - Go 测试 (24 tests)
 
-### Modified Files
-- `devops-toolkit/devices/device_manager.js` - Complete state machine rewrite
-- `devops-toolkit/package.json` - Updated dependencies and scripts
-- `devops-toolkit/test/jest.config.js` - Fixed coverage paths
-- `TODOS.md` - This document
+### 前端
+- `devops-toolkit/frontend/index.html` - 项目管理页面 UI
+- `devops-toolkit/frontend/frontend.test.js` - 前端测试 (35 tests)
+
+### 修改的文件
+- `cmd/devops-toolkit/main.go` - 添加项目管理路由
+- `TODOS.md` - 本文档
 
 ---
 
-## Configuration Files
+## 配置文件
 
-| File | Purpose |
-|------|---------|
-| `config/ldap.yaml` | LDAP server connection and role mapping |
-| `config/permissions.yaml` | Role-to-permission mapping |
-| `config/pipelines.json` | Pipeline definitions and run history |
-| `config/devices/devices.json` | Device registry |
-| `config/devices/groups.json` | Device groups (auto-created) |
-| `config/logs.json` | Log storage configuration |
+| 文件 | 用途 |
+|------|------|
+| `config/ldap.yaml` | LDAP 服务器连接和角色映射 |
+| `config/permissions.yaml` | 角色到权限的映射 |
+| `config/pipelines.json` | 流水线定义和运行历史 |
+| `config/devices/devices.json` | 设备注册表 |
+| `config/devices/groups.json` | 设备组 (自动创建) |
+| `config/logs.json` | 日志存储配置 |
