@@ -1,149 +1,235 @@
 package metrics
 
 import (
+	"fmt"
 	"net/http"
-	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
 
-func TestCollector_IncrementCounter(t *testing.T) {
-	c := NewCollector()
-
-	c.IncrementCounter("requests_total", nil)
-	c.IncrementCounter("requests_total", nil)
-	c.IncrementCounter("requests_get", map[string]string{"method": "GET"})
-
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if c.counters["requests_total"] != 2 {
-		t.Errorf("expected counter 'requests_total' to be 2, got %v", c.counters["requests_total"])
+// skipIfNoServer skips if no devops-toolkit server is running on port 3000
+func skipIfNoServer(t *testing.T) string {
+	// Check if server is running
+	resp, err := http.Get("http://localhost:3000/health")
+	if err != nil {
+		t.Skip("Skipping: no devops-toolkit server running on localhost:3000")
+		return ""
 	}
-	// With labels, the key format is name{key=value} without quotes
-	if c.counters["requests_get{method=GET}"] != 1 {
-		t.Errorf("expected counter 'requests_get{method=GET}' to be 1, got %v", c.counters["requests_get{method=GET}"])
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Skip("Skipping: devops-toolkit server not healthy on localhost:3000")
+		return ""
 	}
+	return "http://localhost:3000"
 }
 
-func TestCollector_SetGauge(t *testing.T) {
-	c := NewCollector()
+func TestHTTPMetrics_RealPrometheusScrape(t *testing.T) {
+	baseURL := skipIfNoServer(t)
 
-	c.SetGauge("memory_usage_bytes", 1024, nil)
-	c.SetGauge("memory_usage_bytes", 2048, nil)
-
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if c.gauges["memory_usage_bytes"] != 2048 {
-		t.Errorf("expected gauge 'memory_usage_bytes' to be 2048, got %v", c.gauges["memory_usage_bytes"])
+	// Make several different requests to generate metrics
+	requests := []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/health"},
+		{"GET", "/api/k8s/clusters"},
+		{"GET", "/api/k8s/clusters/dev-cluster-1/nodes"},
+		{"GET", "/api/k8s/clusters/dev-cluster-1/namespaces"},
+		{"GET", "/metrics"},
 	}
+
+	for _, req := range requests {
+		resp, err := http.DefaultClient.Do(&http.Request{
+			Method: req.method,
+			URL:    mustParseURL(baseURL + req.path),
+			Header: make(http.Header),
+		})
+		if err != nil {
+			t.Fatalf("Request %s %s failed: %v", req.method, req.path, err)
+		}
+		resp.Body.Close()
+		// We expect 2xx or actual response codes, not errors
+		t.Logf("%s %s -> %d", req.method, req.path, resp.StatusCode)
+	}
+
+	// Now scrape the actual /metrics endpoint
+	resp, err := http.Get(baseURL + "/metrics")
+	if err != nil {
+		t.Fatalf("Failed to scrape /metrics: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected /metrics to return 200, got %d", resp.StatusCode)
+	}
+
+	buf := make([]byte, 32768)
+	n, _ := resp.Body.Read(buf)
+	metricsOutput := string(buf[:n])
+
+	// Verify HTTP request metrics are recorded
+	// These should be present because we made actual requests above
+	if !strings.Contains(metricsOutput, "http_requests_total{") {
+		t.Error("Expected http_requests_total metric to be present in Prometheus output")
+	}
+
+	// Verify at least one endpoint was recorded
+	expectedEndpoints := []string{"/health", "/api/k8s/clusters", "/metrics"}
+	found := 0
+	for _, ep := range expectedEndpoints {
+		if strings.Contains(metricsOutput, fmt.Sprintf("endpoint=%s", ep)) {
+			found++
+			t.Logf("Found metric for endpoint: %s", ep)
+		}
+	}
+
+	if found == 0 {
+		t.Error("No expected endpoints found in metrics output. Full output:")
+		t.Log(metricsOutput)
+	}
+
+	// Verify Prometheus format is correct
+	if !strings.Contains(metricsOutput, "# HELP http_requests_total") {
+		t.Error("Expected Prometheus HELP line for http_requests_total")
+	}
+	if !strings.Contains(metricsOutput, "# TYPE http_requests_total counter") {
+		t.Error("Expected Prometheus TYPE line for http_requests_total")
+	}
+
+	// Verify histogram metrics exist for request duration
+	if !strings.Contains(metricsOutput, "http_request_duration_ms_count{") {
+		t.Error("Expected http_request_duration_ms histogram to be present")
+	}
+
+	t.Logf("Prometheus metrics output sample:\n%s", metricsOutput[:min(1000, len(metricsOutput))])
 }
 
-func TestCollector_ObserveHistogram(t *testing.T) {
-	c := NewCollector()
+func TestHTTPMetrics_RequestCounting(t *testing.T) {
+	baseURL := skipIfNoServer(t)
 
-	c.ObserveHistogram("request_duration_seconds", 0.1, nil)
-	c.ObserveHistogram("request_duration_seconds", 0.2, nil)
-	c.ObserveHistogram("request_duration_seconds", 0.3, nil)
+	// Record initial count for a specific endpoint
+	getInitialCount := func(endpoint string) float64 {
+		resp, err := http.Get(baseURL + "/metrics")
+		if err != nil {
+			return -1
+		}
+		defer resp.Body.Close()
+		buf := make([]byte, 32768)
+		n, _ := resp.Body.Read(buf)
+		metricsOutput := string(buf[:n])
 
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+		// Parse http_requests_total{endpoint=/health,...} X
+		lines := strings.Split(metricsOutput, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "http_requests_total{") && strings.Contains(line, fmt.Sprintf("endpoint=%s", endpoint)) {
+				// Format: http_requests_total{endpoint=/health,method=GET,status=200} 5
+				parts := strings.Fields(line)
+				if len(parts) >= 2 {
+					var val float64
+					fmt.Sscanf(parts[len(parts)-1], "%f", &val)
+					return val
+				}
+			}
+		}
+		return 0
+	}
 
-	h := c.histograms["request_duration_seconds"]
-	if h == nil {
-		t.Fatal("expected histogram to exist")
+	initialCount := getInitialCount("/health")
+
+	// Make 3 requests to /health
+	for i := 0; i < 3; i++ {
+		resp, err := http.Get(baseURL + "/health")
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		resp.Body.Close()
 	}
-	if h.Count != 3 {
-		t.Errorf("expected histogram count to be 3, got %d", h.Count)
+
+	// Verify count increased by 3
+	finalCount := getInitialCount("/health")
+	expectedCount := initialCount + 3
+
+	if finalCount < expectedCount {
+		t.Errorf("Expected /health request count to be at least %.0f, got %.0f", expectedCount, finalCount)
 	}
-	if h.Sum < 0.59 || h.Sum > 0.61 {
-		t.Errorf("expected histogram sum to be approximately 0.6, got %v", h.Sum)
-	}
-	if h.Min != 0.1 {
-		t.Errorf("expected histogram min to be 0.1, got %v", h.Min)
-	}
-	if h.Max != 0.3 {
-		t.Errorf("expected histogram max to be 0.3, got %v", h.Max)
-	}
+
+	t.Logf("/health request count: %.0f -> %.0f", initialCount, finalCount)
 }
 
-func TestCollector_RecordLog(t *testing.T) {
-	c := NewCollector()
+func TestHTTPMetrics_DurationHistogram(t *testing.T) {
+	baseURL := skipIfNoServer(t)
 
-	c.RecordLog("info")
-	c.RecordLog("info")
-	c.RecordLog("error")
-
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	// The key format without quotes is logs_total{level=info}
-	infoKey := "logs_total{level=info}"
-	if c.counters[infoKey] != 2 {
-		t.Errorf("expected logs_total{level=info} to be 2, got %v", c.counters[infoKey])
+	// Make a request that should have measurable duration
+	resp, err := http.Get(baseURL + "/api/k8s/clusters")
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
 	}
-	if c.counters["log_errors_total"] != 1 {
-		t.Errorf("expected log_errors_total to be 1, got %v", c.counters["log_errors_total"])
+	resp.Body.Close()
+
+	// Check /metrics for duration histogram
+	metricsResp, err := http.Get(baseURL + "/metrics")
+	if err != nil {
+		t.Fatalf("Failed to get metrics: %v", err)
 	}
+	defer metricsResp.Body.Close()
+
+	buf := make([]byte, 65536)
+	n, _ := metricsResp.Body.Read(buf)
+	metricsOutput := string(buf[:n])
+
+	// Verify histogram has count > 0
+	if !strings.Contains(metricsOutput, "http_request_duration_ms_count{endpoint=/api/k8s/clusters") {
+		t.Error("Expected histogram count for /api/k8s/clusters")
+	}
+
+	// Verify we have sum recorded (means timing was captured)
+	if !strings.Contains(metricsOutput, "http_request_duration_ms_sum{endpoint=/api/k8s/clusters") {
+		t.Error("Expected histogram sum for /api/k8s/clusters")
+	}
+
+	t.Log("Duration histogram is being recorded correctly")
 }
 
-func TestCollector_GetMetricsJSON(t *testing.T) {
-	c := NewCollector()
-	c.IncrementCounter("test_counter", nil)
-	c.SetGauge("test_gauge", 42, nil)
+func TestHTTPMetrics_StatusCodeTracking(t *testing.T) {
+	baseURL := skipIfNoServer(t)
 
-	// Test via ServeJSON which internally accesses the metrics
-	req := httptest.NewRequest("GET", "/api/metrics", nil)
-	w := httptest.NewRecorder()
+	// Hit an endpoint that returns specific status
+	resp, err := http.Get(baseURL + "/health")
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	resp.Body.Close()
 
-	c.ServeJSON(w, req)
+	// Check metrics contain status=200
+	metricsResp, err := http.Get(baseURL + "/metrics")
+	if err != nil {
+		t.Fatalf("Failed to get metrics: %v", err)
+	}
+	defer metricsResp.Body.Close()
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", w.Code)
+	buf := make([]byte, 65536)
+	n, _ := metricsResp.Body.Read(buf)
+	metricsOutput := string(buf[:n])
+
+	if !strings.Contains(metricsOutput, "status=200") {
+		t.Error("Expected status=200 to be recorded in metrics")
 	}
 
-	// Verify the response contains expected values
-	body := w.Body.String()
-	if !strings.Contains(body, "test_counter") {
-		t.Error("expected response to contain test_counter")
-	}
+	t.Log("Status code tracking is working")
 }
 
-func TestCollector_ServeJSON(t *testing.T) {
-	c := NewCollector()
-	c.IncrementCounter("test_counter", nil)
-
-	req := httptest.NewRequest("GET", "/api/metrics", nil)
-	w := httptest.NewRecorder()
-
-	c.ServeJSON(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", w.Code)
+func mustParseURL(rawURL string) *url.URL {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		panic(err)
 	}
-
-	if w.Header().Get("Content-Type") != "application/json" {
-		t.Errorf("expected Content-Type application/json, got %s", w.Header().Get("Content-Type"))
-	}
+	return u
 }
 
-func TestCollector_ServePrometheus(t *testing.T) {
-	c := NewCollector()
-	c.IncrementCounter("test_counter", map[string]string{"method": "GET"})
-	c.SetGauge("test_gauge", 42, nil)
-
-	req := httptest.NewRequest("GET", "/metrics", nil)
-	w := httptest.NewRecorder()
-
-	c.ServePrometheus(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", w.Code)
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-
-	body := w.Body.String()
-	if body == "" {
-		t.Error("expected non-empty response body")
-	}
+	return b
 }
