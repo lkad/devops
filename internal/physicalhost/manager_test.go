@@ -1,3 +1,7 @@
+// Package physicalhost tests
+// NOTE: These are DEV TESTS - may use httptest mocks for fast local development.
+// For QA tests with real environment, see manager_integration_test.go
+
 package physicalhost
 
 import (

@@ -22,13 +22,13 @@ else
     echo "To install k3d: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash"
 fi
 
-# Check if Docker is available for LDAP
+# Check if Docker is available for LDAP and PostgreSQL
 if command -v docker >/dev/null 2>&1; then
-    echo "Docker found. Starting test LDAP server..."
+    echo "Docker found. Starting test services..."
     (cd /mnt/devops && docker compose up -d) || true
-    echo "LDAP server started."
+    echo "LDAP and PostgreSQL started."
 else
-    echo "Docker not found. Skipping LDAP setup."
+    echo "Docker not found. Skipping LDAP and PostgreSQL setup."
 fi
 
 echo ""

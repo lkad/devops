@@ -304,26 +304,44 @@ fetch('/api/org/business-lines')
 - 生产环境按标准K8s集群处理，所有操作相同
 - Cluster数据结构的`Type`字段替代原有的`Provider`字段
 
-### 3. 集成测试规范
+### 3. 测试规范
 
-**测试阶段使用真实环境数据，不使用Mock。**
+测试分为两类：
+
+#### 3.1 开发测试 (DEV Tests)
+- 文件命名：`*_test.go`
+- 目的：本地快速开发验证
+- **允许使用 httptest mock**
+- 适用于：单元测试、handler逻辑测试
+
+#### 3.2 QA测试 (QA Tests)
+- 文件命名：`*_integration_test.go`
+- 目的：真实环境验证，CI/CD使用
+- **禁止使用 mock，必须真实HTTP请求**
+- 必须连接真实依赖服务（PostgreSQL、k3d等）
+- 使用 `skipIf*()` 辅助函数，依赖不可用时自动跳过
+
+```go
+// DEV测试 - 可以使用mock
+func TestManager_QueryLogsHTTP(t *testing.T) {
+    m := NewManager(cfg, nil)  // 直接实例化，不走网络
+    req := httptest.NewRequest("GET", "/api/logs", nil)
+    w := httptest.NewRecorder()
+    m.QueryLogsHTTP(w, req)  // 直接调用handler
+}
+
+// QA测试 - 必须真实HTTP请求
+func TestProjectAPI_BusinessLines_CreateAndList(t *testing.T) {
+    baseURL := skipIfNoProjectDeps(t)  // 检查依赖
+    resp, err := http.Get(baseURL + "/api/org/business-lines")  // 真实HTTP
+    // ...
+}
+```
 
 测试原则：
 - K8s测试：连接真实的k3d集群进行功能验证
-- 测试覆盖：节点操作、Pod管理、日志获取、Cordon/Uncordon等
-- 不使用mock数据，确保测试反映真实使用场景
-- 集成测试使用`skipIfNoK8s()`辅助函数，无集群时自动跳过
-
-```go
-func skipIfNoK8s(t *testing.T) string {
-    // 检查kubeconfig是否存在
-    kubeconfig := os.Getenv("HOME") + "/.kube/config-dev-cluster-1"
-    if _, err := os.Stat(kubeconfig); os.IsNotExist(err) {
-        t.Skip("Skipping: no k3d cluster")
-    }
-    return kubeconfig
-}
-```
+- Metrics测试：从实际运行的服务器抓取 `/metrics` 端点
+- 使用 `skipIfNoK8s()` / `skipIfNoServer()` 等辅助函数，无环境时自动跳过
 
 ### 4. 代码设计原则
 

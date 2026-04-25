@@ -1,4 +1,4 @@
-version: '3.8'
+version: '2.4'
 
 services:
   ldap:
@@ -18,3 +18,19 @@ services:
     volumes:
       - ./bootstrap.ldif:/container/service/slapd/assets/config/bootstrap.ldif:ro
     restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: devops-postgres
+    environment:
+      - POSTGRES_USER=devops
+      - POSTGRES_PASSWORD=devops
+      - POSTGRES_DB=devops_toolkit
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
