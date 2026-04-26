@@ -14,6 +14,16 @@ type Config struct {
 	LDAP     LDAPConfig     `yaml:"ldap"`
 	Logs     LogsConfig     `yaml:"logs"`
 	K8s      K8sConfig      `yaml:"k8s"`
+	Auth     AuthConfig     `yaml:"auth"`
+}
+
+type AuthConfig struct {
+	JWTSecret        string   `yaml:"jwt_secret"`
+	SessionDuration  string   `yaml:"session_duration"`
+	DevBypass        bool     `yaml:"dev_bypass"`
+	DevUsername      string   `yaml:"dev_username"`
+	DevPassword      string   `yaml:"dev_password"`
+	DevRoles         []string `yaml:"dev_roles"`
 }
 
 type ServerConfig struct {
@@ -65,6 +75,52 @@ type K8sConfig struct {
 	KubePath string `yaml:"kubeconfig_path"`
 }
 
+func splitRoles(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var roles []string
+	for _, r := range splitString(s) {
+		if r := trim(r); r != "" {
+			roles = append(roles, r)
+		}
+	}
+	return roles
+}
+
+func splitString(s string) []string {
+	var result []string
+	var curr []byte
+	for _, c := range s {
+		if c == ',' {
+			if len(curr) > 0 {
+				result = append(result, string(curr))
+				curr = nil
+			}
+		} else {
+			curr = append(curr, byte(c))
+		}
+	}
+	if len(curr) > 0 {
+		result = append(result, string(curr))
+	}
+	return result
+}
+
+func trim(s string) string {
+	i, j := 0, len(s)-1
+	for i <= j && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	for j >= i && (s[j] == ' ' || s[j] == '\t') {
+		j--
+	}
+	if i > j {
+		return ""
+	}
+	return s[i : j+1]
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -103,6 +159,19 @@ func Load(path string) (*Config, error) {
 	if backend := os.Getenv("LOG_STORAGE_BACKEND"); backend != "" {
 		cfg.Logs.Backend = backend
 	}
+	// Dev auth bypass
+	if bypass := os.Getenv("DEVOPS_AUTH_BYPASS"); bypass == "true" {
+		cfg.Auth.DevBypass = true
+	}
+	if devUser := os.Getenv("DEVOPS_DEV_USERNAME"); devUser != "" {
+		cfg.Auth.DevUsername = devUser
+	}
+	if devPass := os.Getenv("DEVOPS_DEV_PASSWORD"); devPass != "" {
+		cfg.Auth.DevPassword = devPass
+	}
+	if devRoles := os.Getenv("DEVOPS_DEV_ROLES"); devRoles != "" {
+		cfg.Auth.DevRoles = splitRoles(devRoles)
+	}
 
 	// Defaults
 	if cfg.Server.Port == 0 {
@@ -119,6 +188,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.K8s.Provider == "" {
 		cfg.K8s.Provider = "k3d"
+	}
+	if cfg.Auth.SessionDuration == "" {
+		cfg.Auth.SessionDuration = "8h"
+	}
+	if cfg.Auth.JWTSecret == "" {
+		cfg.Auth.JWTSecret = "devops-toolkit-change-in-production"
 	}
 
 	return &cfg, nil

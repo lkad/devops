@@ -18,3 +18,15 @@ logs:
 k8s:
   provider: "k3d"
   kubeconfig_path: "./data/kubeconfig"
+
+# Development bypass mode - DO NOT USE IN PRODUCTION
+# Set dev_bypass: true OR environment variable DEVOPS_AUTH_BYPASS=true
+# Then set dev_username and dev_password for local authentication without LDAP
+auth:
+  jwt_secret: "devops-toolkit-change-in-production"
+  session_duration: "8h"
+  dev_bypass: false
+  dev_username: "dev"
+  dev_password: "dev"
+  dev_roles:
+    - "Developer"

@@ -17,6 +17,8 @@ import (
 	"github.com/devops-toolkit/internal/logs"
 	"github.com/devops-toolkit/internal/metrics"
 	"github.com/devops-toolkit/internal/alerts"
+	"github.com/devops-toolkit/internal/auth"
+	"github.com/devops-toolkit/internal/auth/ldap"
 	"github.com/devops-toolkit/internal/pipeline"
 	"github.com/devops-toolkit/internal/k8s"
 	"github.com/devops-toolkit/internal/discovery"
@@ -49,6 +51,16 @@ func main() {
 	// Initialize managers
 	wsHub := websocket.NewHub()
 	go wsHub.Run()
+
+	// Initialize LDAP client (uses env vars: LDAP_URL, LDAP_BASE_DN, etc.)
+	ldapClient, err := ldap.NewClient(ldap.DefaultConfig())
+	if err != nil {
+		log.Printf("Warning: LDAP client unavailable: %v", err)
+		ldapClient = nil
+	}
+
+	// Initialize auth handler
+	authHandler := auth.NewHandler(ldapClient, &cfg.Auth)
 
 	deviceMgr, err := device.NewManager(cfg.Database.DSN())
 	if err != nil {
@@ -98,6 +110,11 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 	})
+
+	// Auth routes
+	r.HandleFunc("/api/auth/login", authHandler.Login)
+	r.HandleFunc("/api/auth/logout", authHandler.Logout)
+	r.HandleFunc("/api/auth/me", authHandler.Me)
 
 	// Device routes
 	r.HandleFunc("/api/devices", func(w http.ResponseWriter, r *http.Request) {
@@ -314,16 +331,31 @@ func main() {
 	// Static files (frontend)
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
-	frontendDir := filepath.Join(exeDir, "frontend")
+	frontendDir := filepath.Join(exeDir, "frontend", "dist")
 	if _, err := os.Stat(frontendDir); err == nil {
 		r.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendDir)))
 		log.Printf("Serving static files from %s", frontendDir)
 	} else {
-		// Fallback: try relative path from current working directory
-		if _, err := os.Stat("./devops-toolkit/frontend"); err == nil {
-			r.PathPrefix("/").Handler(http.FileServer(http.Dir("./devops-toolkit/frontend")))
-			log.Printf("Serving static files from ./devops-toolkit/frontend")
+		// Fallback: try frontend without dist
+		frontendDir = filepath.Join(exeDir, "frontend")
+		if _, err := os.Stat(frontendDir); err == nil {
+			r.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendDir)))
+			log.Printf("Serving static files from %s", frontendDir)
+		} else {
+			// Fallback: try relative path from current working directory
+			if _, err := os.Stat("./devops-toolkit/frontend/dist"); err == nil {
+				r.PathPrefix("/").Handler(http.FileServer(http.Dir("./devops-toolkit/frontend/dist")))
+				log.Printf("Serving static files from ./devops-toolkit/frontend/dist")
+			} else if _, err := os.Stat("./devops-toolkit/frontend"); err == nil {
+				r.PathPrefix("/").Handler(http.FileServer(http.Dir("./devops-toolkit/frontend")))
+				log.Printf("Serving static files from ./devops-toolkit/frontend")
+			}
 		}
+	}
+
+	// Add JWT auth middleware for API routes (if LDAP is available or dev bypass enabled)
+	if ldapClient != nil || cfg.Auth.DevBypass {
+		r.Use(auth.Middleware(&cfg.Auth))
 	}
 
 	// Start server
