@@ -19,6 +19,67 @@ func uniqueName(prefix string) string {
 
 // skipIfNoDeps skips if server is not running or project routes are not available
 func skipIfNoProjectDeps(t *testing.T) string {
+	baseURL := checkProjectServer(t)
+	if baseURL == "" {
+		return ""
+	}
+	cleanupTestData(t, baseURL)
+	return baseURL
+}
+
+// cleanupTestData removes test data before running tests
+func cleanupTestData(t *testing.T, baseURL string) {
+	// Get all business lines
+	resp, err := http.Get(baseURL + "/api/org/business-lines?per_page=100")
+	if err != nil {
+		t.Logf("Warning: could not fetch business lines for cleanup: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Logf("Warning: could not decode response for cleanup: %v", err)
+		return
+	}
+
+	data, ok := result["data"].([]interface{})
+	if !ok {
+		return
+	}
+
+	// Delete business lines starting with "test-"
+	client := &http.Client{}
+	for _, item := range data {
+		bl, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, ok := bl["name"].(string)
+		if !ok {
+			continue
+		}
+		if !strings.HasPrefix(name, "test-") {
+			continue
+		}
+		id, ok := bl["id"].(string)
+		if !ok {
+			continue
+		}
+		req, err := http.NewRequest("DELETE", baseURL+"/api/org/business-lines/"+id, nil)
+		if err != nil {
+			continue
+		}
+		client.Do(req)
+	}
+}
+
+// checkProjectServer verifies the server is running and project routes are available
+func checkProjectServer(t *testing.T) string {
 	// Check if server is running and project routes are registered
 	resp, err := http.Get("http://localhost:3000/health")
 	if err != nil {
@@ -50,6 +111,7 @@ func skipIfNoProjectDeps(t *testing.T) string {
 
 	return "http://localhost:3000"
 }
+
 
 // TestProjectAPI_BusinessLines_CreateAndList tests creating and listing business lines via real HTTP
 func TestProjectAPI_BusinessLines_CreateAndList(t *testing.T) {
