@@ -364,12 +364,21 @@ func (m *ClusterManager) GetPods(clusterName, namespace string) ([]Pod, error) {
 		ready := fmt.Sprintf("%d/%d", countReady(p.Status.Conditions), len(p.Spec.Containers))
 
 		cpu := "0"
-		if cpuReq := p.Spec.Containers[0].Resources.Requests.Cpu(); !cpuReq.IsZero() {
-			cpu = cpuReq.String()
+		if len(p.Spec.Containers) > 0 {
+			if cpuReq := p.Spec.Containers[0].Resources.Requests.Cpu(); !cpuReq.IsZero() {
+				cpu = cpuReq.String()
+			}
 		}
 		memory := "0"
-		if memReq := p.Spec.Containers[0].Resources.Requests.Memory(); !memReq.IsZero() {
-			memory = memReq.String()
+		if len(p.Spec.Containers) > 0 {
+			if memReq := p.Spec.Containers[0].Resources.Requests.Memory(); !memReq.IsZero() {
+				memory = memReq.String()
+			}
+		}
+
+		restarts := 0
+		if len(p.Status.ContainerStatuses) > 0 {
+			restarts = int(p.Status.ContainerStatuses[0].RestartCount)
 		}
 
 		result = append(result, Pod{
@@ -377,7 +386,7 @@ func (m *ClusterManager) GetPods(clusterName, namespace string) ([]Pod, error) {
 			Namespace: p.Namespace,
 			Ready:     ready,
 			Status:    string(p.Status.Phase),
-			Restarts:  int(p.Status.ContainerStatuses[0].RestartCount),
+			Restarts:  restarts,
 			CPU:       cpu,
 			Memory:    memory,
 			Age:       time.Since(p.CreationTimestamp.Time).Round(time.Hour).String(),
