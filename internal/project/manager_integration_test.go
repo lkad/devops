@@ -4,11 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
+
+// uniqueName generates a unique name for test data
+func uniqueName(prefix string) string {
+	return fmt.Sprintf("%s-%d-%d", prefix, time.Now().UnixNano(), rand.Intn(9999))
+}
 
 // skipIfNoDeps skips if server is not running or project routes are not available
 func skipIfNoProjectDeps(t *testing.T) string {
@@ -48,8 +55,9 @@ func skipIfNoProjectDeps(t *testing.T) string {
 func TestProjectAPI_BusinessLines_CreateAndList(t *testing.T) {
 	baseURL := skipIfNoProjectDeps(t)
 
-	// Create a business line
-	createPayload := `{"name":"test-bl-integration","description":"integration test business line"}`
+	// Create a business line with unique name
+	blName := uniqueName("test-bl-integration")
+	createPayload := fmt.Sprintf(`{"name":"%s","description":"integration test business line"}`, blName)
 	resp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(createPayload))
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
@@ -104,8 +112,9 @@ func TestProjectAPI_BusinessLines_CreateAndList(t *testing.T) {
 func TestProjectAPI_BusinessLines_Get(t *testing.T) {
 	baseURL := skipIfNoProjectDeps(t)
 
-	// Create a business line first
-	createPayload := `{"name":"test-bl-get","description":"test get"}`
+	// Create a business line first with unique name
+	blName := uniqueName("test-bl-get")
+	createPayload := fmt.Sprintf(`{"name":"%s","description":"test get"}`, blName)
 	resp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(createPayload))
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
@@ -138,8 +147,8 @@ func TestProjectAPI_BusinessLines_Get(t *testing.T) {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	if result["name"] != "test-bl-get" {
-		t.Errorf("Expected name 'test-bl-get', got '%v'", result["name"])
+	if result["name"] != blName {
+		t.Errorf("Expected name '%s', got '%v'", blName, result["name"])
 	}
 }
 
@@ -147,8 +156,9 @@ func TestProjectAPI_BusinessLines_Get(t *testing.T) {
 func TestProjectAPI_Systems_CRUD(t *testing.T) {
 	baseURL := skipIfNoProjectDeps(t)
 
-	// First create a business line
-	blPayload := `{"name":"test-bl-for-system","description":"test"}`
+	// First create a business line with unique name
+	blName := uniqueName("test-bl-for-system")
+	blPayload := fmt.Sprintf(`{"name":"%s","description":"test"}`, blName)
 	blResp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(blPayload))
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
@@ -163,8 +173,9 @@ func TestProjectAPI_Systems_CRUD(t *testing.T) {
 		t.Fatal("Failed to get business line ID")
 	}
 
-	// Create a system
-	sysPayload := fmt.Sprintf(`{"name":"test-system","description":"integration test system","business_line_id":"%s"}`, blID)
+	// Create a system with unique name
+	sysName := uniqueName("test-system")
+	sysPayload := fmt.Sprintf(`{"name":"%s","description":"integration test system","business_line_id":"%s"}`, sysName, blID)
 	sysResp, err := http.Post(baseURL+"/api/org/business-lines/"+blID+"/systems", "application/json", strings.NewReader(sysPayload))
 	if err != nil {
 		t.Fatalf("Failed to create system: %v", err)
@@ -193,8 +204,9 @@ func TestProjectAPI_Systems_CRUD(t *testing.T) {
 func TestProjectAPI_Projects_CRUD(t *testing.T) {
 	baseURL := skipIfNoProjectDeps(t)
 
-	// Create business line -> system -> project hierarchy
-	blPayload := `{"name":"test-bl-hierarchy","description":"test"}`
+	// Create business line -> system -> project hierarchy with unique names
+	blName := uniqueName("test-bl-hierarchy")
+	blPayload := fmt.Sprintf(`{"name":"%s","description":"test"}`, blName)
 	blResp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(blPayload))
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
@@ -209,7 +221,8 @@ func TestProjectAPI_Projects_CRUD(t *testing.T) {
 		t.Fatal("Failed to get business line ID")
 	}
 
-	sysPayload := fmt.Sprintf(`{"name":"test-sys-hierarchy","description":"test","business_line_id":"%s"}`, blID)
+	sysName := uniqueName("test-sys-hierarchy")
+	sysPayload := fmt.Sprintf(`{"name":"%s","description":"test","business_line_id":"%s"}`, sysName, blID)
 	sysResp, err := http.Post(baseURL+"/api/org/business-lines/"+blID+"/systems", "application/json", strings.NewReader(sysPayload))
 	if err != nil {
 		t.Fatalf("Failed to create system: %v", err)
@@ -224,8 +237,9 @@ func TestProjectAPI_Projects_CRUD(t *testing.T) {
 		t.Fatal("Failed to get system ID")
 	}
 
-	// Create a project
-	projPayload := fmt.Sprintf(`{"name":"test-project","type":"backend","description":"integration test","system_id":"%s"}`, sysID)
+	// Create a project with unique name
+	projName := uniqueName("test-project")
+	projPayload := fmt.Sprintf(`{"name":"%s","type":"backend","description":"integration test","system_id":"%s"}`, projName, sysID)
 	projResp, err := http.Post(baseURL+"/api/org/systems/"+sysID+"/projects", "application/json", strings.NewReader(projPayload))
 	if err != nil {
 		t.Fatalf("Failed to create project: %v", err)
