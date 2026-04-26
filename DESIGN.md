@@ -81,3 +81,33 @@
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-04-19 | Initial design system created | Created by /design-consultation based on product context (SRE dashboard, dark theme, dual-datacenter infrastructure) |
+
+## Multi-Cluster Kubernetes UI
+
+### Environment Color Coding
+Clusters must be visually distinguished by environment type using the following color scheme:
+
+| Environment | Background | Border | Label |
+|------------|------------|--------|-------|
+| dev | rgba(59, 130, 246, 0.15) | #3b82f6 | 开发 |
+| test | rgba(245, 158, 11, 0.15) | #f59e0b | 测试 |
+| uat | rgba(168, 85, 247, 0.15) | #a855f7 | UAT |
+| prod | rgba(239, 68, 68, 0.15) | #ef4444 | 生产 |
+| default | rgba(148, 163, 184, 0.1) | #94a3b8 | 标准 |
+
+### Filtering Requirements
+- **Search input**: Filter clusters by name (case-insensitive substring match)
+- **Environment dropdown**: Filter by environment type (dev/test/uat/prod)
+- Both filters work together (AND logic)
+- Filtered results update in real-time as user types/selects
+
+### Selected Cluster Highlighting
+- Selected cluster has a cyan border (3px solid #22d3ee)
+- Selected cluster has a cyan glow shadow: `box-shadow: 0 0 20px rgba(34, 211, 238, 0.3)`
+- Selected cluster has a cyan dot indicator in top-right corner
+
+### Implementation Notes
+- Cluster type is determined by parsing the `type` field (case-insensitive match for keywords: dev, test, uat, prod)
+- All clusters stored in `allK8sClusters` global variable for client-side filtering
+- `filterK8sClusters()` function handles both search and environment filtering
+- `getEnvStyle()` returns appropriate color scheme based on cluster type
