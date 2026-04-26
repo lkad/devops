@@ -22,7 +22,9 @@ func Middleware(cfg *config.AuthConfig) func(http.Handler) http.Handler {
 				path == "/health" ||
 				path == "/metrics" ||
 				path == "/" ||
-				strings.HasPrefix(path, "/api/") && r.Method == http.MethodOptions {
+				strings.HasPrefix(path, "/assets/") ||
+				strings.HasPrefix(path, "/favicon") ||
+				(strings.HasPrefix(path, "/api/") && r.Method == http.MethodOptions) {
 				next.ServeHTTP(w, r)
 				return
 			}
