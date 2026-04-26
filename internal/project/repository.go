@@ -96,6 +96,23 @@ func (r *Repository) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_project_resources_type ON project_resources(resource_type);
 	CREATE INDEX IF NOT EXISTS idx_project_permissions_subject ON project_permissions(subject);
 	CREATE INDEX IF NOT EXISTS idx_project_permissions_level ON project_permissions(level);
+
+	CREATE TABLE IF NOT EXISTS audit_logs (
+		id TEXT PRIMARY KEY,
+		timestamp TIMESTAMP DEFAULT NOW(),
+		username TEXT NOT NULL,
+		action TEXT NOT NULL,
+		entity_type TEXT NOT NULL,
+		entity_id TEXT NOT NULL,
+		entity_name TEXT,
+		changes TEXT,
+		old_value TEXT,
+		new_value TEXT,
+		ip_address TEXT
+	);
+	CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp DESC);
+	CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_type, entity_id);
+	CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_logs(username);
 	`
 	_, err := r.db.Exec(schema)
 	return err
@@ -571,4 +588,95 @@ func ValidateRole(r string) bool {
 // ValidateLevel validates permission level
 func ValidateLevel(l string) bool {
 	return strings.HasPrefix(l, "project") || strings.HasPrefix(l, "system") || strings.HasPrefix(l, "business_line")
+}
+
+// AuditLog CRUD
+func (r *Repository) CreateAuditLog(log *AuditLog) error {
+	query := `INSERT INTO audit_logs (id, timestamp, username, action, entity_type, entity_id, entity_name, changes, old_value, new_value, ip_address)
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+	_, err := r.db.Exec(query, log.ID, log.Timestamp, log.Username, log.Action, log.EntityType, log.EntityID, log.EntityName, log.Changes, log.OldValue, log.NewValue, log.IPAddress)
+	return err
+}
+
+func (r *Repository) ListAuditLogs(entityType, entityID, username string, limit, offset int) ([]*AuditLog, int, error) {
+	// Build count query
+	countQuery := `SELECT COUNT(*) FROM audit_logs WHERE 1=1`
+	args := []interface{}{}
+	argIdx := 1
+
+	if entityType != "" {
+		countQuery += ` AND entity_type = $` + string(rune('0'+argIdx))
+		args = append(args, entityType)
+		argIdx++
+	}
+	if entityID != "" {
+		countQuery += ` AND entity_id = $` + string(rune('0'+argIdx))
+		args = append(args, entityID)
+		argIdx++
+	}
+	if username != "" {
+		countQuery += ` AND username = $` + string(rune('0'+argIdx))
+		args = append(args, username)
+		argIdx++
+	}
+
+	var total int
+	if err := r.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// Build select query
+	selectQuery := `SELECT id, timestamp, username, action, entity_type, entity_id, entity_name, changes, old_value, new_value, ip_address
+	                FROM audit_logs WHERE 1=1`
+	args = []interface{}{}
+	argIdx = 1
+
+	if entityType != "" {
+		selectQuery += ` AND entity_type = $` + string(rune('0'+argIdx))
+		args = append(args, entityType)
+		argIdx++
+	}
+	if entityID != "" {
+		selectQuery += ` AND entity_id = $` + string(rune('0'+argIdx))
+		args = append(args, entityID)
+		argIdx++
+	}
+	if username != "" {
+		selectQuery += ` AND username = $` + string(rune('0'+argIdx))
+		args = append(args, username)
+		argIdx++
+	}
+
+	selectQuery += ` ORDER BY timestamp DESC LIMIT $` + string(rune('0'+argIdx)) + ` OFFSET $` + string(rune('0'+argIdx+1))
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(selectQuery, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var results []*AuditLog
+	for rows.Next() {
+		log := &AuditLog{}
+		if err := rows.Scan(&log.ID, &log.Timestamp, &log.Username, &log.Action, &log.EntityType, &log.EntityID, &log.EntityName, &log.Changes, &log.OldValue, &log.NewValue, &log.IPAddress); err != nil {
+			return nil, 0, err
+		}
+		results = append(results, log)
+	}
+	return results, total, nil
+}
+
+func (r *Repository) GetAuditLog(id string) (*AuditLog, error) {
+	query := `SELECT id, timestamp, username, action, entity_type, entity_id, entity_name, changes, old_value, new_value, ip_address
+	          FROM audit_logs WHERE id = $1`
+	log := &AuditLog{}
+	err := r.db.QueryRow(query, id).Scan(&log.ID, &log.Timestamp, &log.Username, &log.Action, &log.EntityType, &log.EntityID, &log.EntityName, &log.Changes, &log.OldValue, &log.NewValue, &log.IPAddress)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return log, nil
 }

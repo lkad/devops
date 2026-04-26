@@ -1225,6 +1225,7 @@ Business Line,System,Project Type,Project,Resource Type,Count,Unit
 | `/api/org/projects/:id/permissions` | GET/POST | List/grant permissions |
 | `/api/org/permissions/:perm_id` | DELETE | Revoke permission |
 | `/api/org/reports/finops` | GET | FinOps CSV export |
+| `/api/org/audit-logs` | GET | Query audit logs |
 
 ### 13.7 Data Model
 
@@ -1233,3 +1234,54 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full data model details.
 ### 13.8 Design Document
 
 Full design: `~/.gstack/projects/devops-toolkit/vagrant-main-design-20260424.md`
+
+### 13.9 Audit Logging
+
+All CRUD operations on project management entities are logged to the audit trail for compliance and security auditing.
+
+#### Audited Operations
+
+| Entity Type | Actions | Description |
+|-------------|---------|-------------|
+| `business_line` | create, update, delete | Business line CRUD |
+| `system` | create, update, delete | System CRUD |
+| `project` | create, update, delete | Project CRUD |
+| `resource_link` | create, delete | Resource linking/unlinking |
+| `permission` | create, delete | Permission grant/revoke |
+
+#### Audit Log Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier (UUID) |
+| `timestamp` | datetime | When the action occurred |
+| `username` | string | User who performed the action |
+| `action` | enum | `create`, `update`, `delete` |
+| `entity_type` | string | Type of entity affected |
+| `entity_id` | string | ID of the affected entity |
+| `entity_name` | string | Human-readable name of entity |
+| `changes` | string | Description of changes made |
+| `old_value` | string | Previous value (for updates) |
+| `new_value` | string | New value (for updates) |
+| `ip_address` | string | Client IP address |
+
+#### API Endpoint
+
+```
+GET /api/org/audit-logs
+```
+
+Query parameters:
+- `entity_type` — Filter by entity type
+- `entity_id` — Filter by entity ID
+- `username` — Filter by username
+- `limit` — Page size (default 20)
+- `offset` — Pagination offset
+
+#### Frontend Interface
+
+The audit log viewer page (`/audit-logs`) provides:
+- Filter bar: entity type dropdown, entity ID input, username input
+- Table with columns: timestamp, user, action (color-coded badges), entity type, entity name, changes
+- Pagination controls
+- Color-coded action badges: green (create), blue (update), red (delete)

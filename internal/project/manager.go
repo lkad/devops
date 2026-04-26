@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/devops-toolkit/internal/auth"
 	"github.com/gorilla/mux"
 )
 
@@ -85,6 +86,15 @@ func (m *Manager) CreateBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		auditLog := NewAuditLog(user.Username, ActionCreate, "business_line", bl.ID, bl.Name)
+		auditLog.NewValue = input.Name
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(bl)
@@ -124,6 +134,9 @@ func (m *Manager) UpdateBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	oldName := bl.Name
+	oldDesc := bl.Description
 	if input.Name != "" {
 		bl.Name = input.Name
 	}
@@ -132,15 +145,44 @@ func (m *Manager) UpdateBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		changes := fmt.Sprintf("name: %s -> %s, description: %s -> %s", oldName, bl.Name, oldDesc, bl.Description)
+		auditLog := NewAuditLog(user.Username, ActionUpdate, "business_line", bl.ID, bl.Name)
+		auditLog.Changes = changes
+		auditLog.OldValue = oldName
+		auditLog.NewValue = bl.Name
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(bl)
 }
 
 func (m *Manager) DeleteBusinessLineHTTP(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	bl, err := m.repo.GetBusinessLine(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if bl == nil {
+		http.Error(w, "business line not found", http.StatusNotFound)
+		return
+	}
 	if err := m.repo.DeleteBusinessLine(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		auditLog := NewAuditLog(user.Username, ActionDelete, "business_line", id, bl.Name)
+		auditLog.OldValue = bl.Name
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -200,6 +242,15 @@ func (m *Manager) CreateSystemHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		auditLog := NewAuditLog(user.Username, ActionCreate, "system", sys.ID, sys.Name)
+		auditLog.NewValue = input.Name
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(sys)
@@ -239,6 +290,9 @@ func (m *Manager) UpdateSystemHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	oldName := sys.Name
+	oldDesc := sys.Description
 	if input.Name != "" {
 		sys.Name = input.Name
 	}
@@ -247,15 +301,44 @@ func (m *Manager) UpdateSystemHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		changes := fmt.Sprintf("name: %s -> %s, description: %s -> %s", oldName, sys.Name, oldDesc, sys.Description)
+		auditLog := NewAuditLog(user.Username, ActionUpdate, "system", sys.ID, sys.Name)
+		auditLog.Changes = changes
+		auditLog.OldValue = oldName
+		auditLog.NewValue = sys.Name
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(sys)
 }
 
 func (m *Manager) DeleteSystemHTTP(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	sys, err := m.repo.GetSystem(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if sys == nil {
+		http.Error(w, "system not found", http.StatusNotFound)
+		return
+	}
 	if err := m.repo.DeleteSystem(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		auditLog := NewAuditLog(user.Username, ActionDelete, "system", id, sys.Name)
+		auditLog.OldValue = sys.Name
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -320,6 +403,15 @@ func (m *Manager) CreateProjectHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		auditLog := NewAuditLog(user.Username, ActionCreate, "project", proj.ID, proj.Name)
+		auditLog.NewValue = fmt.Sprintf("%s (%s)", input.Name, input.Type)
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(proj)
@@ -360,6 +452,10 @@ func (m *Manager) UpdateProjectHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	oldName := proj.Name
+	oldType := proj.Type
+	oldDesc := proj.Description
 	if input.Name != "" {
 		proj.Name = input.Name
 	}
@@ -371,15 +467,45 @@ func (m *Manager) UpdateProjectHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		changes := fmt.Sprintf("name: %s -> %s, type: %s -> %s, description: %s -> %s",
+			oldName, proj.Name, oldType, proj.Type, oldDesc, proj.Description)
+		auditLog := NewAuditLog(user.Username, ActionUpdate, "project", proj.ID, proj.Name)
+		auditLog.Changes = changes
+		auditLog.OldValue = fmt.Sprintf("%s (%s)", oldName, oldType)
+		auditLog.NewValue = fmt.Sprintf("%s (%s)", proj.Name, proj.Type)
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(proj)
 }
 
 func (m *Manager) DeleteProjectHTTP(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	proj, err := m.repo.GetProject(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if proj == nil {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
 	if err := m.repo.DeleteProject(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		auditLog := NewAuditLog(user.Username, ActionDelete, "project", id, proj.Name)
+		auditLog.OldValue = fmt.Sprintf("%s (%s)", proj.Name, proj.Type)
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -432,6 +558,15 @@ func (m *Manager) LinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		auditLog := NewAuditLog(user.Username, ActionCreate, "resource_link", pr.ID, proj.Name)
+		auditLog.NewValue = fmt.Sprintf("%s: %s", input.ResourceType, input.ResourceID)
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(pr)
@@ -440,9 +575,35 @@ func (m *Manager) LinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 func (m *Manager) UnlinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	resourceID := mux.Vars(r)["resource_id"]
+	pr, err := m.repo.GetProjectResource(id, resourceID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if pr == nil {
+		http.Error(w, "resource not found", http.StatusNotFound)
+		return
+	}
+	proj, err := m.repo.GetProject(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if proj == nil {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
 	if err := m.repo.DeleteProjectResource(id, resourceID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		auditLog := NewAuditLog(user.Username, ActionDelete, "resource_link", pr.ID, proj.Name)
+		auditLog.OldValue = fmt.Sprintf("%s: %s", pr.ResourceType, pr.ResourceID)
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -507,6 +668,15 @@ func (m *Manager) GrantPermissionHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Audit log
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		auditLog := NewAuditLog(user.Username, ActionCreate, "permission", perm.ID, fmt.Sprintf("%s on %s", input.Role, level))
+		auditLog.NewValue = fmt.Sprintf("%s: %s (%s)", input.Role, input.Subject, level)
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(perm)
@@ -514,6 +684,23 @@ func (m *Manager) GrantPermissionHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (m *Manager) RevokePermissionHTTP(w http.ResponseWriter, r *http.Request) {
 	permID := mux.Vars(r)["perm_id"]
+
+	// Get permission details before deletion for audit log
+	perms, err := m.repo.ListPermissionsBySubject("")
+	if err == nil {
+		for _, p := range perms {
+			if p.ID == permID {
+				if user := auth.GetUserFromContext(r.Context()); user != nil {
+					auditLog := NewAuditLog(user.Username, ActionDelete, "permission", permID, fmt.Sprintf("%s on %s", p.Role, p.Level))
+					auditLog.OldValue = fmt.Sprintf("%s: %s (%s)", p.Role, p.Subject, p.Level)
+					auditLog.IPAddress = getClientIP(r)
+					m.repo.CreateAuditLog(auditLog)
+				}
+				break
+			}
+		}
+	}
+
 	if err := m.repo.DeletePermission(permID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -574,4 +761,47 @@ func (m *Manager) CheckPermission(subject string, projectID string, requiredRole
 		RoleAdmin:  3,
 	}
 	return roleWeight[role] >= roleWeight[requiredRole], nil
+}
+
+// AuditLog handlers
+func (m *Manager) ListAuditLogsHTTP(w http.ResponseWriter, r *http.Request) {
+	entityType := r.URL.Query().Get("entity_type")
+	entityID := r.URL.Query().Get("entity_id")
+	username := r.URL.Query().Get("username")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	logs, total, err := m.repo.ListAuditLogs(entityType, entityID, username, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(m.paginatedResponse(logs, total, offset/limit+1, limit))
+}
+
+func getClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header first
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if idx := strings.Index(xff, ","); idx != -1 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+	// Check X-Real-IP
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+	// Fall back to RemoteAddr
+	addr := r.RemoteAddr
+	if idx := strings.LastIndex(addr, ":"); idx != -1 {
+		return addr[:idx]
+	}
+	return addr
 }

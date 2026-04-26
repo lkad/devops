@@ -1,6 +1,6 @@
 # DevOps Toolkit - 待办事项
 
-**最后更新:** 2026-04-24
+**最后更新:** 2026-04-26
 
 ## 状态总览
 
@@ -17,6 +17,7 @@
 | K8s 多集群 | ✅ 完成 | k3d集群管理，多集群健康检查 |
 | 物理主机管理 | ✅ 完成 | SSH连接管理，状态监控，指标采集 |
 | 项目管理 | ✅ 完成 | 事业群 → 系统 → 项目层级，FinOps 报表 |
+| 审计日志 | ✅ 完成 | 项目管理变动记录，审计界面 |
 
 ---
 
@@ -29,6 +30,7 @@
 - [x] 资源链接 (`/api/org/projects/:id/resources`)
 - [x] 级别RBAC权限 (viewer, editor, admin)
 - [x] FinOps CSV 导出 (`/api/org/reports/finops?period=YYYY-MM`)
+- [x] 审计日志 (`/api/org/audit-logs`) - 记录所有 CRUD 变动
 - [x] PostgreSQL 迁移
 
 **数据模型:**

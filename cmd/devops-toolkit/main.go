@@ -326,6 +326,9 @@ func main() {
 
 		// FinOps export
 		r.HandleFunc("/api/org/reports/finops", projectMgr.ExportFinOpsHTTP)
+
+		// Audit logs
+		r.HandleFunc("/api/org/audit-logs", projectMgr.ListAuditLogsHTTP)
 	}
 
 	// Static files (frontend)
