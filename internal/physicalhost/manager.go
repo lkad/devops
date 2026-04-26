@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/mux"
 	"golang.org/x/crypto/ssh"
 	"github.com/google/uuid"
 )
@@ -299,7 +300,7 @@ func (m *Manager) CreateHostHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) GetHostHTTP(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get(":id")
+	id := mux.Vars(r)["id"]
 	host := m.GetHost(id)
 	if host == nil {
 		http.Error(w, "host not found", http.StatusNotFound)
@@ -310,7 +311,7 @@ func (m *Manager) GetHostHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) DeleteHostHTTP(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get(":id")
+	id := mux.Vars(r)["id"]
 	if m.DeleteHost(id) {
 		w.WriteHeader(http.StatusNoContent)
 	} else {

@@ -1,12 +1,14 @@
 package project
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,19 +20,23 @@ func uniqueName(prefix string) string {
 }
 
 // skipIfNoDeps skips if server is not running or project routes are not available
-func skipIfNoProjectDeps(t *testing.T) string {
-	baseURL := checkProjectServer(t)
+func skipIfNoProjectDeps(t *testing.T) (string, string) {
+	baseURL, token := checkProjectServer(t)
 	if baseURL == "" {
-		return ""
+		return "", ""
 	}
-	cleanupTestData(t, baseURL)
-	return baseURL
+	cleanupTestData(t, baseURL, token)
+	return baseURL, token
 }
 
 // cleanupTestData removes test data before running tests
-func cleanupTestData(t *testing.T, baseURL string) {
+func cleanupTestData(t *testing.T, baseURL, token string) {
 	// Get all business lines
-	resp, err := http.Get(baseURL + "/api/org/business-lines?per_page=100")
+	req, _ := http.NewRequest("GET", baseURL+"/api/org/business-lines?per_page=100", nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Logf("Warning: could not fetch business lines for cleanup: %v", err)
 		return
@@ -74,53 +80,117 @@ func cleanupTestData(t *testing.T, baseURL string) {
 		if err != nil {
 			continue
 		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 		client.Do(req)
 	}
 }
 
 // checkProjectServer verifies the server is running and project routes are available
-func checkProjectServer(t *testing.T) string {
-	// Check if server is running and project routes are registered
-	resp, err := http.Get("http://localhost:3000/health")
+func checkProjectServer(t *testing.T) (string, string) {
+	baseURL := os.Getenv("DEVOPS_TEST_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:3000"
+	}
+
+	// Check if server is running
+	resp, err := http.Get(baseURL + "/health")
 	if err != nil {
-		t.Skip("Skipping: no devops-toolkit server running on localhost:3000")
-		return ""
+		t.Skipf("Skipping: no devops-toolkit server running at %s: %v", baseURL, err)
+		return "", ""
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Skip("Skipping: server not healthy")
-		return ""
+		t.Skipf("Skipping: server at %s not healthy (status %d)", baseURL, resp.StatusCode)
+		return "", ""
 	}
 
-	// Check if project routes are available by trying a project endpoint
-	// If it returns 404, project manager is not initialized (no DB)
-	resp, err = http.Get("http://localhost:3000/api/org/business-lines")
+	// Try to login and get token
+	loginBody := map[string]interface{}{
+		"username": "dev",
+		"password": "dev",
+	}
+	loginJSON, _ := json.Marshal(loginBody)
+	loginResp, err := http.Post(baseURL+"/api/auth/login", "application/json", bytes.NewBuffer(loginJSON))
 	if err != nil {
-		t.Skip("Skipping: cannot reach project endpoints")
-		return ""
+		t.Skipf("Skipping: cannot login to get token: %v", err)
+		return "", ""
+	}
+	defer loginResp.Body.Close()
+
+	if loginResp.StatusCode != http.StatusOK {
+		t.Skipf("Skipping: login failed with status %d", loginResp.StatusCode)
+		return "", ""
+	}
+
+	var loginResult map[string]interface{}
+	if err := json.NewDecoder(loginResp.Body).Decode(&loginResult); err != nil {
+		t.Skipf("Skipping: cannot decode login response: %v", err)
+		return "", ""
+	}
+
+	token, ok := loginResult["token"].(string)
+	if !ok || token == "" {
+		t.Skip("Skipping: no token in login response")
+		return "", ""
+	}
+
+	// Check if project routes are available
+	req, _ := http.NewRequest("GET", baseURL+"/api/org/business-lines", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Skipf("Skipping: cannot reach project endpoints")
+		return "", ""
 	}
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusServiceUnavailable {
 		t.Skip("Skipping: project manager unavailable (PostgreSQL not connected)")
-		return ""
+		return "", ""
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		t.Skip("Skipping: project routes not registered")
-		return ""
+		return "", ""
 	}
 
-	return "http://localhost:3000"
+	return baseURL, token
+}
+
+func makeReq(method, urlStr, token string, body interface{}) (*http.Request, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		jsonBody, _ := json.Marshal(body)
+		bodyReader = bytes.NewBuffer(jsonBody)
+	}
+	req, err := http.NewRequest(method, urlStr, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return req, nil
 }
 
 
 // TestProjectAPI_BusinessLines_CreateAndList tests creating and listing business lines via real HTTP
 func TestProjectAPI_BusinessLines_CreateAndList(t *testing.T) {
-	baseURL := skipIfNoProjectDeps(t)
+	baseURL, token := skipIfNoProjectDeps(t)
 
 	// Create a business line with unique name
 	blName := uniqueName("test-bl-integration")
-	createPayload := fmt.Sprintf(`{"name":"%s","description":"integration test business line"}`, blName)
-	resp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(createPayload))
+	createPayload := map[string]interface{}{
+		"name":        blName,
+		"description": "integration test business line",
+	}
+
+	req, err := makeReq("POST", baseURL+"/api/org/business-lines", token, createPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
 	}
@@ -143,7 +213,11 @@ func TestProjectAPI_BusinessLines_CreateAndList(t *testing.T) {
 	t.Logf("Created business line: %s", blID)
 
 	// List business lines
-	resp, err = http.Get(baseURL + "/api/org/business-lines")
+	req, err = makeReq("GET", baseURL+"/api/org/business-lines", token, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to list business lines: %v", err)
 	}
@@ -172,12 +246,20 @@ func TestProjectAPI_BusinessLines_CreateAndList(t *testing.T) {
 
 // TestProjectAPI_BusinessLines_Get tests getting a single business line via real HTTP
 func TestProjectAPI_BusinessLines_Get(t *testing.T) {
-	baseURL := skipIfNoProjectDeps(t)
+	baseURL, token := skipIfNoProjectDeps(t)
 
 	// Create a business line first with unique name
 	blName := uniqueName("test-bl-get")
-	createPayload := fmt.Sprintf(`{"name":"%s","description":"test get"}`, blName)
-	resp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(createPayload))
+	createPayload := map[string]interface{}{
+		"name":        blName,
+		"description": "test get",
+	}
+
+	req, err := makeReq("POST", baseURL+"/api/org/business-lines", token, createPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
 	}
@@ -194,7 +276,11 @@ func TestProjectAPI_BusinessLines_Get(t *testing.T) {
 	}
 
 	// Get the business line
-	resp, err = http.Get(baseURL + "/api/org/business-lines/" + blID)
+	req, err = makeReq("GET", baseURL+"/api/org/business-lines/"+blID, token, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to get business line: %v", err)
 	}
@@ -216,12 +302,20 @@ func TestProjectAPI_BusinessLines_Get(t *testing.T) {
 
 // TestProjectAPI_Systems_CRUD tests system CRUD operations via real HTTP
 func TestProjectAPI_Systems_CRUD(t *testing.T) {
-	baseURL := skipIfNoProjectDeps(t)
+	baseURL, token := skipIfNoProjectDeps(t)
 
 	// First create a business line with unique name
 	blName := uniqueName("test-bl-for-system")
-	blPayload := fmt.Sprintf(`{"name":"%s","description":"test"}`, blName)
-	blResp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(blPayload))
+	blPayload := map[string]interface{}{
+		"name":        blName,
+		"description": "test",
+	}
+
+	req, err := makeReq("POST", baseURL+"/api/org/business-lines", token, blPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	blResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
 	}
@@ -237,8 +331,17 @@ func TestProjectAPI_Systems_CRUD(t *testing.T) {
 
 	// Create a system with unique name
 	sysName := uniqueName("test-system")
-	sysPayload := fmt.Sprintf(`{"name":"%s","description":"integration test system","business_line_id":"%s"}`, sysName, blID)
-	sysResp, err := http.Post(baseURL+"/api/org/business-lines/"+blID+"/systems", "application/json", strings.NewReader(sysPayload))
+	sysPayload := map[string]interface{}{
+		"name":              sysName,
+		"description":       "integration test system",
+		"business_line_id": blID,
+	}
+
+	req, err = makeReq("POST", baseURL+"/api/org/business-lines/"+blID+"/systems", token, sysPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	sysResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create system: %v", err)
 	}
@@ -249,7 +352,11 @@ func TestProjectAPI_Systems_CRUD(t *testing.T) {
 	}
 
 	// List systems under the business line
-	listResp, err := http.Get(baseURL + "/api/org/business-lines/" + blID + "/systems")
+	req, err = makeReq("GET", baseURL+"/api/org/business-lines/"+blID+"/systems", token, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	listResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to list systems: %v", err)
 	}
@@ -264,12 +371,20 @@ func TestProjectAPI_Systems_CRUD(t *testing.T) {
 
 // TestProjectAPI_Projects_CRUD tests project CRUD operations via real HTTP
 func TestProjectAPI_Projects_CRUD(t *testing.T) {
-	baseURL := skipIfNoProjectDeps(t)
+	baseURL, token := skipIfNoProjectDeps(t)
 
 	// Create business line -> system -> project hierarchy with unique names
 	blName := uniqueName("test-bl-hierarchy")
-	blPayload := fmt.Sprintf(`{"name":"%s","description":"test"}`, blName)
-	blResp, err := http.Post(baseURL+"/api/org/business-lines", "application/json", strings.NewReader(blPayload))
+	blPayload := map[string]interface{}{
+		"name":        blName,
+		"description": "test",
+	}
+
+	req, err := makeReq("POST", baseURL+"/api/org/business-lines", token, blPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	blResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create business line: %v", err)
 	}
@@ -284,8 +399,17 @@ func TestProjectAPI_Projects_CRUD(t *testing.T) {
 	}
 
 	sysName := uniqueName("test-sys-hierarchy")
-	sysPayload := fmt.Sprintf(`{"name":"%s","description":"test","business_line_id":"%s"}`, sysName, blID)
-	sysResp, err := http.Post(baseURL+"/api/org/business-lines/"+blID+"/systems", "application/json", strings.NewReader(sysPayload))
+	sysPayload := map[string]interface{}{
+		"name":              sysName,
+		"description":       "test",
+		"business_line_id": blID,
+	}
+
+	req, err = makeReq("POST", baseURL+"/api/org/business-lines/"+blID+"/systems", token, sysPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	sysResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create system: %v", err)
 	}
@@ -301,8 +425,18 @@ func TestProjectAPI_Projects_CRUD(t *testing.T) {
 
 	// Create a project with unique name
 	projName := uniqueName("test-project")
-	projPayload := fmt.Sprintf(`{"name":"%s","type":"backend","description":"integration test","system_id":"%s"}`, projName, sysID)
-	projResp, err := http.Post(baseURL+"/api/org/systems/"+sysID+"/projects", "application/json", strings.NewReader(projPayload))
+	projPayload := map[string]interface{}{
+		"name":        projName,
+		"type":        "backend",
+		"description": "integration test",
+		"system_id":   sysID,
+	}
+
+	req, err = makeReq("POST", baseURL+"/api/org/systems/"+sysID+"/projects", token, projPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	projResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create project: %v", err)
 	}
@@ -313,7 +447,11 @@ func TestProjectAPI_Projects_CRUD(t *testing.T) {
 	}
 
 	// List projects
-	listResp, err := http.Get(baseURL + "/api/org/systems/" + sysID + "/projects")
+	req, err = makeReq("GET", baseURL+"/api/org/systems/"+sysID+"/projects", token, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	listResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to list projects: %v", err)
 	}
@@ -328,10 +466,14 @@ func TestProjectAPI_Projects_CRUD(t *testing.T) {
 
 // TestProjectAPI_Pagination tests pagination via real HTTP
 func TestProjectAPI_Pagination(t *testing.T) {
-	baseURL := skipIfNoProjectDeps(t)
+	baseURL, token := skipIfNoProjectDeps(t)
 
 	// Test with pagination params
-	resp, err := http.Get(baseURL + "/api/org/business-lines?page=1&per_page=5")
+	req, err := makeReq("GET", baseURL+"/api/org/business-lines?page=1&per_page=5", token, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to list with pagination: %v", err)
 	}

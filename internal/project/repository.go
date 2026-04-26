@@ -41,6 +41,20 @@ func (r *Repository) migrate() error {
 		updated_at TIMESTAMP DEFAULT NOW()
 	);
 
+	CREATE TABLE IF NOT EXISTS project_types (
+		id TEXT PRIMARY KEY,
+		name TEXT UNIQUE NOT NULL,
+		description TEXT,
+		color TEXT DEFAULT '#64748b',
+		created_at TIMESTAMP DEFAULT NOW()
+	);
+
+	-- Insert default project types if not exist
+	INSERT INTO project_types (id, name, description, color) VALUES
+		('frontend', 'frontend', '前端项目', '#22d3ee'),
+		('backend', 'backend', '后端项目', '#a855f7')
+	ON CONFLICT (id) DO NOTHING;
+
 	CREATE TABLE IF NOT EXISTS systems (
 		id TEXT PRIMARY KEY,
 		business_line_id TEXT NOT NULL REFERENCES business_lines(id) ON DELETE CASCADE,
@@ -53,8 +67,8 @@ func (r *Repository) migrate() error {
 	CREATE TABLE IF NOT EXISTS projects (
 		id TEXT PRIMARY KEY,
 		system_id TEXT NOT NULL REFERENCES systems(id) ON DELETE CASCADE,
+		type TEXT NOT NULL REFERENCES project_types(id),
 		name TEXT NOT NULL,
-		type TEXT NOT NULL,
 		description TEXT,
 		created_at TIMESTAMP DEFAULT NOW(),
 		updated_at TIMESTAMP DEFAULT NOW()
@@ -116,6 +130,80 @@ func (r *Repository) migrate() error {
 	`
 	_, err := r.db.Exec(schema)
 	return err
+}
+
+// ProjectType CRUD
+func (r *Repository) ListProjectTypes() ([]*ProjectTypeDef, error) {
+	query := `SELECT id, name, description, color FROM project_types ORDER BY name`
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	results := []*ProjectTypeDef{}
+	for rows.Next() {
+		pt := &ProjectTypeDef{}
+		if err := rows.Scan(&pt.ID, &pt.Name, &pt.Description, &pt.Color); err != nil {
+			return nil, err
+		}
+		results = append(results, pt)
+	}
+	return results, nil
+}
+
+func (r *Repository) GetProjectType(id string) (*ProjectTypeDef, error) {
+	query := `SELECT id, name, description, color FROM project_types WHERE id = $1`
+	pt := &ProjectTypeDef{}
+	err := r.db.QueryRow(query, id).Scan(&pt.ID, &pt.Name, &pt.Description, &pt.Color)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return pt, nil
+}
+
+func (r *Repository) CreateProjectType(pt *ProjectTypeDef) error {
+	query := `INSERT INTO project_types (id, name, description, color) VALUES ($1, $2, $3, $4)`
+	_, err := r.db.Exec(query, pt.ID, pt.Name, pt.Description, pt.Color)
+	return err
+}
+
+func (r *Repository) UpdateProjectType(pt *ProjectTypeDef) error {
+	query := `UPDATE project_types SET name = $2, description = $3, color = $4 WHERE id = $1`
+	_, err := r.db.Exec(query, pt.ID, pt.Name, pt.Description, pt.Color)
+	return err
+}
+
+func (r *Repository) DeleteProjectType(id string) error {
+	var count int
+	query := `SELECT COUNT(*) FROM projects WHERE type = $1`
+	if err := r.db.QueryRow(query, id).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("cannot delete project type that is in use by %d projects", count)
+	}
+	deleteQuery := `DELETE FROM project_types WHERE id = $1`
+	_, err := r.db.Exec(deleteQuery, id)
+	return err
+}
+
+func (r *Repository) ProjectTypeExists(id string) (bool, error) {
+	var exists bool
+	query := `SELECT EXISTS(SELECT 1 FROM project_types WHERE id = $1)`
+	err := r.db.QueryRow(query, id).Scan(&exists)
+	return exists, err
+}
+
+// ValidateProjectType validates project type by checking database
+func (r *Repository) ValidateProjectType(t string) bool {
+	exists, err := r.ProjectTypeExists(t)
+	if err != nil {
+		return false
+	}
+	return exists
 }
 
 // BusinessLine CRUD

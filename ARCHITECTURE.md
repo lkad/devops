@@ -263,31 +263,53 @@ The project hierarchy can be viewed in real-time via WebSocket subscriptions:
 - `/devops/` (子路径)
 - `/api/devops-toolkit/` (自定义路径)
 
-如果前端使用绝对路径 `/api/...`，当代理配置为子路径时会导致请求失败。
+使用绝对路径 `/api/...` 会绕过代理的前端路由，导致 404 错误。
 
 **正确示例：**
 ```javascript
-// ✅ 使用相对路径
-const API_BASE = 'api/org';
-fetch('api/k8s/clusters')
-fetch('api/org/business-lines')
+// ✅ 使用 path-relative 路径（无前导斜杠）
+// basePath 来自 Vite 的 import.meta.env.BASE_URL
+const basePath = import.meta.env.BASE_URL || '/';
+const API_BASE = `${basePath}api`;  // 部署在 /devops/ 时为 'devops/api'
 
-// ✅ 使用模板字符串
-fetch(`api/k8s/clusters/${clusterName}/nodes`)
+fetch(`${API_BASE}/k8s/clusters`)
+fetch(`${API_BASE}/org/business-lines`)
+
+// ✅ WebSocket 使用相对路径
+const WS_URL = `${basePath}ws`
 ```
 
 **错误示例：**
 ```javascript
-// ❌ 使用绝对路径
+// ❌ 禁止使用绝对路径（以 / 开头的路径）
 fetch('/api/k8s/clusters')
 fetch('/api/org/business-lines')
+const WS_URL = `ws://${window.location.host}/ws`  // 使用绝对路径的 WebSocket
 ```
 
 **适用于：**
-- `fetch()` 请求
-- `window.location.href` 跳转
-- WebSocket 连接
-- 静态资源路径（除非明确知道代理配置）
+- `fetch()` 请求 - 使用 path-relative 路径
+- `WebSocket` 连接 - 使用 path-relative 路径
+- 静态资源路径 - 使用 path-relative 路径
+
+**代理配置要求：**
+
+使用相对路径后，反向代理只需将请求路由到后端服务：
+
+```nginx
+# 子路径部署示例：/devops/
+# 所有 /devops/* 请求都会被代理，包括 /devops/api/* 和 /devops/ws
+location /devops/ {
+    rewrite ^/devops/(.*) /$1 break;
+    proxy_pass http://localhost:3000;
+}
+```
+
+当浏览器访问 `http://example.com/devops/k8s` 时：
+1. 前端返回 SPA 应用
+2. 浏览器执行 `fetch('devops/api/k8s/clusters')`
+3. 请求发送到 `http://example.com/devops/api/k8s/clusters`
+4. 代理将 `/devops/api/k8s/clusters` 重写为 `/api/k8s/clusters` 并转发到后端
 
 ### 2. Kubernetes集群类型区分
 
@@ -438,14 +460,35 @@ server {
 }
 ```
 
-For sub-path deployment (`/devops/`):
+For sub-path deployment (`/devops/`), the proxy must route BOTH the frontend app AND the API/WebSocket endpoints:
 
 ```nginx
+# 前端 SPA (必须在 /api/ 之后)
 location /devops/ {
     rewrite ^/devops/(.*) /$1 break;
     proxy_pass http://localhost:3000;
 }
+
+# API 路径重写 (关键！将 /devops/api/* 转为 /api/*)
+location /devops/api/ {
+    rewrite ^/devops/api/(.*) /api/$1 break;
+    proxy_pass http://localhost:3000;
+}
+
+# WebSocket 路径重写
+location /devops/ws {
+    rewrite ^/devops/ws /ws break;
+    proxy_pass http://localhost:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
 ```
+
+**工作原理**:
+1. 前端使用 `base: './'` 和相对路径 `'api/clusters'`
+2. 浏览器在 `/devops/k8s` 页面时，`fetch('api/clusters')` 解析为 `/devops/api/clusters`
+3. nginx 将 `/devops/api/clusters` 重写为 `/api/clusters` 并转发到后端
 
 ### Environment Variables
 

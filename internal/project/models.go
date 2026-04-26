@@ -67,6 +67,14 @@ type Project struct {
 	Resources   []*Resource  `json:"resources,omitempty"`
 }
 
+// ProjectTypeDef defines a custom project type that can be created
+type ProjectTypeDef struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Color       string `json:"color,omitempty"`
+}
+
 // ProjectResource links a project to an external resource
 type ProjectResource struct {
 	ID           string       `json:"id"`

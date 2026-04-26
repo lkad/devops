@@ -242,6 +242,22 @@ func main() {
 
 	// Project management routes (if available)
 	if projectMgr != nil {
+		// Project Types
+		r.HandleFunc("/api/org/project-types", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListProjectTypesHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.CreateProjectTypeHTTP(w, r)
+			}
+		})
+		r.HandleFunc("/api/org/project-types/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" {
+				projectMgr.UpdateProjectTypeHTTP(w, r)
+			} else if r.Method == "DELETE" {
+				projectMgr.DeleteProjectTypeHTTP(w, r)
+			}
+		})
+
 		// Business Lines
 		r.HandleFunc("/api/org/business-lines", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" {

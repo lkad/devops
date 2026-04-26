@@ -56,6 +56,107 @@ func (m *Manager) paginatedResponse(data interface{}, total, page, perPage int) 
 	}
 }
 
+// ProjectType handlers
+func (m *Manager) ListProjectTypesHTTP(w http.ResponseWriter, r *http.Request) {
+	types, err := m.repo.ListProjectTypes()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(types)
+}
+
+func (m *Manager) CreateProjectTypeHTTP(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Color       string `json:"color"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if input.ID == "" || input.Name == "" {
+		http.Error(w, "id and name are required", http.StatusBadRequest)
+		return
+	}
+	// Validate ID format (lowercase alphanumeric and hyphens only)
+	for _, c := range input.ID {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			http.Error(w, "id must be lowercase alphanumeric with optional hyphens", http.StatusBadRequest)
+			return
+		}
+	}
+	if input.Color == "" {
+		input.Color = "#64748b"
+	}
+	pt := &ProjectTypeDef{
+		ID:          input.ID,
+		Name:        input.Name,
+		Description: input.Description,
+		Color:       input.Color,
+	}
+	if err := m.repo.CreateProjectType(pt); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(pt)
+}
+
+func (m *Manager) UpdateProjectTypeHTTP(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	existing, err := m.repo.GetProjectType(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if existing == nil {
+		http.Error(w, "project type not found", http.StatusNotFound)
+		return
+	}
+	var input struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Color       string `json:"color"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if input.Name != "" {
+		existing.Name = input.Name
+	}
+	if input.Description != "" {
+		existing.Description = input.Description
+	}
+	if input.Color != "" {
+		existing.Color = input.Color
+	}
+	if err := m.repo.UpdateProjectType(existing); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(existing)
+}
+
+func (m *Manager) DeleteProjectTypeHTTP(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	if id == "frontend" || id == "backend" {
+		http.Error(w, "cannot delete default project types", http.StatusBadRequest)
+		return
+	}
+	if err := m.repo.DeleteProjectType(id); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // BusinessLine handlers
 func (m *Manager) ListBusinessLinesHTTP(w http.ResponseWriter, r *http.Request) {
 	page, perPage := m.parsePagination(r)
@@ -394,7 +495,7 @@ func (m *Manager) CreateProjectHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name is required", http.StatusBadRequest)
 		return
 	}
-	if !ValidateProjectType(string(input.Type)) {
+	if !m.repo.ValidateProjectType(string(input.Type)) {
 		http.Error(w, "invalid project type", http.StatusBadRequest)
 		return
 	}
@@ -459,7 +560,7 @@ func (m *Manager) UpdateProjectHTTP(w http.ResponseWriter, r *http.Request) {
 	if input.Name != "" {
 		proj.Name = input.Name
 	}
-	if input.Type != "" && ValidateProjectType(string(input.Type)) {
+	if input.Type != "" && m.repo.ValidateProjectType(string(input.Type)) {
 		proj.Type = input.Type
 	}
 	proj.Description = input.Description
