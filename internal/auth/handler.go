@@ -162,7 +162,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user from context (set by middleware)
-	user, ok := r.Context().Value("user").(*User)
+	user, ok := r.Context().Value(userContextKey).(*User)
 	if !ok || user == nil {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return

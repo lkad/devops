@@ -16,9 +16,9 @@ const userContextKey contextKey = "user"
 func Middleware(cfg *config.AuthConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip auth for certain paths
+			// Skip auth for certain paths (except /api/auth/me which requires auth)
 			path := r.URL.Path
-			if strings.HasPrefix(path, "/api/auth/") ||
+			if (strings.HasPrefix(path, "/api/auth/") && path != "/api/auth/me") ||
 				path == "/health" ||
 				path == "/metrics" ||
 				path == "/" ||

@@ -25,7 +25,7 @@ k8s:
 auth:
   jwt_secret: "devops-toolkit-change-in-production"
   session_duration: "8h"
-  dev_bypass: false
+  dev_bypass: true
   dev_username: "dev"
   dev_password: "dev"
   dev_roles:
