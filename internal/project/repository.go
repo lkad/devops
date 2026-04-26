@@ -151,7 +151,7 @@ func (r *Repository) ListBusinessLines(page, perPage int) ([]*BusinessLine, int,
 		return nil, 0, err
 	}
 	defer rows.Close()
-	var results []*BusinessLine
+	results := []*BusinessLine{}
 	for rows.Next() {
 		bl := &BusinessLine{}
 		if err := rows.Scan(&bl.ID, &bl.Name, &bl.Description, &bl.CreatedAt, &bl.UpdatedAt); err != nil {
@@ -214,7 +214,7 @@ func (r *Repository) ListSystemsByBusinessLine(blID string) ([]*System, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var results []*System
+	results := []*System{}
 	for rows.Next() {
 		s := &System{}
 		if err := rows.Scan(&s.ID, &s.BusinessLineID, &s.Name, &s.Description, &s.CreatedAt, &s.UpdatedAt); err != nil {
@@ -238,7 +238,7 @@ func (r *Repository) ListSystems(page, perPage int) ([]*System, int, error) {
 		return nil, 0, err
 	}
 	defer rows.Close()
-	var results []*System
+	results := []*System{}
 	for rows.Next() {
 		s := &System{}
 		if err := rows.Scan(&s.ID, &s.BusinessLineID, &s.Name, &s.Description, &s.CreatedAt, &s.UpdatedAt); err != nil {
@@ -301,7 +301,7 @@ func (r *Repository) ListProjectsBySystem(sysID string) ([]*Project, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var results []*Project
+	results := []*Project{}
 	for rows.Next() {
 		p := &Project{}
 		if err := rows.Scan(&p.ID, &p.SystemID, &p.Name, &p.Type, &p.Description, &p.CreatedAt, &p.UpdatedAt); err != nil {
@@ -325,7 +325,7 @@ func (r *Repository) ListProjects(page, perPage int) ([]*Project, int, error) {
 		return nil, 0, err
 	}
 	defer rows.Close()
-	var results []*Project
+	results := []*Project{}
 	for rows.Next() {
 		p := &Project{}
 		if err := rows.Scan(&p.ID, &p.SystemID, &p.Name, &p.Type, &p.Description, &p.CreatedAt, &p.UpdatedAt); err != nil {
@@ -375,7 +375,7 @@ func (r *Repository) ListProjectResources(projectID string) ([]*Resource, error)
 		return nil, err
 	}
 	defer rows.Close()
-	var results []*Resource
+	results := []*Resource{}
 	for rows.Next() {
 		pr := &Resource{}
 		if err := rows.Scan(&pr.ID, &pr.ResourceType, &pr.ResourceID, &pr.CreatedAt); err != nil {
@@ -428,7 +428,7 @@ func (r *Repository) queryPermissions(query string, arg interface{}) ([]*Project
 		return nil, err
 	}
 	defer rows.Close()
-	var results []*ProjectPermission
+	results := []*ProjectPermission{}
 	for rows.Next() {
 		p := &ProjectPermission{}
 		if err := rows.Scan(&p.ID, &p.Level, &p.ProjectID, &p.SystemID, &p.BusinessLineID, &p.Role, &p.Subject, &p.CreatedAt); err != nil {
@@ -516,7 +516,7 @@ func (r *Repository) GetFinOpsData(period string) ([]FinOpsRow, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var results []FinOpsRow
+	results := []FinOpsRow{}
 	for rows.Next() {
 		row := FinOpsRow{}
 		if err := rows.Scan(&row.BusinessLine, &row.System, &row.ProjectType, &row.Project, &row.ResourceType, &row.Count, &row.Unit); err != nil {
@@ -656,7 +656,7 @@ func (r *Repository) ListAuditLogs(entityType, entityID, username string, limit,
 	}
 	defer rows.Close()
 
-	var results []*AuditLog
+	results := []*AuditLog{}
 	for rows.Next() {
 		log := &AuditLog{}
 		if err := rows.Scan(&log.ID, &log.Timestamp, &log.Username, &log.Action, &log.EntityType, &log.EntityID, &log.EntityName, &log.Changes, &log.OldValue, &log.NewValue, &log.IPAddress); err != nil {
