@@ -5,77 +5,81 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/devops-toolkit/internal/config"
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/devops-toolkit/pkg/errors"
+	"github.com/devops-toolkit/pkg/response"
 )
 
 type contextKey string
 
-const userContextKey contextKey = "user"
+const UserContextKey contextKey = "user"
 
-func Middleware(cfg *config.AuthConfig) func(http.Handler) http.Handler {
+func AuthMiddleware(jwtService *JWTService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip auth for certain paths (except /api/auth/me which requires auth)
-			path := r.URL.Path
-			if cfg.DevBypass ||
-				(strings.HasPrefix(path, "/api/auth/") && path != "/api/auth/me") ||
-				path == "/health" ||
-				path == "/metrics" ||
-				path == "/" ||
-				strings.HasPrefix(path, "/assets/") ||
-				strings.HasPrefix(path, "/favicon") ||
-				(strings.HasPrefix(path, "/api/") && r.Method == http.MethodOptions) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Extract token from Authorization header
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, "missing authorization header", http.StatusUnauthorized)
+				response.Error(w, errors.Unauthorized("missing authorization header"))
 				return
 			}
 
-			parts := strings.SplitN(authHeader, " ", 2)
+			parts := strings.Split(authHeader, " ")
 			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
+				response.Error(w, errors.Unauthorized("invalid authorization header format"))
 				return
 			}
 
-			tokenString := parts[1]
-
-			// Parse and validate token
-			claims := &Claims{}
-			token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, jwt.ErrSignatureInvalid
-				}
-				return []byte(cfg.JWTSecret), nil
-			})
-
-			if err != nil || !token.Valid {
-				http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+			claims, err := jwtService.ValidateToken(parts[1])
+			if err != nil {
+				response.Error(w, errors.Unauthorized("invalid or expired token"))
 				return
 			}
 
-			// Attach user to request context
 			user := &User{
-				Username:    claims.Username,
-				Roles:       claims.Roles,
-				Permissions: claims.Permissions,
+				Username: claims.Username,
+				Email:    claims.Email,
+				Roles:    claims.Roles,
+				Group:    claims.Group,
 			}
-			ctx := context.WithValue(r.Context(), userContextKey, user)
 
+			ctx := context.WithValue(r.Context(), UserContextKey, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-// GetUserFromContext retrieves the authenticated user from context
 func GetUserFromContext(ctx context.Context) *User {
-	if user, ok := ctx.Value(userContextKey).(*User); ok {
+	if user, ok := ctx.Value(UserContextKey).(*User); ok {
 		return user
 	}
 	return nil
+}
+
+func GetUsernameFromContext(ctx context.Context) string {
+	if user := GetUserFromContext(ctx); user != nil {
+		return user.Username
+	}
+	return ""
+}
+
+func HasRole(ctx context.Context, role string) bool {
+	user := GetUserFromContext(ctx)
+	if user == nil {
+		return false
+	}
+
+	for _, r := range user.Roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
+func HasAnyRole(ctx context.Context, roles ...string) bool {
+	for _, role := range roles {
+		if HasRole(ctx, role) {
+			return true
+		}
+	}
+	return false
 }
