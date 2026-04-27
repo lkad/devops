@@ -9,9 +9,13 @@ import (
 	"time"
 
 	"github.com/devops-toolkit/internal/apierror"
-	"github.com/devops-toolkit/internal/metrics"
 	"github.com/devops-toolkit/internal/pagination"
 )
+
+// MetricsRecorder defines the interface for recording metrics
+type MetricsRecorder interface {
+	RecordAlert(alertName, severity string)
+}
 
 type Manager struct {
 	mu           sync.RWMutex
@@ -19,7 +23,7 @@ type Manager struct {
 	history      []*Alert
 	maxHistory   int
 	rateLimiter  *RateLimiter
-	metrics      *metrics.Collector
+	metrics      MetricsRecorder
 }
 
 type Channel struct {
@@ -81,7 +85,7 @@ func (r *RateLimiter) Allow(name string) bool {
 	return true
 }
 
-func NewManager(m *metrics.Collector) *Manager {
+func NewManager(m MetricsRecorder) *Manager {
 	return &Manager{
 		channels:    make(map[string]*Channel),
 		history:     make([]*Alert, 0),

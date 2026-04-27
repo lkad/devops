@@ -10,24 +10,41 @@ import (
 	"strings"
 
 	"github.com/devops-toolkit/internal/apierror"
-	"github.com/devops-toolkit/internal/auth"
 	"github.com/gorilla/mux"
 )
 
+// UserProvider defines the interface for getting user information from request context
+type UserProvider interface {
+	GetUserFromRequest(r *http.Request) *User
+}
+
+// User represents authenticated user info needed for audit logging
+type User struct {
+	Username string `json:"username"`
+}
+
+// AuthUserProvider implements UserProvider by extracting user from request context
+// using auth package's GetUserFromContext. This bridges the gap and allows
+// the project package to remain decoupled from auth implementation details.
+type AuthUserProvider struct {
+	GetUserFromRequest func(r *http.Request) *User
+}
+
 type Manager struct {
-	repo *Repository
+	repo         *Repository
+	userProvider UserProvider
 }
 
-func NewManager(repo *Repository) *Manager {
-	return &Manager{repo: repo}
+func NewManager(repo *Repository, userProvider UserProvider) *Manager {
+	return &Manager{repo: repo, userProvider: userProvider}
 }
 
-func NewManagerWithDSN(dsn string) (*Manager, error) {
+func NewManagerWithDSN(dsn string, userProvider UserProvider) (*Manager, error) {
 	repo, err := NewRepository(dsn)
 	if err != nil {
 		return nil, err
 	}
-	return &Manager{repo: repo}, nil
+	return &Manager{repo: repo, userProvider: userProvider}, nil
 }
 
 func (m *Manager) parsePagination(r *http.Request) (limit, offset int) {
@@ -196,7 +213,7 @@ func (m *Manager) CreateBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		auditLog := NewAuditLog(user.Username, ActionCreate, "business_line", bl.ID, bl.Name)
 		auditLog.NewValue = input.Name
 		auditLog.IPAddress = getClientIP(r)
@@ -255,7 +272,7 @@ func (m *Manager) UpdateBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		changes := fmt.Sprintf("name: %s -> %s, description: %s -> %s", oldName, bl.Name, oldDesc, bl.Description)
 		auditLog := NewAuditLog(user.Username, ActionUpdate, "business_line", bl.ID, bl.Name)
 		auditLog.Changes = changes
@@ -286,7 +303,7 @@ func (m *Manager) DeleteBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		auditLog := NewAuditLog(user.Username, ActionDelete, "business_line", id, bl.Name)
 		auditLog.OldValue = bl.Name
 		auditLog.IPAddress = getClientIP(r)
@@ -353,7 +370,7 @@ func (m *Manager) CreateSystemHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		auditLog := NewAuditLog(user.Username, ActionCreate, "system", sys.ID, sys.Name)
 		auditLog.NewValue = input.Name
 		auditLog.IPAddress = getClientIP(r)
@@ -412,7 +429,7 @@ func (m *Manager) UpdateSystemHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		changes := fmt.Sprintf("name: %s -> %s, description: %s -> %s", oldName, sys.Name, oldDesc, sys.Description)
 		auditLog := NewAuditLog(user.Username, ActionUpdate, "system", sys.ID, sys.Name)
 		auditLog.Changes = changes
@@ -443,7 +460,7 @@ func (m *Manager) DeleteSystemHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		auditLog := NewAuditLog(user.Username, ActionDelete, "system", id, sys.Name)
 		auditLog.OldValue = sys.Name
 		auditLog.IPAddress = getClientIP(r)
@@ -515,7 +532,7 @@ func (m *Manager) CreateProjectHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		auditLog := NewAuditLog(user.Username, ActionCreate, "project", proj.ID, proj.Name)
 		auditLog.NewValue = fmt.Sprintf("%s (%s)", input.Name, input.Type)
 		auditLog.IPAddress = getClientIP(r)
@@ -579,7 +596,7 @@ func (m *Manager) UpdateProjectHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		changes := fmt.Sprintf("name: %s -> %s, type: %s -> %s, description: %s -> %s",
 			oldName, proj.Name, oldType, proj.Type, oldDesc, proj.Description)
 		auditLog := NewAuditLog(user.Username, ActionUpdate, "project", proj.ID, proj.Name)
@@ -611,7 +628,7 @@ func (m *Manager) DeleteProjectHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		auditLog := NewAuditLog(user.Username, ActionDelete, "project", id, proj.Name)
 		auditLog.OldValue = fmt.Sprintf("%s (%s)", proj.Name, proj.Type)
 		auditLog.IPAddress = getClientIP(r)
@@ -670,7 +687,7 @@ func (m *Manager) LinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		auditLog := NewAuditLog(user.Username, ActionCreate, "resource_link", pr.ID, proj.Name)
 		auditLog.NewValue = fmt.Sprintf("%s: %s", input.ResourceType, input.ResourceID)
 		auditLog.IPAddress = getClientIP(r)
@@ -709,7 +726,7 @@ func (m *Manager) UnlinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		auditLog := NewAuditLog(user.Username, ActionDelete, "resource_link", pr.ID, proj.Name)
 		auditLog.OldValue = fmt.Sprintf("%s: %s", pr.ResourceType, pr.ResourceID)
 		auditLog.IPAddress = getClientIP(r)
@@ -780,7 +797,7 @@ func (m *Manager) GrantPermissionHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		auditLog := NewAuditLog(user.Username, ActionCreate, "permission", perm.ID, fmt.Sprintf("%s on %s", input.Role, level))
 		auditLog.NewValue = fmt.Sprintf("%s: %s (%s)", input.Role, input.Subject, level)
 		auditLog.IPAddress = getClientIP(r)
@@ -800,7 +817,7 @@ func (m *Manager) RevokePermissionHTTP(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		for _, p := range perms {
 			if p.ID == permID {
-				if user := auth.GetUserFromContext(r.Context()); user != nil {
+				if user := m.userProvider.GetUserFromRequest(r); user != nil {
 					auditLog := NewAuditLog(user.Username, ActionDelete, "permission", permID, fmt.Sprintf("%s on %s", p.Role, p.Level))
 					auditLog.OldValue = fmt.Sprintf("%s: %s (%s)", p.Role, p.Subject, p.Level)
 					auditLog.IPAddress = getClientIP(r)

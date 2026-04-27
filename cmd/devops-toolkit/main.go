@@ -38,6 +38,16 @@ func (w *statusCodeWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// authUserProvider implements project.UserProvider by extracting user from request context
+type authUserProvider struct{}
+
+func (a *authUserProvider) GetUserFromRequest(r *http.Request) *project.User {
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		return &project.User{Username: user.Username}
+	}
+	return nil
+}
+
 func main() {
 	// Load configuration
 	cfg, err := config.Load("config.yaml")
@@ -67,7 +77,11 @@ func main() {
 		log.Printf("Warning: Device manager unavailable (DB connection failed): %v", err)
 		deviceMgr = nil
 	}
-	projectMgr, err := project.NewManagerWithDSN(cfg.Database.DSN())
+
+	// Create user provider that extracts user from request context
+	userProvider := &authUserProvider{}
+
+	projectMgr, err := project.NewManagerWithDSN(cfg.Database.DSN(), userProvider)
 	if err != nil {
 		log.Printf("Warning: Project manager unavailable (DB connection failed): %v", err)
 		projectMgr = nil
@@ -79,6 +93,7 @@ func main() {
 		wsHub.BroadcastLog(entry)
 	})
 	metricsMgr := metrics.NewCollector()
+	// Use metrics.Collector directly since it implements the MetricsRecorder interface
 	alertsMgr := alerts.NewManager(metricsMgr)
 	pipelineMgr := pipeline.NewManager()
 	k8sMgr := k8s.NewClusterManager()
