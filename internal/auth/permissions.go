@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"net/http"
+
+	"github.com/devops-toolkit/internal/apierror"
 )
 
 // Permission constants
@@ -22,12 +24,12 @@ func RequirePermission(permission string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user := GetUserFromContext(r.Context())
 			if user == nil {
-				http.Error(w, "not authenticated", http.StatusUnauthorized)
+				apierror.Unauthorized(w, "not authenticated")
 				return
 			}
 
 			if !userHasPermission(user, permission) {
-				http.Error(w, "permission denied", http.StatusForbidden)
+				apierror.Forbidden(w, "permission denied")
 				return
 			}
 

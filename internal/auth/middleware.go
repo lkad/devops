@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/devops-toolkit/internal/apierror"
 	"github.com/devops-toolkit/internal/config"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -33,13 +34,13 @@ func Middleware(cfg *config.AuthConfig) func(http.Handler) http.Handler {
 			// Extract token from Authorization header
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, "missing authorization header", http.StatusUnauthorized)
+				apierror.Unauthorized(w, "missing authorization header")
 				return
 			}
 
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
+				apierror.Unauthorized(w, "invalid authorization header format")
 				return
 			}
 
@@ -55,7 +56,7 @@ func Middleware(cfg *config.AuthConfig) func(http.Handler) http.Handler {
 			})
 
 			if err != nil || !token.Valid {
-				http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+				apierror.Unauthorized(w, "invalid or expired token")
 				return
 			}
 

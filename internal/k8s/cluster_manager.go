@@ -9,9 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/devops-toolkit/internal/apierror"
+	"github.com/devops-toolkit/internal/pagination"
 	"github.com/gorilla/mux"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -542,15 +545,39 @@ func countReady(conditions []v1.PodCondition) int {
 	return 0
 }
 
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 // HTTP handlers
 func (m *ClusterManager) ListClustersHTTP(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePagination(r)
 	clusters, err := m.ListClusters()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
+	// Apply pagination in-memory
+	total := len(clusters)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedClusters := clusters[start:end]
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(clusters)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedClusters, total, limit, offset))
 }
 
 func (m *ClusterManager) CreateClusterHTTP(w http.ResponseWriter, r *http.Request) {
@@ -560,7 +587,7 @@ func (m *ClusterManager) CreateClusterHTTP(w http.ResponseWriter, r *http.Reques
 		APIPort int    `json:"api_port"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 
@@ -573,7 +600,7 @@ func (m *ClusterManager) CreateClusterHTTP(w http.ResponseWriter, r *http.Reques
 
 	cluster, err := m.CreateCluster(input.Name, input.Agents, input.APIPort)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -584,7 +611,7 @@ func (m *ClusterManager) CreateClusterHTTP(w http.ResponseWriter, r *http.Reques
 func (m *ClusterManager) DeleteClusterHTTP(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	if err := m.DeleteCluster(name); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -594,7 +621,7 @@ func (m *ClusterManager) HealthCheckHTTP(w http.ResponseWriter, r *http.Request)
 	name := mux.Vars(r)["name"]
 	status, err := m.HealthCheck(name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -604,20 +631,32 @@ func (m *ClusterManager) HealthCheckHTTP(w http.ResponseWriter, r *http.Request)
 // Maintenance HTTP handlers
 func (m *ClusterManager) GetNodesHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := mux.Vars(r)["cluster"]
+	limit, offset := parsePagination(r)
 	nodes, err := m.GetNodes(cluster)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
+	// Apply pagination in-memory
+	total := len(nodes)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedNodes := nodes[start:end]
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(nodes)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedNodes, total, limit, offset))
 }
 
 func (m *ClusterManager) GetNamespacesHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := mux.Vars(r)["cluster"]
 	namespaces, err := m.GetNamespaces(cluster)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -630,30 +669,42 @@ func (m *ClusterManager) GetPodsHTTP(w http.ResponseWriter, r *http.Request) {
 	if namespace == "" {
 		namespace = "default"
 	}
+	limit, offset := parsePagination(r)
 	pods, err := m.GetPods(cluster, namespace)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
+	// Apply pagination in-memory
+	total := len(pods)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedPods := pods[start:end]
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pods)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedPods, total, limit, offset))
 }
 
 func (m *ClusterManager) MaintenanceOpHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.MethodNotAllowed(w)
 		return
 	}
 
 	var op MaintenanceOp
 	if err := json.NewDecoder(r.Body).Decode(&op); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 
 	result, err := m.ExecuteMaintenanceOp(&op)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -665,13 +716,13 @@ func (m *ClusterManager) GetPodLogsHTTP(w http.ResponseWriter, r *http.Request) 
 	namespace := r.URL.Query().Get("namespace")
 	podName := mux.Vars(r)["pod"]
 	if namespace == "" || podName == "" {
-		http.Error(w, "namespace and pod are required", http.StatusBadRequest)
+		apierror.ValidationError(w, "namespace and pod are required")
 		return
 	}
 
 	logs, err := m.GetPodLogs(cluster, namespace, podName, 100)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")

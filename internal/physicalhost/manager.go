@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/devops-toolkit/internal/apierror"
+	"github.com/devops-toolkit/internal/pagination"
 	"github.com/gorilla/mux"
 	"golang.org/x/crypto/ssh"
 	"github.com/google/uuid"
@@ -506,9 +509,33 @@ func (m *Manager) getHost(id string) (*Host, error) {
 
 // HTTP handlers
 func (m *Manager) ListHostsHTTP(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePagination(r)
 	hosts := m.ListHosts()
+	// Apply pagination in-memory
+	total := len(hosts)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedHosts := hosts[start:end]
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(hosts)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedHosts, total, limit, offset))
+}
+
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
 }
 
 func (m *Manager) CreateHostHTTP(w http.ResponseWriter, r *http.Request) {
@@ -520,7 +547,7 @@ func (m *Manager) CreateHostHTTP(w http.ResponseWriter, r *http.Request) {
 		AuthMethod string `json:"auth_method"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 
@@ -541,7 +568,7 @@ func (m *Manager) GetHostHTTP(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	host := m.GetHost(id)
 	if host == nil {
-		http.Error(w, "host not found", http.StatusNotFound)
+		apierror.NotFound(w, "host not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -553,6 +580,6 @@ func (m *Manager) DeleteHostHTTP(w http.ResponseWriter, r *http.Request) {
 	if m.DeleteHost(id) {
 		w.WriteHeader(http.StatusNoContent)
 	} else {
-		http.Error(w, "host not found", http.StatusNotFound)
+		apierror.NotFound(w, "host not found")
 	}
 }

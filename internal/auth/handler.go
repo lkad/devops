@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/devops-toolkit/internal/apierror"
 	"github.com/devops-toolkit/internal/auth/ldap"
 	"github.com/devops-toolkit/internal/config"
 	"github.com/golang-jwt/jwt/v5"
@@ -48,18 +49,18 @@ func NewHandler(ldapClient *ldap.Client, cfg *config.AuthConfig) *Handler {
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		apierror.MethodNotAllowed(w)
 		return
 	}
 
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		apierror.ValidationError(w, "invalid request body")
 		return
 	}
 
 	if req.Username == "" || req.Password == "" {
-		http.Error(w, "username and password required", http.StatusBadRequest)
+		apierror.ValidationError(w, "username and password required")
 		return
 	}
 
@@ -69,7 +70,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	// Dev bypass mode: use hardcoded credentials
 	if h.config.DevBypass && h.ldapClient == nil {
 		if req.Username != h.config.DevUsername || req.Password != h.config.DevPassword {
-			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+			apierror.Unauthorized(w, "invalid credentials")
 			return
 		}
 		roles = h.config.DevRoles
@@ -80,7 +81,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Normal LDAP authentication
 		if h.ldapClient == nil {
-			http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
+			apierror.ServiceUnavailable(w, "authentication unavailable")
 			return
 		}
 
@@ -90,18 +91,18 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		// Authenticate against LDAP
 		ok, err := h.ldapClient.Authenticate(userDN, req.Password)
 		if err != nil {
-			http.Error(w, "authentication error", http.StatusInternalServerError)
+			apierror.InternalError(w, "authentication error")
 			return
 		}
 		if !ok {
-			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+			apierror.Unauthorized(w, "invalid credentials")
 			return
 		}
 
 		// Get roles from LDAP
 		roles, err = h.ldapClient.GetRoles(userDN)
 		if err != nil {
-			http.Error(w, "failed to get roles", http.StatusInternalServerError)
+			apierror.InternalError(w, "failed to get roles")
 			return
 		}
 	}
@@ -133,7 +134,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString([]byte(h.config.JWTSecret))
 	if err != nil {
-		http.Error(w, "failed to create token", http.StatusInternalServerError)
+		apierror.InternalError(w, "failed to create token")
 		return
 	}
 
@@ -157,14 +158,14 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		apierror.MethodNotAllowed(w)
 		return
 	}
 
 	// Get user from context (set by middleware)
 	user, ok := r.Context().Value(userContextKey).(*User)
 	if !ok || user == nil {
-		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		apierror.Unauthorized(w, "not authenticated")
 		return
 	}
 

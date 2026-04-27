@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/devops-toolkit/internal/apierror"
+	"github.com/devops-toolkit/internal/pagination"
 )
 
 type Manager struct {
@@ -107,20 +111,50 @@ func (m *Manager) GetStatusHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 
+func (m *Manager) GetResultsHTTP(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePagination(r)
+	results := m.GetResults()
+	// Apply pagination in-memory
+	total := len(results)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedResults := results[start:end]
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedResults, total, limit, offset))
+}
+
 func (m *Manager) ScanHTTP(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Targets []string `json:"targets"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 
 	if err := m.Scan(input.Targets); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"status": "scan started"})
+}
+
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
 }

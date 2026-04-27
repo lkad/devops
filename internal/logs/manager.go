@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/devops-toolkit/internal/apierror"
+	"github.com/devops-toolkit/internal/pagination"
 	"github.com/google/uuid"
 )
 
@@ -185,21 +188,39 @@ func containsPattern(message, pattern string) bool {
 	return len(pattern) > 0 && len(message) > 0 && strings.Contains(message, pattern)
 }
 
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 // HTTP handlers
 func (m *Manager) QueryLogsHTTP(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePagination(r)
 	opts := QueryOptions{
 		Level:  r.URL.Query().Get("level"),
 		Source: r.URL.Query().Get("source"),
 		Search: r.URL.Query().Get("search"),
+		Limit:  limit,
+		Offset: offset,
 	}
 
 	entries, err := m.QueryLogs(opts)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
+	// For logs, we can't easily get total count without scanning all entries
+	// So we use the returned count as a proxy
+	total := len(entries) + offset
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"logs": entries, "total": len(entries)})
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(entries, total, limit, offset))
 }
 
 func (m *Manager) CreateLogHTTP(w http.ResponseWriter, r *http.Request) {
@@ -210,13 +231,13 @@ func (m *Manager) CreateLogHTTP(w http.ResponseWriter, r *http.Request) {
 		Meta    map[string]interface{} `json:"metadata"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 
 	entry, err := m.AddLog(input.Level, input.Message, input.Source, input.Meta)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -227,7 +248,7 @@ func (m *Manager) CreateLogHTTP(w http.ResponseWriter, r *http.Request) {
 func (m *Manager) GetStatsHTTP(w http.ResponseWriter, r *http.Request) {
 	stats, err := m.GetStats()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -248,7 +269,7 @@ func (m *Manager) CreateAlertRuleHTTP(w http.ResponseWriter, r *http.Request) {
 		Threshold int    `json:"threshold"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 

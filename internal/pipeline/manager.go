@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/devops-toolkit/internal/apierror"
+	"github.com/devops-toolkit/internal/pagination"
 	"github.com/google/uuid"
 )
 
@@ -228,9 +231,33 @@ func (m *Manager) CancelRun(pipelineID, runID string) bool {
 
 // HTTP handlers
 func (m *Manager) ListPipelinesHTTP(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePagination(r)
 	pipelines := m.ListPipelines()
+	// Apply pagination in-memory
+	total := len(pipelines)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedPipelines := pipelines[start:end]
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pipelines)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedPipelines, total, limit, offset))
+}
+
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
 }
 
 func (m *Manager) CreatePipelineHTTP(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +268,7 @@ func (m *Manager) CreatePipelineHTTP(w http.ResponseWriter, r *http.Request) {
 		Stages     []string `json:"stages"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 
@@ -255,7 +282,7 @@ func (m *Manager) GetPipelineHTTP(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get(":id")
 	p := m.GetPipeline(id)
 	if p == nil {
-		http.Error(w, "pipeline not found", http.StatusNotFound)
+		apierror.NotFound(w, "pipeline not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -267,7 +294,7 @@ func (m *Manager) DeletePipelineHTTP(w http.ResponseWriter, r *http.Request) {
 	if m.DeletePipeline(id) {
 		w.WriteHeader(http.StatusNoContent)
 	} else {
-		http.Error(w, "pipeline not found", http.StatusNotFound)
+		apierror.NotFound(w, "pipeline not found")
 	}
 }
 
@@ -276,7 +303,7 @@ func (m *Manager) ExecutePipelineHTTP(w http.ResponseWriter, r *http.Request) {
 	trigger := Trigger{Type: "manual", By: "api"}
 	run, err := m.ExecutePipeline(id, trigger)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

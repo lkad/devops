@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/devops-toolkit/internal/apierror"
 	"github.com/devops-toolkit/internal/metrics"
+	"github.com/devops-toolkit/internal/pagination"
 )
 
 type Manager struct {
@@ -187,26 +190,62 @@ func (m *Manager) GetHistory() []*Alert {
 
 // HTTP handlers
 func (m *Manager) ListChannelsHTTP(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePagination(r)
 	chans := m.ListChannels()
+	// Apply pagination in-memory
+	total := len(chans)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedChans := chans[start:end]
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(chans)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedChans, total, limit, offset))
 }
 
 func (m *Manager) AddChannelHTTP(w http.ResponseWriter, r *http.Request) {
 	var ch Channel
 	if err := json.NewDecoder(r.Body).Decode(&ch); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 	if err := m.AddChannel(&ch); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
 }
 
 func (m *Manager) GetHistoryHTTP(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePagination(r)
 	history := m.GetHistory()
+	// Apply pagination in-memory
+	total := len(history)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedHistory := history[start:end]
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(history)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedHistory, total, limit, offset))
+}
+
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
 }
