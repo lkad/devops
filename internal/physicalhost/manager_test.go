@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -321,6 +322,233 @@ func TestManager_PoolInitialized(t *testing.T) {
 	cfg := DefaultSSHConnPoolConfig()
 	if m.pool.maxConns != cfg.MaxConns {
 		t.Errorf("expected pool maxConns %d, got %d", cfg.MaxConns, m.pool.maxConns)
+	}
+}
+
+func TestParseServiceList(t *testing.T) {
+	// Sample systemctl output
+	output := []byte(`nginx.service loaded active running A nginx HTTP and reverse proxy server
+sshd.service loaded active running OpenSSH daemon
+crond.service loaded active running Regular background program processing daemon
+failed.service loaded failed failed Failed to start Some service
+`)
+
+	services := parseServiceList(output)
+
+	if len(services) != 4 {
+		t.Fatalf("expected 4 services, got %d", len(services))
+	}
+
+	// Check nginx
+	if services[0].Name != "nginx" {
+		t.Errorf("expected first service 'nginx', got '%s'", services[0].Name)
+	}
+	if !services[0].Active {
+		t.Error("expected nginx to be active")
+	}
+
+	// Check sshd
+	if services[1].Name != "sshd" {
+		t.Errorf("expected second service 'sshd', got '%s'", services[1].Name)
+	}
+	if !services[1].Active {
+		t.Error("expected sshd to be active")
+	}
+
+	// Check crond
+	if services[2].Name != "crond" {
+		t.Errorf("expected third service 'crond', got '%s'", services[2].Name)
+	}
+	if !services[2].Active {
+		t.Error("expected crond to be active")
+	}
+
+	// Check failed service
+	if services[3].Name != "failed" {
+		t.Errorf("expected fourth service 'failed', got '%s'", services[3].Name)
+	}
+	if services[3].Active {
+		t.Error("expected failed service to not be active")
+	}
+}
+
+func TestParseServiceList_EmptyOutput(t *testing.T) {
+	output := []byte("")
+	services := parseServiceList(output)
+
+	if len(services) != 0 {
+		t.Errorf("expected 0 services, got %d", len(services))
+	}
+}
+
+func TestParseServiceList_OnlyWhitespace(t *testing.T) {
+	output := []byte("   \n   \n   ")
+	services := parseServiceList(output)
+
+	if len(services) != 0 {
+		t.Errorf("expected 0 services, got %d", len(services))
+	}
+}
+
+func TestParseServiceList_ServiceWithoutSuffix(t *testing.T) {
+	// Some services might not have .service suffix in output
+	output := []byte(`docker loaded active running Docker Application Container Engine
+`)
+
+	services := parseServiceList(output)
+
+	if len(services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(services))
+	}
+	if services[0].Name != "docker" {
+		t.Errorf("expected service 'docker', got '%s'", services[0].Name)
+	}
+}
+
+func TestManager_ListServicesHTTP_HostNotFound(t *testing.T) {
+	m := NewManager()
+
+	req := httptest.NewRequest("GET", "/api/physical-hosts/nonexistent/services", nil)
+	w := httptest.NewRecorder()
+
+	m.ListServicesHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", w.Code)
+	}
+}
+
+func TestManager_ListServicesHTTP_HostExists(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	req := httptest.NewRequest("GET", "/api/physical-hosts/"+host.ID+"/services", nil)
+	// Set mux variables since we're calling handler directly
+	// Note: SetURLVars returns a new request with updated context
+	vars := map[string]string{"id": host.ID}
+	req = mux.SetURLVars(req, vars)
+
+	w := httptest.NewRecorder()
+
+	// This will fail to connect but should still return 500 (not 404)
+	// since the host exists
+	m.ListServicesHTTP(w, req)
+
+	// Should get an error response since SSH won't work in test env
+	if w.Code != http.StatusInternalServerError && w.Code != http.StatusOK {
+		t.Errorf("expected status 500 or 200, got %d", w.Code)
+	}
+}
+
+func TestManager_PushConfigHTTP_ValidationError(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	// Test with missing path
+	body := `{"content": "some content"}`
+	req := httptest.NewRequest("POST", "/api/physical-hosts/"+host.ID+"/config", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// Set mux variables since we're calling handler directly
+	// Note: SetURLVars returns a new request with updated context
+	vars := map[string]string{"id": host.ID}
+	req = mux.SetURLVars(req, vars)
+	w := httptest.NewRecorder()
+
+	m.PushConfigHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestManager_PushConfigHTTP_ValidationErrorMissingContent(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	// Test with missing content
+	body := `{"path": "/etc/nginx/nginx.conf"}`
+	req := httptest.NewRequest("POST", "/api/physical-hosts/"+host.ID+"/config", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// Set mux variables since we're calling handler directly
+	// Note: SetURLVars returns a new request with updated context
+	vars := map[string]string{"id": host.ID}
+	req = mux.SetURLVars(req, vars)
+	w := httptest.NewRecorder()
+
+	m.PushConfigHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestManager_PushConfigHTTP_HostNotFound(t *testing.T) {
+	m := NewManager()
+
+	body := `{"path": "/etc/nginx/nginx.conf", "content": "some config"}`
+	req := httptest.NewRequest("POST", "/api/physical-hosts/nonexistent/config", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	m.PushConfigHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", w.Code)
+	}
+}
+
+func TestManager_PushConfig_InvalidRequest(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	// Test with nil request
+	err := m.PushConfig(host.ID, nil)
+	if err == nil {
+		t.Error("expected error for nil request")
+	}
+
+	// Test with empty path
+	err = m.PushConfig(host.ID, &PushConfigRequest{Path: "", Content: "test"})
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+
+	// Test with empty content
+	err = m.PushConfig(host.ID, &PushConfigRequest{Path: "/etc/test", Content: ""})
+	if err == nil {
+		t.Error("expected error for empty content")
+	}
+}
+
+func TestManager_PushConfig_NonExistentHost(t *testing.T) {
+	m := NewManager()
+
+	err := m.PushConfig("nonexistent", &PushConfigRequest{Path: "/etc/test", Content: "test"})
+	if err == nil {
+		t.Error("expected error for non-existent host")
+	}
+}
+
+func TestManager_ListServices_NonExistentHost(t *testing.T) {
+	m := NewManager()
+
+	_, err := m.ListServices("nonexistent")
+	if err == nil {
+		t.Error("expected error for non-existent host")
+	}
+}
+
+func TestPushConfigRequest_Structure(t *testing.T) {
+	req := PushConfigRequest{
+		Path:    "/etc/nginx/nginx.conf",
+		Content: "worker_processes 4;",
+	}
+
+	if req.Path != "/etc/nginx/nginx.conf" {
+		t.Errorf("expected path '/etc/nginx/nginx.conf', got '%s'", req.Path)
+	}
+	if req.Content != "worker_processes 4;" {
+		t.Errorf("unexpected content: '%s'", req.Content)
 	}
 }
 

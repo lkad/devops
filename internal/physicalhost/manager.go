@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -582,4 +583,198 @@ func (m *Manager) DeleteHostHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		apierror.NotFound(w, "host not found")
 	}
+}
+
+// ListServices retrieves the list of systemd services on the host via SSH
+func (m *Manager) ListServices(id string) ([]*ServiceStatus, error) {
+	host, err := m.getHost(id)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := m.sshConnect(host)
+	if err != nil {
+		host.State = "offline"
+		return nil, fmt.Errorf("failed to connect to host: %w", err)
+	}
+	defer m.sshPutConnection(host, client)
+
+	return m.listServicesViaSSH(client)
+}
+
+// listServicesViaSSH runs systemctl to list services on the remote host
+func (m *Manager) listServicesViaSSH(client *ssh.Client) ([]*ServiceStatus, error) {
+	session, err := client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	// Run systemctl to list all service units
+	// Using --no-pager to avoid interactive output, --no-legend to omit headers
+	output, err := session.CombinedOutput("systemctl list-units --type=service --all --no-pager --no-legend")
+	if err != nil {
+		// Fallback: try to get at least running services
+		output, err = session.CombinedOutput("systemctl list-units --type=service --no-pager --no-legend")
+		if err != nil {
+			return nil, fmt.Errorf("failed to list services: %w", err)
+		}
+	}
+
+	return parseServiceList(output), nil
+}
+
+// parseServiceList parses systemctl output into ServiceStatus structs
+// Output format: UNIT LOAD ACTIVE SUB DESCRIPTION
+// Example: nginx.service loaded active running A nginx HTTP and reverse proxy server
+func parseServiceList(output []byte) []*ServiceStatus {
+	var services []*ServiceStatus
+	lines := strings.Split(string(output), "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Parse the line - format is: UNIT LOAD ACTIVE SUB DESCRIPTION
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+
+		name := fields[0]
+		// Remove .service suffix if present for cleaner names
+		if strings.HasSuffix(name, ".service") {
+			name = strings.TrimSuffix(name, ".service")
+		}
+
+		activeState := fields[2]
+		active := activeState == "active" || activeState == "running"
+
+		services = append(services, &ServiceStatus{
+			Name:       name,
+			Active:     active,
+			Uptime:     0, // systemctl list-units doesn't provide uptime directly
+			LastCheck:  time.Now(),
+		})
+	}
+
+	return services
+}
+
+// ListServicesHTTP handles GET /api/physical-hosts/:id/services
+func (m *Manager) ListServicesHTTP(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+
+	// Check if host exists
+	host := m.GetHost(id)
+	if host == nil {
+		apierror.NotFound(w, "host not found")
+		return
+	}
+
+	services, err := m.ListServices(id)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"host_id":  id,
+		"services": services,
+	})
+}
+
+// PushConfigRequest represents the config push request body
+type PushConfigRequest struct {
+	Path    string `json:"path"`    // Remote file path to write to
+	Content string `json:"content"` // Config content to write
+}
+
+// PushConfig pushes configuration content to the host via SSH
+func (m *Manager) PushConfig(id string, req *PushConfigRequest) error {
+	if req == nil || req.Path == "" || req.Content == "" {
+		return fmt.Errorf("path and content are required")
+	}
+
+	host, err := m.getHost(id)
+	if err != nil {
+		return err
+	}
+
+	client, err := m.sshConnect(host)
+	if err != nil {
+		host.State = "offline"
+		return fmt.Errorf("failed to connect to host: %w", err)
+	}
+	defer m.sshPutConnection(host, client)
+
+	return m.pushConfigViaSSH(client, req.Path, req.Content)
+}
+
+// pushConfigViaSSH writes config content to a remote file via SSH
+func (m *Manager) pushConfigViaSSH(client *ssh.Client, path, content string) error {
+	session, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create SSH session: %w", err)
+	}
+	defer session.Close()
+
+	// Use a heredoc to write the file content via SSH
+	// This avoids issues with special characters in the config content
+	// Using Sudo tee for privileged write if needed
+	cmd := fmt.Sprintf("sudo tee %s > /dev/null << 'DEVOPS_EOF'\n%s\nDEVOPS_EOF", path, content)
+
+	err = session.Run(cmd)
+	if err != nil {
+		// Try without sudo if that fails
+		cmd = fmt.Sprintf("cat > %s << 'DEVOPS_EOF'\n%s\nDEVOPS_EOF", path, content)
+		err = session.Run(cmd)
+		if err != nil {
+			return fmt.Errorf("failed to write config: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// PushConfigHTTP handles POST /api/physical-hosts/:id/config
+func (m *Manager) PushConfigHTTP(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+
+	// Check if host exists
+	host := m.GetHost(id)
+	if host == nil {
+		apierror.NotFound(w, "host not found")
+		return
+	}
+
+	var req PushConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apierror.ValidationError(w, "invalid request body")
+		return
+	}
+
+	if req.Path == "" {
+		apierror.ValidationError(w, "path is required")
+		return
+	}
+	if req.Content == "" {
+		apierror.ValidationError(w, "content is required")
+		return
+	}
+
+	if err := m.PushConfig(id, &req); err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "config pushed successfully",
+		"host_id": id,
+		"path":    req.Path,
+	})
 }
