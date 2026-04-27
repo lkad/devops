@@ -12,6 +12,241 @@ import (
 	"time"
 )
 
+func TestSNMPDeviceInfo_Fields(t *testing.T) {
+	info := &SNMPDeviceInfo{
+		IP:          "192.168.1.1",
+		SysDescr:    "Cisco IOS Software, Version 15.2",
+		SysObjectID: ".1.3.6.1.4.1.9.1.1",
+		SysName:     "core-router-01",
+		SysContact:  "admin@example.com",
+		SysLocation: "Data Center A",
+	}
+
+	if info.IP != "192.168.1.1" {
+		t.Errorf("expected IP '192.168.1.1', got '%s'", info.IP)
+	}
+	if info.SysDescr == "" {
+		t.Error("expected SysDescr to be set")
+	}
+	if info.SysObjectID == "" {
+		t.Error("expected SysObjectID to be set")
+	}
+}
+
+func TestSNMPConfig_Defaults(t *testing.T) {
+	cfg := &SNMPConfig{
+		Community: "public",
+		Timeout:   5 * time.Second,
+		Retries:   2,
+	}
+
+	if cfg.Community != "public" {
+		t.Errorf("expected Community 'public', got '%s'", cfg.Community)
+	}
+	if cfg.Timeout != 5*time.Second {
+		t.Errorf("expected Timeout 5s, got %v", cfg.Timeout)
+	}
+}
+
+func TestNewManagerWithSNMP(t *testing.T) {
+	m := NewManagerWithSNMP("private", 10*time.Second, 3)
+
+	if m.snmpCfg == nil {
+		t.Fatal("expected snmpCfg to be initialized")
+	}
+	if m.snmpCfg.Community != "private" {
+		t.Errorf("expected Community 'private', got '%s'", m.snmpCfg.Community)
+	}
+	if m.snmpCfg.Timeout != 10*time.Second {
+		t.Errorf("expected Timeout 10s, got %v", m.snmpCfg.Timeout)
+	}
+	if m.snmpCfg.Retries != 3 {
+		t.Errorf("expected Retries 3, got %d", m.snmpCfg.Retries)
+	}
+}
+
+func TestNewManager_HasDefaultSNMPConfig(t *testing.T) {
+	m := NewManager()
+
+	if m.snmpCfg == nil {
+		t.Fatal("expected snmpCfg to be initialized with defaults")
+	}
+	if m.snmpCfg.Community != "public" {
+		t.Errorf("expected default Community 'public', got '%s'", m.snmpCfg.Community)
+	}
+}
+
+func TestIdentifyDeviceType_Cisco(t *testing.T) {
+	m := &Manager{}
+
+	tests := []struct {
+		descr     string
+		objID     string
+		expected  string
+	}{
+		{"Cisco IOS Router", "", "cisco_router"},
+		{"Cisco Catalyst Switch", "", "cisco_switch"},
+		{"Cisco ASA Firewall", "", "cisco_firewall"},
+		{"", ".1.3.6.1.4.1.9.1.1", "cisco_device"},
+	}
+
+	for _, tt := range tests {
+		info := &SNMPDeviceInfo{SysDescr: tt.descr, SysObjectID: tt.objID}
+		result := m.identifyDeviceType(info)
+		if result != tt.expected {
+			t.Errorf("identifyDeviceType(%q, %q) = %q, want %q", tt.descr, tt.objID, result, tt.expected)
+		}
+	}
+}
+
+func TestIdentifyDeviceType_Juniper(t *testing.T) {
+	m := &Manager{}
+
+	tests := []struct {
+		descr     string
+		objID     string
+		expected  string
+	}{
+		{"Juniper JUNOS Router", "", "juniper_router"},
+		{"Juniper EX Switch", "", "juniper_switch"},
+		{"", ".1.3.6.1.4.1.2636.1.1", "juniper_device"},
+	}
+
+	for _, tt := range tests {
+		info := &SNMPDeviceInfo{SysDescr: tt.descr, SysObjectID: tt.objID}
+		result := m.identifyDeviceType(info)
+		if result != tt.expected {
+			t.Errorf("identifyDeviceType(%q, %q) = %q, want %q", tt.descr, tt.objID, result, tt.expected)
+		}
+	}
+}
+
+func TestIdentifyDeviceType_HP(t *testing.T) {
+	m := &Manager{}
+
+	tests := []struct {
+		descr     string
+		objID     string
+		expected  string
+	}{
+		{"HP ProCurve Switch", "", "hp_switch"},
+		{"HP J4813A Switch", "", "hp_switch"},
+		{"HP Printer", "", "hp_device"},
+		{"", ".1.3.6.1.4.1.11.2.3.4.5", "hp_device"},
+	}
+
+	for _, tt := range tests {
+		info := &SNMPDeviceInfo{SysDescr: tt.descr, SysObjectID: tt.objID}
+		result := m.identifyDeviceType(info)
+		if result != tt.expected {
+			t.Errorf("identifyDeviceType(%q, %q) = %q, want %q", tt.descr, tt.objID, result, tt.expected)
+		}
+	}
+}
+
+func TestIdentifyDeviceType_Dell(t *testing.T) {
+	m := &Manager{}
+
+	tests := []struct {
+		descr     string
+		objID     string
+		expected  string
+	}{
+		{"Dell PowerConnect Switch", "", "dell_switch"},
+		{"Dell Networking Switch", "", "dell_switch"},
+		{"Dell Server", "", "dell_device"},
+		{"", ".1.3.6.1.4.1.6027.1.1", "dell_device"},
+	}
+
+	for _, tt := range tests {
+		info := &SNMPDeviceInfo{SysDescr: tt.descr, SysObjectID: tt.objID}
+		result := m.identifyDeviceType(info)
+		if result != tt.expected {
+			t.Errorf("identifyDeviceType(%q, %q) = %q, want %q", tt.descr, tt.objID, result, tt.expected)
+		}
+	}
+}
+
+func TestIdentifyDeviceType_Generic(t *testing.T) {
+	m := &Manager{}
+
+	tests := []struct {
+		descr     string
+		objID     string
+		expected  string
+	}{
+		{"Generic Router Device", "", "router"},
+		{"Layer 3 Switch", "", "switch"},
+		{"Firewall Appliance", "", "firewall"},
+		{"Wireless Access Point", "", "wireless_ap"},
+		{"Network Printer", "", "printer"},
+	}
+
+	for _, tt := range tests {
+		info := &SNMPDeviceInfo{SysDescr: tt.descr, SysObjectID: tt.objID}
+		result := m.identifyDeviceType(info)
+		if result != tt.expected {
+			t.Errorf("identifyDeviceType(%q, %q) = %q, want %q", tt.descr, tt.objID, result, tt.expected)
+		}
+	}
+}
+
+func TestIdentifyDeviceType_Nil(t *testing.T) {
+	m := &Manager{}
+	result := m.identifyDeviceType(nil)
+	if result != "unknown" {
+		t.Errorf("identifyDeviceType(nil) = %q, want %q", result, "unknown")
+	}
+}
+
+func TestBuildSNMPLabels(t *testing.T) {
+	m := &Manager{}
+
+	info := &SNMPDeviceInfo{
+		IP:          "192.168.1.1",
+		SysDescr:    "Cisco IOS Router",
+		SysObjectID: ".1.3.6.1.4.1.9.1.1",
+		SysName:     "router-01",
+		SysContact:  "admin@example.com",
+		SysLocation: "Data Center",
+	}
+
+	labels := m.buildSNMPLabels(info)
+
+	if labels["snmp_sysdescr"] != info.SysDescr {
+		t.Errorf("expected snmp_sysdescr %q, got %q", info.SysDescr, labels["snmp_sysdescr"])
+	}
+	if labels["snmp_sysObjectID"] != info.SysObjectID {
+		t.Errorf("expected snmp_sysObjectID %q, got %q", info.SysObjectID, labels["snmp_sysObjectID"])
+	}
+	if labels["snmp_contact"] != info.SysContact {
+		t.Errorf("expected snmp_contact %q, got %q", info.SysContact, labels["snmp_contact"])
+	}
+	if labels["snmp_location"] != info.SysLocation {
+		t.Errorf("expected snmp_location %q, got %q", info.SysLocation, labels["snmp_location"])
+	}
+}
+
+func TestParseSNMPValue(t *testing.T) {
+	m := &Manager{}
+
+	tests := []struct {
+		input    interface{}
+		expected string
+	}{
+		{[]byte("test string"), "test string"},
+		{"direct string", "direct string"},
+		{int(42), "42"},
+	}
+
+	for _, tt := range tests {
+		result := m.parseSNMPValue(tt.input)
+		if result != tt.expected {
+			t.Errorf("parseSNMPValue(%v) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
 func TestManager_NewManager(t *testing.T) {
 	m := NewManager()
 	if m.status == nil {
