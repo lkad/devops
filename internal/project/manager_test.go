@@ -153,20 +153,23 @@ func TestPagination(t *testing.T) {
 		Data: []string{"a", "b", "c"},
 		Pagination: Pagination{
 			Total:   100,
-			Page:    2,
-			PerPage: 10,
-			Pages:   10,
+			Limit:   10,
+			Offset:  20,
+			HasMore: true,
 		},
 	}
 
 	if pr.Pagination.Total != 100 {
 		t.Errorf("expected total 100, got %d", pr.Pagination.Total)
 	}
-	if pr.Pagination.Page != 2 {
-		t.Errorf("expected page 2, got %d", pr.Pagination.Page)
+	if pr.Pagination.Limit != 10 {
+		t.Errorf("expected limit 10, got %d", pr.Pagination.Limit)
 	}
-	if pr.Pagination.Pages != 10 {
-		t.Errorf("expected pages 10, got %d", pr.Pagination.Pages)
+	if pr.Pagination.Offset != 20 {
+		t.Errorf("expected offset 20, got %d", pr.Pagination.Offset)
+	}
+	if !pr.Pagination.HasMore {
+		t.Errorf("expected hasMore true, got false")
 	}
 }
 
@@ -174,26 +177,27 @@ func TestManager_parsePagination(t *testing.T) {
 	m := &Manager{}
 
 	tests := []struct {
-		url      string
-		wantPage int
-		wantPP   int
+		url        string
+		wantLimit  int
+		wantOffset int
 	}{
-		{"/", 1, 50},
-		{"/?page=3", 3, 50},
-		{"/?per_page=20", 1, 20},
-		{"/?page=5&per_page=25", 5, 25},
-		{"/?page=-1", 1, 50},
-		{"/?per_page=200", 1, 50},
+		{"/", 50, 0},
+		{"/?limit=10", 10, 0},
+		{"/?offset=20", 50, 20},
+		{"/?limit=25&offset=50", 25, 50},
+		{"/?limit=-1", 50, 0},
+		{"/?offset=-5", 50, 0},
+		{"/?limit=200", 50, 0},
 	}
 
 	for _, tt := range tests {
 		req := httptest.NewRequest("GET", tt.url, nil)
-		page, perPage := m.parsePagination(req)
-		if page != tt.wantPage {
-			t.Errorf("parsePagination(%s): page = %d, want %d", tt.url, page, tt.wantPage)
+		limit, offset := m.parsePagination(req)
+		if limit != tt.wantLimit {
+			t.Errorf("parsePagination(%s): limit = %d, want %d", tt.url, limit, tt.wantLimit)
 		}
-		if perPage != tt.wantPP {
-			t.Errorf("parsePagination(%s): perPage = %d, want %d", tt.url, perPage, tt.wantPP)
+		if offset != tt.wantOffset {
+			t.Errorf("parsePagination(%s): offset = %d, want %d", tt.url, offset, tt.wantOffset)
 		}
 	}
 }
@@ -201,30 +205,43 @@ func TestManager_parsePagination(t *testing.T) {
 func TestManager_paginatedResponse(t *testing.T) {
 	m := &Manager{}
 	data := []string{"a", "b", "c"}
-	resp := m.paginatedResponse(data, 100, 2, 10)
+	resp := m.paginatedResponse(data, 100, 10, 20)
 
 	if resp.Pagination.Total != 100 {
 		t.Errorf("expected total 100, got %d", resp.Pagination.Total)
 	}
-	if resp.Pagination.Page != 2 {
-		t.Errorf("expected page 2, got %d", resp.Pagination.Page)
+	if resp.Pagination.Limit != 10 {
+		t.Errorf("expected limit 10, got %d", resp.Pagination.Limit)
 	}
-	if resp.Pagination.PerPage != 10 {
-		t.Errorf("expected perPage 10, got %d", resp.Pagination.PerPage)
+	if resp.Pagination.Offset != 20 {
+		t.Errorf("expected offset 20, got %d", resp.Pagination.Offset)
 	}
-	if resp.Pagination.Pages != 10 {
-		t.Errorf("expected pages 10, got %d", resp.Pagination.Pages)
+	// offset(20) + len(data)(3) < total(100), so hasMore = true
+	if !resp.Pagination.HasMore {
+		t.Errorf("expected hasMore true, got false")
 	}
 }
 
 func TestManager_paginatedResponse_remainder(t *testing.T) {
 	m := &Manager{}
 	data := []string{}
-	resp := m.paginatedResponse(data, 95, 1, 10)
+	resp := m.paginatedResponse(data, 95, 10, 90)
 
-	// 95 / 10 = 9 remainder 5, so pages = 10
-	if resp.Pagination.Pages != 10 {
-		t.Errorf("expected pages 10, got %d", resp.Pagination.Pages)
+	// When data is empty (dataLen=0), hasMore should be false regardless of offset
+	// because an empty page indicates we've reached the end
+	if resp.Pagination.HasMore {
+		t.Errorf("expected hasMore false, got true")
+	}
+}
+
+func TestManager_paginatedResponse_no_more(t *testing.T) {
+	m := &Manager{}
+	data := []string{"a", "b", "c"}
+	resp := m.paginatedResponse(data, 3, 10, 0)
+
+	// offset(0) + len(data)(3) = total(3), so hasMore = false
+	if resp.Pagination.HasMore {
+		t.Errorf("expected hasMore false, got true")
 	}
 }
 

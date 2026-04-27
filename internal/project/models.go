@@ -115,12 +115,12 @@ type FinOpsRow struct {
 	Unit         string `json:"unit"`
 }
 
-// Pagination holds pagination metadata
+// Pagination holds pagination metadata per API spec
 type Pagination struct {
-	Total   int `json:"total"`
-	Page    int `json:"page"`
-	PerPage int `json:"per_page"`
-	Pages   int `json:"pages"`
+	Total   int  `json:"total"`
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	HasMore bool `json:"has_more"`
 }
 
 // PaginatedResponse wraps a list response with pagination

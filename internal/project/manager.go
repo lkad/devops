@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -43,22 +44,13 @@ func (m *Manager) parsePagination(r *http.Request) (limit, offset int) {
 
 func (m *Manager) paginatedResponse(data interface{}, total, limit, offset int) *PaginatedResponse {
 	dataLen := 0
-	switch v := data.(type) {
-	case []*BusinessLine:
-		dataLen = len(v)
-	case []*System:
-		dataLen = len(v)
-	case []*Project:
-		dataLen = len(v)
-	case []*AuditLog:
-		dataLen = len(v)
-	default:
-		dataLen = 0
+	if data != nil {
+		v := reflect.ValueOf(data)
+		if v.Kind() == reflect.Slice {
+			dataLen = v.Len()
+		}
 	}
-	hasMore := offset+dataLen < total
-	if dataLen == 0 {
-		hasMore = false
-	}
+	hasMore := dataLen > 0 && offset+dataLen < total
 	return &PaginatedResponse{
 		Data: data,
 		Pagination: Pagination{

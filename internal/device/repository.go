@@ -120,6 +120,41 @@ func (r *Repository) List() ([]*Device, error) {
 	return devices, nil
 }
 
+func (r *Repository) ListPaginated(limit, offset int) ([]*Device, int, error) {
+	// Get total count
+	var total int
+	countQuery := `SELECT COUNT(*) FROM devices`
+	if err := r.db.QueryRow(countQuery).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// Get paginated results
+	query := `
+		SELECT id, type, name, status, labels, business_unit, compute_cluster, parent_id, config, metadata, registered_at, last_seen, last_config_sync, created_at, updated_at
+		FROM devices ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+	rows, err := r.db.Query(query, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var devices []*Device
+	for rows.Next() {
+		d := &Device{}
+		var labels, config, metadata []byte
+		if err := rows.Scan(&d.ID, &d.Type, &d.Name, &d.Status, &labels, &d.BusinessUnit, &d.ComputeCluster, &d.ParentID, &config, &metadata, &d.RegisteredAt, &d.LastSeen, &d.LastConfigSync, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			return nil, 0, err
+		}
+		json.Unmarshal(labels, &d.Labels)
+		json.Unmarshal(config, &d.Config)
+		json.Unmarshal(metadata, &d.Metadata)
+		devices = append(devices, d)
+	}
+	return devices, total, nil
+}
+
 func (r *Repository) Update(d *Device) error {
 	query := `
 		UPDATE devices SET

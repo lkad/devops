@@ -162,11 +162,22 @@ func TestManager_ListPipelinesHTTP(t *testing.T) {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 
-	var pipelines []*Pipeline
-	if err := json.NewDecoder(w.Body).Decode(&pipelines); err != nil {
+	var resp struct {
+		Data       []*Pipeline `json:"data"`
+		Pagination struct {
+			Total   int  `json:"total"`
+			Limit   int  `json:"limit"`
+			Offset  int  `json:"offset"`
+			HasMore bool `json:"has_more"`
+		} `json:"pagination"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if len(pipelines) != 1 {
-		t.Errorf("expected 1 pipeline, got %d", len(pipelines))
+	if len(resp.Data) != 1 {
+		t.Errorf("expected 1 pipeline, got %d", len(resp.Data))
+	}
+	if resp.Pagination.Total != 1 {
+		t.Errorf("expected total 1, got %d", resp.Pagination.Total)
 	}
 }
