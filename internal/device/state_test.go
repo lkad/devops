@@ -71,3 +71,47 @@ func TestState_String(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvironment(t *testing.T) {
+	tests := []struct {
+		env      Environment
+		expected string
+	}{
+		{EnvProd, "prod"},
+		{EnvDev, "dev"},
+		{EnvTest, "test"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			if result := string(tt.env); result != tt.expected {
+				t.Errorf("Environment(%s) = %s, want %s", tt.env, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDevice_Environment(t *testing.T) {
+	device := &Device{
+		ID:          "test-id",
+		Type:        "test-type",
+		Name:        "test-device",
+		Environment: EnvProd,
+	}
+
+	if device.Environment != EnvProd {
+		t.Errorf("Device.Environment = %s, want %s", device.Environment, EnvProd)
+	}
+}
+
+func TestRegisterOpts_Environment(t *testing.T) {
+	opts := RegisterOpts{
+		Type:        "agent",
+		Name:        "test-device",
+		Environment: EnvDev,
+	}
+
+	if opts.Environment != EnvDev {
+		t.Errorf("RegisterOpts.Environment = %s, want %s", opts.Environment, EnvDev)
+	}
+}

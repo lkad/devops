@@ -17,11 +17,21 @@ type Manager struct {
 	repo *Repository
 }
 
+// Environment represents the deployment environment
+type Environment string
+
+const (
+	EnvProd  Environment = "prod"
+	EnvDev   Environment = "dev"
+	EnvTest  Environment = "test"
+)
+
 type Device struct {
 	ID              string            `json:"id"`
 	Type            string            `json:"type"`
 	Name            string            `json:"name"`
 	Status          State             `json:"status"`
+	Environment     Environment       `json:"environment"`
 	Labels          map[string]string `json:"labels"`
 	BusinessUnit    string            `json:"business_unit,omitempty"`
 	ComputeCluster  string            `json:"compute_cluster,omitempty"`
@@ -45,6 +55,7 @@ type StateTransition struct {
 type RegisterOpts struct {
 	Type           string
 	Name           string
+	Environment    Environment
 	Labels         map[string]string
 	BusinessUnit   string
 	ComputeCluster string
@@ -63,11 +74,18 @@ func (m *Manager) RegisterDevice(opts RegisterOpts) (*Device, error) {
 	id := uuid.New().String()
 	now := time.Now()
 
+	// Default to dev environment if not specified
+	env := opts.Environment
+	if env == "" {
+		env = EnvDev
+	}
+
 	device := &Device{
 		ID:             id,
 		Type:           opts.Type,
 		Name:           opts.Name,
 		Status:         StatePending,
+		Environment:    env,
 		Labels:         opts.Labels,
 		BusinessUnit:   opts.BusinessUnit,
 		ComputeCluster: opts.ComputeCluster,
@@ -128,6 +146,9 @@ func (m *Manager) UpdateDevice(id string, updates map[string]interface{}) (*Devi
 	}
 	if cc, ok := updates["compute_cluster"].(string); ok {
 		device.ComputeCluster = cc
+	}
+	if env, ok := updates["environment"].(string); ok {
+		device.Environment = Environment(env)
 	}
 
 	if err := m.repo.Update(device); err != nil {
