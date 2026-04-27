@@ -469,3 +469,91 @@ func TestManager_GenerateSampleLogsHTTP(t *testing.T) {
 		t.Error("expected response to contain generated field")
 	}
 }
+
+// ElasticsearchBackend tests
+func TestElasticsearchBackend_New(t *testing.T) {
+	cfg := LogsConfig{Backend: "elasticsearch", ESURL: "http://localhost:9200"}
+	es := NewElasticsearchBackend(cfg)
+	if es == nil {
+		t.Error("expected non-nil ElasticsearchBackend")
+	}
+	if es.url != "http://localhost:9200" {
+		t.Errorf("expected url 'http://localhost:9200', got '%s'", es.url)
+	}
+	if es.index != "devops-logs" {
+		t.Errorf("expected index 'devops-logs', got '%s'", es.index)
+	}
+}
+
+func TestElasticsearchBackend_esURL(t *testing.T) {
+	cfg := LogsConfig{Backend: "elasticsearch", ESURL: "http://localhost:9200"}
+	es := NewElasticsearchBackend(cfg)
+	url := es.esURL("/_cluster/health")
+	if url != "http://localhost:9200/_cluster/health" {
+		t.Errorf("expected 'http://localhost:9200/_cluster/health', got '%s'", url)
+	}
+}
+
+func TestElasticsearchBackend_buildQuery(t *testing.T) {
+	cfg := LogsConfig{Backend: "elasticsearch", ESURL: "http://localhost:9200"}
+	es := NewElasticsearchBackend(cfg)
+
+	opts := QueryOptions{Level: "error", Source: "api"}
+	query := es.buildQuery(opts)
+
+	// Verify query structure
+	if query["query"] == nil {
+		t.Error("expected query to have 'query' field")
+	}
+}
+
+func TestElasticsearchBackend_buildQueryEmpty(t *testing.T) {
+	cfg := LogsConfig{Backend: "elasticsearch", ESURL: "http://localhost:9200"}
+	es := NewElasticsearchBackend(cfg)
+
+	opts := QueryOptions{}
+	query := es.buildQuery(opts)
+
+	// Empty query should use match_all
+	if query["query"] == nil {
+		t.Error("expected query to have 'query' field")
+	}
+}
+
+// LokiBackend tests
+func TestLokiBackend_New(t *testing.T) {
+	cfg := LogsConfig{Backend: "loki", LokiURL: "http://localhost:3100"}
+	loki := NewLokiBackend(cfg)
+	if loki == nil {
+		t.Error("expected non-nil LokiBackend")
+	}
+	if loki.url != "http://localhost:3100" {
+		t.Errorf("expected url 'http://localhost:3100', got '%s'", loki.url)
+	}
+}
+
+func TestLokiBackend_lokiURL(t *testing.T) {
+	cfg := LogsConfig{Backend: "loki", LokiURL: "http://localhost:3100"}
+	loki := NewLokiBackend(cfg)
+	url := loki.lokiURL("/loki/api/v1/push")
+	if url != "http://localhost:3100/loki/api/v1/push" {
+		t.Errorf("expected 'http://localhost:3100/loki/api/v1/push', got '%s'", url)
+	}
+}
+
+// Test that backend selection works correctly
+func TestNewManager_ElasticsearchBackendSelection(t *testing.T) {
+	cfg := LogsConfig{Backend: "elasticsearch", ESURL: "http://localhost:9200"}
+	m := NewManager(cfg, nil)
+	if m == nil {
+		t.Error("expected non-nil Manager")
+	}
+}
+
+func TestNewManager_LokiBackendSelection(t *testing.T) {
+	cfg := LogsConfig{Backend: "loki", LokiURL: "http://localhost:3100"}
+	m := NewManager(cfg, nil)
+	if m == nil {
+		t.Error("expected non-nil Manager")
+	}
+}

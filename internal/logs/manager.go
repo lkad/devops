@@ -1,8 +1,10 @@
 package logs
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -591,43 +593,394 @@ func (b *LocalBackend) GetStats() (*Stats, error) {
 type ElasticsearchBackend struct {
 	url    string
 	index  string
+	client *http.Client
 }
 
 func NewElasticsearchBackend(cfg LogsConfig) *ElasticsearchBackend {
 	return &ElasticsearchBackend{
 		url:    cfg.ESURL,
 		index:  "devops-logs",
+		client: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
+func (b *ElasticsearchBackend) esURL(path string) string {
+	return b.url + path
+}
+
 func (b *ElasticsearchBackend) Write(entry *Entry) error {
-	return fmt.Errorf("elasticsearch backend not implemented")
+	doc := map[string]interface{}{
+		"@timestamp": entry.Timestamp.Format(time.RFC3339Nano),
+		"level":      entry.Level,
+		"message":    entry.Message,
+		"source":     entry.Source,
+		"resource":   entry.Resource,
+		"metadata":   entry.Metadata,
+		"tags":       entry.Tags,
+	}
+
+	data, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("failed to marshal document: %w", err)
+	}
+
+	resp, err := http.Post(
+		b.esURL("/"+b.index+"/_doc"),
+		"application/json",
+		bytes.NewReader(data),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to write to elasticsearch: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("elasticsearch error: %s", string(body))
+	}
+
+	return nil
 }
 
 func (b *ElasticsearchBackend) Query(opts QueryOptions) ([]*Entry, error) {
-	return nil, fmt.Errorf("elasticsearch backend not implemented")
+	query := b.buildQuery(opts)
+	data, err := json.Marshal(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal query: %w", err)
+	}
+
+	resp, err := http.Post(
+		b.esURL("/"+b.index+"/_search?size=100"),
+		"application/json",
+		bytes.NewReader(data),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query elasticsearch: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("elasticsearch error: %s", string(body))
+	}
+
+	var result struct {
+		Hits struct {
+			Hits []struct {
+				Source json.RawMessage `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	entries := make([]*Entry, 0, len(result.Hits.Hits))
+	for _, hit := range result.Hits.Hits {
+		var entry Entry
+		if err := json.Unmarshal(hit.Source, &entry); err != nil {
+			continue
+		}
+		entries = append(entries, &entry)
+	}
+
+	return entries, nil
+}
+
+func (b *ElasticsearchBackend) buildQuery(opts QueryOptions) map[string]interface{} {
+	must := []map[string]interface{}{}
+
+	if opts.Level != "" {
+		must = append(must, map[string]interface{}{
+			"term": map[string]interface{}{"level": opts.Level},
+		})
+	}
+	if opts.Source != "" {
+		must = append(must, map[string]interface{}{
+			"term": map[string]interface{}{"source": opts.Source},
+		})
+	}
+	if opts.Search != "" {
+		must = append(must, map[string]interface{}{
+			"match": map[string]interface{}{"message": opts.Search},
+		})
+	}
+	if opts.Resource != "" {
+		must = append(must, map[string]interface{}{
+			"term": map[string]interface{}{"resource": opts.Resource},
+		})
+	}
+
+	query := map[string]interface{}{
+		"query": map[string]interface{}{
+			"bool": map[string]interface{}{
+				"must": must,
+			},
+		},
+		"sort": []map[string]interface{}{
+			{"@timestamp": map[string]interface{}{"order": "desc"}},
+		},
+	}
+
+	if len(must) == 0 {
+		query = map[string]interface{}{
+			"query": map[string]interface{}{
+				"match_all": map[string]interface{}{},
+			},
+			"sort": []map[string]interface{}{
+				{"@timestamp": map[string]interface{}{"order": "desc"}},
+			},
+		}
+	}
+
+	return query
 }
 
 func (b *ElasticsearchBackend) GetStats() (*Stats, error) {
-	return nil, fmt.Errorf("elasticsearch backend not implemented")
+	query := map[string]interface{}{
+		"size": 0,
+		"aggs": map[string]interface{}{
+			"by_level": map[string]interface{}{
+				"terms": map[string]interface{}{"field": "level"},
+			},
+			"by_source": map[string]interface{}{
+				"terms": map[string]interface{}{"field": "source"},
+			},
+		},
+	}
+
+	data, err := json.Marshal(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal query: %w", err)
+	}
+
+	resp, err := http.Post(
+		b.esURL("/"+b.index+"/_search"),
+		"application/json",
+		bytes.NewReader(data),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stats from elasticsearch: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("elasticsearch error: %s", string(body))
+	}
+
+	var result struct {
+		Hits struct {
+			Total struct {
+				Value int `json:"value"`
+			} `json:"total"`
+		} `json:"hits"`
+		Aggregations struct {
+			ByLevel struct {
+				Buckets []struct {
+					Key      string `json:"key"`
+					DocCount int    `json:"doc_count"`
+				} `json:"buckets"`
+			} `json:"by_level"`
+			BySource struct {
+				Buckets []struct {
+					Key      string `json:"key"`
+					DocCount int    `json:"doc_count"`
+				} `json:"buckets"`
+			} `json:"by_source"`
+		} `json:"aggregations"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	stats := &Stats{
+		Total:    result.Hits.Total.Value,
+		ByLevel:  make(map[string]int),
+		BySource: make(map[string]int),
+	}
+
+	for _, bucket := range result.Aggregations.ByLevel.Buckets {
+		stats.ByLevel[bucket.Key] = bucket.DocCount
+	}
+	for _, bucket := range result.Aggregations.BySource.Buckets {
+		stats.BySource[bucket.Key] = bucket.DocCount
+	}
+
+	return stats, nil
 }
 
 type LokiBackend struct {
-	url string
+	url    string
+	client *http.Client
 }
 
 func NewLokiBackend(cfg LogsConfig) *LokiBackend {
-	return &LokiBackend{url: cfg.LokiURL}
+	return &LokiBackend{
+		url:    cfg.LokiURL,
+		client: &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+func (b *LokiBackend) lokiURL(path string) string {
+	return b.url + path
 }
 
 func (b *LokiBackend) Write(entry *Entry) error {
-	return fmt.Errorf("loki backend not implemented")
+	// Loki uses a push-based API with stream labels
+	labels := map[string]string{
+		"level":  entry.Level,
+		"source": entry.Source,
+	}
+	if entry.Resource != "" {
+		labels["resource"] = entry.Resource
+	}
+
+	stream := map[string]interface{}{
+		"stream": labels,
+		"values": [][]string{
+			{
+				fmt.Sprintf("%d", entry.Timestamp.UnixNano()),
+				entry.Message,
+			},
+		},
+	}
+
+	pushRequest := map[string]interface{}{
+		"streams": []map[string]interface{}{stream},
+	}
+
+	data, err := json.Marshal(pushRequest)
+	if err != nil {
+		return fmt.Errorf("failed to marshal push request: %w", err)
+	}
+
+	resp, err := http.Post(
+		b.lokiURL("/loki/api/v1/push"),
+		"application/json",
+		bytes.NewReader(data),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to write to loki: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("loki error: %s", string(body))
+	}
+
+	return nil
 }
 
 func (b *LokiBackend) Query(opts QueryOptions) ([]*Entry, error) {
-	return nil, fmt.Errorf("loki backend not implemented")
+	// Build LogQL query
+	query := ""
+	if opts.Search != "" {
+		query = fmt.Sprintf(`{source="%s"} |= "%s"`, opts.Source, opts.Search)
+	} else if opts.Level != "" {
+		query = fmt.Sprintf(`{source="%s"} |= "%s"`, opts.Source, opts.Level)
+	} else {
+		query = `{source="` + opts.Source + `"}`
+	}
+
+	if query == "" {
+		query = "{}"
+	}
+
+	url := b.lokiURL("/loki/api/v1/query_range") + "?query=" + query +
+		"&limit=" + strconv.Itoa(opts.Limit) +
+		"&start=" + fmt.Sprintf("%d", time.Now().Add(-24*time.Hour).UnixNano()) +
+		"&end=" + fmt.Sprintf("%d", time.Now().UnixNano())
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query loki: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("loki error: %s", string(body))
+	}
+
+	var result struct {
+		Status string `json:"status"`
+		Data   struct {
+			Result []struct {
+				Stream map[string]string `json:"stream"`
+				Values [][]string        `json:"values"`
+			} `json:"result"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode loki response: %w", err)
+	}
+
+	entries := make([]*Entry, 0, len(result.Data.Result))
+	for _, stream := range result.Data.Result {
+		for _, value := range stream.Values {
+			if len(value) < 2 {
+				continue
+			}
+			ts, _ := strconv.ParseInt(value[0], 10, 64)
+			entry := &Entry{
+				ID:        uuid.New().String(),
+				Timestamp: time.Unix(0, ts),
+				Message:   value[1],
+				Level:     stream.Stream["level"],
+				Source:    stream.Stream["source"],
+				Resource:  stream.Stream["resource"],
+				Tags:      []string{},
+			}
+			entries = append(entries, entry)
+		}
+	}
+
+	return entries, nil
 }
 
 func (b *LokiBackend) GetStats() (*Stats, error) {
-	return nil, fmt.Errorf("loki backend not implemented")
+	// Use stats endpoint or aggregate query
+	url := b.lokiURL("/loki/api/v1/label/level/values")
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get loki stats: %w", err)
+	}
+	defer resp.Body.Close()
+
+	stats := &Stats{
+		ByLevel:  make(map[string]int),
+		BySource: make(map[string]int),
+	}
+
+	if resp.StatusCode >= 400 {
+		// Return empty stats if Loki is not available
+		return stats, nil
+	}
+
+	var result struct {
+		Status string   `json:"status"`
+		Data   []string `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return stats, nil
+	}
+
+	// Query for total approximate count using a count aggregation
+	countQuery := "sum(count_over_time({}[24h]))"
+	countURL := b.lokiURL("/loki/api/v1/query") + "?query=" + countQuery
+
+	countResp, err := http.Get(countURL)
+	if err != nil {
+		return stats, nil
+	}
+	defer countResp.Body.Close()
+
+	return stats, nil
 }
