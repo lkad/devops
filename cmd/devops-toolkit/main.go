@@ -2,113 +2,485 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/devops-toolkit/internal/auth"
+	"github.com/devops-toolkit/internal/config"
 	"github.com/devops-toolkit/internal/device"
 	"github.com/devops-toolkit/internal/logs"
 	"github.com/devops-toolkit/internal/metrics"
+	"github.com/devops-toolkit/internal/alerts"
+	"github.com/devops-toolkit/internal/auth"
+	"github.com/devops-toolkit/internal/auth/ldap"
+	"github.com/devops-toolkit/internal/pipeline"
+	"github.com/devops-toolkit/internal/k8s"
+	"github.com/devops-toolkit/internal/discovery"
+	"github.com/devops-toolkit/internal/physicalhost"
+	"github.com/devops-toolkit/internal/project"
 	"github.com/devops-toolkit/internal/websocket"
-	"github.com/devops-toolkit/pkg/config"
-	"github.com/devops-toolkit/pkg/database"
-	"github.com/devops-toolkit/pkg/middleware"
+	"github.com/gorilla/mux"
 )
+
+type statusCodeWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *statusCodeWriter) WriteHeader(code int) {
+	w.statusCode = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// authUserProvider implements project.UserProvider by extracting user from request context
+type authUserProvider struct{}
+
+func (a *authUserProvider) GetUserFromRequest(r *http.Request) *project.User {
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		return &project.User{Username: user.Username}
+	}
+	return nil
+}
 
 func main() {
 	// Load configuration
-	configPath := os.Getenv("CONFIG_PATH")
-	if configPath == "" {
-		configPath = "config.yaml"
-	}
-
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load("config.yaml")
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Printf("Config load error (using defaults): %v", err)
+		cfg = &config.Config{
+			Server: config.ServerConfig{Port: 3000, Host: "0.0.0.0"},
+		}
 	}
 
-	// Initialize database
-	db, err := initDatabase(cfg)
-	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
-	}
-	defer db.Close()
-
-	// Initialize database connection
-	database.Set(db)
-
-	// Initialize WebSocket hub
+	// Initialize managers
 	wsHub := websocket.NewHub()
-	websocket.SetHub(wsHub)
 	go wsHub.Run()
 
-	// Initialize services
-	jwtService := auth.NewJWTService(cfg.Auth.JWT_SECRET, cfg.Auth.TokenExpiry)
+	// Initialize LDAP client (uses env vars: LDAP_URL, LDAP_BASE_DN, etc.)
+	ldapClient, err := ldap.NewClient(ldap.DefaultConfig())
+	if err != nil {
+		log.Printf("Warning: LDAP client unavailable: %v", err)
+		ldapClient = nil
+	}
 
-	// Initialize LDAP connection pool
-	var ldapClient *auth.LDAPClient
-	if cfg.Auth.LDAP.Enabled {
-		ldapPool, err := auth.NewLDAPPool(&cfg.Auth.LDAP, auth.PoolConfig{
-			MaxConnections: 5,
-			MaxAge:        5 * time.Minute,
+	// Initialize auth handler
+	authHandler := auth.NewHandler(ldapClient, &cfg.Auth)
+
+	deviceMgr, err := device.NewManager(cfg.Database.DSN())
+	if err != nil {
+		log.Printf("Warning: Device manager unavailable (DB connection failed): %v", err)
+		deviceMgr = nil
+	}
+
+	// Create user provider that extracts user from request context
+	userProvider := &authUserProvider{}
+
+	projectMgr, err := project.NewManagerWithDSN(cfg.Database.DSN(), userProvider)
+	if err != nil {
+		log.Printf("Warning: Project manager unavailable (DB connection failed): %v", err)
+		projectMgr = nil
+	}
+	logMgr := logs.NewManager(logs.LogsConfig{
+		Backend:       cfg.Logs.Backend,
+		RetentionDays: cfg.Logs.RetentionDays,
+	}, func(entry *logs.Entry) {
+		wsHub.BroadcastLog(entry)
+	})
+	metricsMgr := metrics.NewCollector()
+	// Use metrics.Collector directly since it implements the MetricsRecorder interface
+	alertsMgr := alerts.NewManager(metricsMgr)
+	pipelineMgr := pipeline.NewManager()
+	k8sMgr := k8s.NewClusterManager()
+	discoveryMgr := discovery.NewManager()
+	physicalhostMgr := physicalhost.NewManager()
+
+	// Create router
+	r := mux.NewRouter()
+
+	// HTTP metrics middleware
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			path := r.URL.Path
+			method := r.Method
+
+			// Wrap response writer to capture status code
+			wrapped := &statusCodeWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			next.ServeHTTP(wrapped, r)
+
+			duration := time.Since(start).Milliseconds()
+			status := fmt.Sprintf("%d", wrapped.statusCode)
+			metricsMgr.RecordHTTPRequest(path, method, status, float64(duration))
 		})
-		if err != nil {
-			log.Printf("Warning: failed to create LDAP pool: %v, falling back to per-request connections", err)
-			ldapClient = auth.NewLDAPClient(&cfg.Auth.LDAP)
-		} else {
-			ldapClient = auth.NewLDAPClientWithPool(&cfg.Auth.LDAP, ldapPool)
-			defer ldapPool.Close()
-		}
+	})
+
+	// Determine base path for API routes
+	basePath := cfg.Server.BasePath
+	if basePath == "" {
+		basePath = "/"
+	}
+
+	// Create API router using subrouter for base path
+	// When base path is set, routes must be registered WITH the base path on the subrouter
+	// For dual-path compatibility (direct and via proxy), we use main router directly
+	var apiRouter *mux.Router
+	if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
+		apiRouter = r.PathPrefix(cfg.Server.BasePath).Subrouter()
+		log.Printf("Base path configured: %s", cfg.Server.BasePath)
 	} else {
-		ldapClient = auth.NewLDAPClient(&cfg.Auth.LDAP)
+		apiRouter = r
 	}
 
-	authService := auth.NewAuthService(jwtService, ldapClient)
-
-	deviceRepo := device.NewRepository(db)
-	deviceService := device.NewService(deviceRepo)
-	logBackend := logs.NewLocalBackend()
-	logService := logs.NewService(logBackend)
-	logService.SetHub(wsHub)
-
-	// Initialize handlers
-	authHandler := auth.NewAuthHandler(authService, jwtService)
-	deviceHandler := device.NewHandler(deviceService)
-	logHandler := logs.NewHandler(logService)
-	metricsHandler := metrics.Handler()
-
-	// Create HTTP server
-	server := &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.App.Host, cfg.App.Port),
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
-		IdleTimeout:  cfg.Server.IdleTimeout,
+	// Helper to register routes on both main router and API subrouter for dual access
+	registerRoute := func(path string, handler http.HandlerFunc) {
+		apiRouter.HandleFunc(path, handler)
+		if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
+			r.HandleFunc(path, handler)
+		}
 	}
 
-	// Setup routes
-	mux := http.NewServeMux()
-	setupRoutes(mux, cfg, authHandler, authService, deviceHandler, logHandler, metricsHandler, wsHub, ldapClient)
+	// Health check (always at root for direct access and proxy health checks)
+	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+	})
 
-	// Apply middleware chain
-	handler := middleware.Chain(mux,
-		middleware.Recovery(),
-		middleware.RequestID(),
-		middleware.CORS(),
-		middleware.Logging(),
-	)
+	// Health check on API subrouter too (for proxy access via base path)
+	if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
+		apiRouter.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+		})
+		// Static file handler - only serve known static asset paths
+		apiRouter.PathPrefix("/assets/").Handler(http.StripPrefix(cfg.Server.BasePath, http.FileServer(http.Dir("./devops-toolkit/frontend/dist"))))
+		// Serve favicon
+		apiRouter.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, "./devops-toolkit/frontend/dist/favicon.svg")
+		})
+		// Also serve root
+		apiRouter.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, "./devops-toolkit/frontend/dist/index.html")
+		})
+	}
 
-	server.Handler = handler
+	// Auth routes
+	registerRoute("/api/auth/login", authHandler.Login)
+	registerRoute("/api/auth/logout", authHandler.Logout)
+	registerRoute("/api/auth/me", authHandler.Me)
 
-	// Start server in goroutine
+	// Device routes
+	registerRoute("/api/devices", func(w http.ResponseWriter, r *http.Request) {
+		if deviceMgr == nil {
+			http.Error(w, "device manager unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if r.Method == "GET" {
+			deviceMgr.ListDevicesHTTP(w, r)
+		} else if r.Method == "POST" {
+			deviceMgr.CreateDeviceHTTP(w, r)
+		}
+	})
+	registerRoute("/api/devices/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if deviceMgr == nil {
+			http.Error(w, "device manager unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if r.Method == "GET" {
+			deviceMgr.GetDeviceHTTP(w, r)
+		} else if r.Method == "PUT" {
+			deviceMgr.UpdateDeviceHTTP(w, r)
+		} else if r.Method == "DELETE" {
+			deviceMgr.DeleteDeviceHTTP(w, r)
+		}
+	})
+	registerRoute("/api/devices/search", func(w http.ResponseWriter, r *http.Request) {
+		if deviceMgr == nil {
+			http.Error(w, "device manager unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		deviceMgr.SearchDevicesHTTP(w, r)
+	})
+
+	// Pipeline routes
+	registerRoute("/api/pipelines", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			pipelineMgr.ListPipelinesHTTP(w, r)
+		} else if r.Method == "POST" {
+			pipelineMgr.CreatePipelineHTTP(w, r)
+		}
+	})
+	registerRoute("/api/pipelines/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			pipelineMgr.GetPipelineHTTP(w, r)
+		} else if r.Method == "DELETE" {
+			pipelineMgr.DeletePipelineHTTP(w, r)
+		}
+	})
+	registerRoute("/api/pipelines/{id}/execute", pipelineMgr.ExecutePipelineHTTP)
+
+	// Log routes
+	registerRoute("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			logMgr.QueryLogsHTTP(w, r)
+		} else if r.Method == "POST" {
+			logMgr.CreateLogHTTP(w, r)
+		}
+	})
+	registerRoute("/api/logs/stats", logMgr.GetStatsHTTP)
+	registerRoute("/api/logs/alerts", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			logMgr.ListAlertRulesHTTP(w, r)
+		} else if r.Method == "POST" {
+			logMgr.CreateAlertRuleHTTP(w, r)
+		}
+	})
+	registerRoute("/api/logs/retention", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			logMgr.GetRetentionPolicyHTTP(w, r)
+		} else if r.Method == "PUT" {
+			logMgr.UpdateRetentionPolicyHTTP(w, r)
+		}
+	})
+	registerRoute("/api/logs/retention/apply", logMgr.ApplyRetentionPolicyHTTP)
+	registerRoute("/api/logs/filters", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			logMgr.ListSavedFiltersHTTP(w, r)
+		} else if r.Method == "POST" {
+			logMgr.CreateSavedFilterHTTP(w, r)
+		}
+	})
+	registerRoute("/api/logs/generate", logMgr.GenerateSampleLogsHTTP)
+
+	// Metrics
+	registerRoute("/metrics", metricsMgr.ServePrometheus)
+	registerRoute("/api/metrics", metricsMgr.ServeJSON)
+
+	// Alert routes
+	registerRoute("/api/alerts/channels", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			alertsMgr.ListChannelsHTTP(w, r)
+		} else if r.Method == "POST" {
+			alertsMgr.AddChannelHTTP(w, r)
+		}
+	})
+	registerRoute("/api/alerts/history", alertsMgr.GetHistoryHTTP)
+
+	// K8s routes
+	registerRoute("/api/k8s/clusters", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			k8sMgr.ListClustersHTTP(w, r)
+		} else if r.Method == "POST" {
+			k8sMgr.CreateClusterHTTP(w, r)
+		}
+	})
+	registerRoute("/api/k8s/clusters/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" {
+			k8sMgr.DeleteClusterHTTP(w, r)
+		}
+	})
+	registerRoute("/api/k8s/clusters/{name}/health", k8sMgr.HealthCheckHTTP)
+	registerRoute("/api/k8s/clusters/{cluster}/nodes", k8sMgr.GetNodesHTTP)
+	registerRoute("/api/k8s/clusters/{cluster}/namespaces", k8sMgr.GetNamespacesHTTP)
+	registerRoute("/api/k8s/clusters/{cluster}/pods", k8sMgr.GetPodsHTTP)
+	registerRoute("/api/k8s/clusters/{cluster}/pods/{pod}/logs", k8sMgr.GetPodLogsHTTP)
+	// New routes per spec: /api/k8s/clusters/:id/namespaces/:ns/pods/:pod/logs
+	registerRoute("/api/k8s/clusters/{cluster}/namespaces/{ns}/pods/{pod}/logs", k8sMgr.GetPodLogsWithNamespaceHTTP)
+	registerRoute("/api/k8s/clusters/{cluster}/namespaces/{ns}/pods/{pod}/exec", k8sMgr.PodExecHTTP)
+	// Metrics endpoint: /api/k8s/clusters/:id/metrics
+	registerRoute("/api/k8s/clusters/{cluster}/metrics", k8sMgr.GetClusterMetricsHTTP)
+	registerRoute("/api/k8s/maintenance", k8sMgr.MaintenanceOpHTTP)
+
+	// Physical host routes
+	registerRoute("/api/physical-hosts", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			physicalhostMgr.ListHostsHTTP(w, r)
+		} else if r.Method == "POST" {
+			physicalhostMgr.CreateHostHTTP(w, r)
+		}
+	})
+	registerRoute("/api/physical-hosts/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			physicalhostMgr.GetHostHTTP(w, r)
+		} else if r.Method == "DELETE" {
+			physicalhostMgr.DeleteHostHTTP(w, r)
+		}
+	})
+	registerRoute("/api/physical-hosts/{id}/services", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			physicalhostMgr.ListServicesHTTP(w, r)
+		}
+	})
+	registerRoute("/api/physical-hosts/{id}/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			physicalhostMgr.PushConfigHTTP(w, r)
+		}
+	})
+
+	// Discovery routes
+	registerRoute("/api/discovery/status", discoveryMgr.GetStatusHTTP)
+	registerRoute("/api/discovery/scan", discoveryMgr.ScanHTTP)
+
+	// WebSocket (always at root for proxy compatibility)
+	r.HandleFunc("/ws", wsHub.HandleWebSocket)
+	// Also on subrouter for proxy access
+	if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
+		apiRouter.HandleFunc("/ws", wsHub.HandleWebSocket)
+	}
+
+	// Project management routes (if available)
+	if projectMgr != nil {
+		// Project Types
+		registerRoute("/api/org/project-types", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListProjectTypesHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.CreateProjectTypeHTTP(w, r)
+			}
+		})
+		registerRoute("/api/org/project-types/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" {
+				projectMgr.UpdateProjectTypeHTTP(w, r)
+			} else if r.Method == "DELETE" {
+				projectMgr.DeleteProjectTypeHTTP(w, r)
+			}
+		})
+
+		// Business Lines
+		registerRoute("/api/org/business-lines", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListBusinessLinesHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.CreateBusinessLineHTTP(w, r)
+			}
+		})
+		registerRoute("/api/org/business-lines/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.GetBusinessLineHTTP(w, r)
+			} else if r.Method == "PUT" {
+				projectMgr.UpdateBusinessLineHTTP(w, r)
+			} else if r.Method == "DELETE" {
+				projectMgr.DeleteBusinessLineHTTP(w, r)
+			}
+		})
+
+		// Systems
+		registerRoute("/api/org/business-lines/{bl_id}/systems", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListSystemsHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.CreateSystemHTTP(w, r)
+			}
+		})
+		registerRoute("/api/org/systems/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.GetSystemHTTP(w, r)
+			} else if r.Method == "PUT" {
+				projectMgr.UpdateSystemHTTP(w, r)
+			} else if r.Method == "DELETE" {
+				projectMgr.DeleteSystemHTTP(w, r)
+			}
+		})
+
+		// Projects
+		registerRoute("/api/org/systems/{sys_id}/projects", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListProjectsHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.CreateProjectHTTP(w, r)
+			}
+		})
+		registerRoute("/api/org/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.GetProjectHTTP(w, r)
+			} else if r.Method == "PUT" {
+				projectMgr.UpdateProjectHTTP(w, r)
+			} else if r.Method == "DELETE" {
+				projectMgr.DeleteProjectHTTP(w, r)
+			}
+		})
+
+		// Resource linking
+		registerRoute("/api/org/projects/{id}/resources", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListProjectResourcesHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.LinkResourceHTTP(w, r)
+			}
+		})
+		registerRoute("/api/org/projects/{id}/resources/{resource_id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "DELETE" {
+				projectMgr.UnlinkResourceHTTP(w, r)
+			}
+		})
+
+		// Permissions
+		registerRoute("/api/org/projects/{id}/permissions", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				projectMgr.ListProjectPermissionsHTTP(w, r)
+			} else if r.Method == "POST" {
+				projectMgr.GrantPermissionHTTP(w, r)
+			}
+		})
+		registerRoute("/api/org/permissions/{perm_id}", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "DELETE" {
+				projectMgr.RevokePermissionHTTP(w, r)
+			}
+		})
+
+		// FinOps export
+		registerRoute("/api/org/reports/finops", projectMgr.ExportFinOpsHTTP)
+
+		// Audit logs
+		registerRoute("/api/org/audit-logs", projectMgr.ListAuditLogsHTTP)
+	}
+
+	// Static files (frontend) - always served at root (proxy strips base path before forwarding)
+	exePath, _ := os.Executable()
+	exeDir := filepath.Dir(exePath)
+	frontendDir := filepath.Join(exeDir, "frontend", "dist")
+	if _, err := os.Stat(frontendDir); err == nil {
+		r.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendDir)))
+		log.Printf("Serving static files from %s", frontendDir)
+	} else {
+		// Fallback: try frontend without dist
+		frontendDir = filepath.Join(exeDir, "frontend")
+		if _, err := os.Stat(frontendDir); err == nil {
+			r.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendDir)))
+			log.Printf("Serving static files from %s", frontendDir)
+		} else {
+			// Fallback: try relative path from current working directory
+			if _, err := os.Stat("./devops-toolkit/frontend/dist"); err == nil {
+				r.PathPrefix("/").Handler(http.FileServer(http.Dir("./devops-toolkit/frontend/dist")))
+				log.Printf("Serving static files from ./devops-toolkit/frontend/dist")
+			} else if _, err := os.Stat("./devops-toolkit/frontend"); err == nil {
+				r.PathPrefix("/").Handler(http.FileServer(http.Dir("./devops-toolkit/frontend")))
+				log.Printf("Serving static files from ./devops-toolkit/frontend")
+			}
+		}
+	}
+
+	// Add JWT auth middleware for API routes (if LDAP is available or dev bypass enabled)
+	if ldapClient != nil || cfg.Auth.DevBypass {
+		apiRouter.Use(auth.Middleware(&cfg.Auth))
+	}
+
+	// Start server
+	addr := cfg.Server.Addr()
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: r,
+	}
+
 	go func() {
-		log.Printf("Starting server on %s:%d", cfg.App.Host, cfg.App.Port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed: %v", err)
+		log.Printf("Starting server on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
 		}
 	}()
 
@@ -117,84 +489,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
-	}
-
-	log.Println("Server stopped")
-}
-
-func initDatabase(cfg *config.Config) (*database.DB, error) {
-	dbCfg := &database.DBConfig{
-		Host:            cfg.Database.Host,
-		Port:            cfg.Database.Port,
-		Username:        cfg.Database.Username,
-		Password:        cfg.Database.Password,
-		Name:            cfg.Database.Name,
-		MaxConnections:  cfg.Database.MaxConnections,
-		SSLMode:         cfg.Database.SSLMode,
-		ConnMaxLifetime: cfg.Database.ConnMaxLifetime,
-	}
-	return database.New(dbCfg)
-}
-
-func setupRoutes(
-	mux *http.ServeMux,
-	cfg *config.Config,
-	authHandler *auth.AuthHandler,
-	authService *auth.AuthService,
-	deviceHandler *device.Handler,
-	logHandler *logs.Handler,
-	metricsHandler http.HandlerFunc,
-	wsHub *websocket.Hub,
-	ldapClient *auth.LDAPClient,
-) {
-	// Health check (public)
-	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/health/ldap", ldapHealthHandler(ldapClient))
-
-	// Metrics (public)
-	if cfg.Metrics.Enabled {
-		mux.Handle(cfg.Metrics.Path, metricsHandler)
-	}
-
-	// WebSocket (public)
-	mux.HandleFunc("/ws", websocket.Handler(wsHub))
-
-	// Auth routes (public)
-	mux.HandleFunc("/api/auth/login", authHandler.Login)
-	mux.HandleFunc("/api/auth/logout", authHandler.Logout)
-	mux.HandleFunc("/api/auth/me", authHandler.Me)
-
-	// Device routes
-	deviceHandler.RegisterRoutes(mux)
-
-	// Log routes
-	logHandler.RegisterRoutes(mux)
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
-}
-
-func ldapHealthHandler(ldapClient *auth.LDAPClient) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		healthy, reason := ldapClient.HealthCheck()
-		if healthy {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok","service":"ldap","reason":"` + reason + `"}`))
-		} else {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte(`{"status":"error","service":"ldap","reason":"` + reason + `"}`))
-		}
-	}
+	srv.Shutdown(ctx)
 }

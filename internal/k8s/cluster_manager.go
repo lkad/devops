@@ -9,14 +9,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/devops-toolkit/internal/apierror"
+	"github.com/devops-toolkit/internal/pagination"
 	"github.com/gorilla/mux"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 type ClusterManager struct {
@@ -78,6 +82,38 @@ type MaintenanceOp struct {
 	Operation string `json:"operation"` // drain, cordon, uncordon, restart-pod
 	Target    string `json:"target"`   // node name or namespace/pod-name
 	Force     bool   `json:"force"`
+}
+
+// PodLogsOptions contains options for pod log retrieval
+type PodLogsOptions struct {
+	Namespace string
+	PodName   string
+	Container string
+	Lines     int64
+	Previous  bool
+}
+
+// ExecOptions contains options for pod exec
+type ExecOptions struct {
+	Namespace string
+	PodName   string
+	Container string
+	Command   []string
+}
+
+// ExecResult contains the result of pod exec
+type ExecResult struct {
+	Output string `json:"output"`
+	Error  string `json:"error,omitempty"`
+}
+
+// NodeMetrics contains CPU and memory metrics for a node
+type NodeMetrics struct {
+	Name      string `json:"name"`
+	CPUUsage  string `json:"cpuUsage"`
+	CPUCap    string `json:"cpuCap"`
+	MemUsage  string `json:"memUsage"`
+	MemCap    string `json:"memCap"`
 }
 
 func NewClusterManager() *ClusterManager {
@@ -430,6 +466,178 @@ func (m *ClusterManager) GetPodLogs(clusterName, namespace, podName string, line
 	return out.String(), nil
 }
 
+// GetPodLogsWithOptions retrieves pod logs using the Kubernetes client API with support for previous logs
+func (m *ClusterManager) GetPodLogsWithOptions(clusterName string, opts PodLogsOptions) (string, error) {
+	ctx := context.Background()
+	kubeconfigPath := m.getKubeconfig(clusterName)
+
+	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return "", err
+	}
+
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return "", err
+	}
+
+	limit := int64(opts.Lines)
+	if limit <= 0 {
+		limit = 100 // default
+	}
+
+	req := clientset.CoreV1().Pods(opts.Namespace).GetLogs(opts.PodName, &v1.PodLogOptions{
+		Container:  opts.Container,
+		TailLines:  &limit,
+		Previous:   opts.Previous,
+	})
+
+	result, err := req.Stream(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer result.Close()
+
+	buf := new(bytes.Buffer)
+	_, err = buf.ReadFrom(result)
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// PodExec executes a command in a pod container using the Kubernetes exec API
+func (m *ClusterManager) PodExec(clusterName string, opts ExecOptions) (*ExecResult, error) {
+	ctx := context.Background()
+	kubeconfigPath := m.getKubeconfig(clusterName)
+
+	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return nil, err
+	}
+
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	container := opts.Container
+	if container == "" {
+		// Get first container if not specified
+		pod, err := clientset.CoreV1().Pods(opts.Namespace).Get(ctx, opts.PodName, metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		if len(pod.Spec.Containers) > 0 {
+			container = pod.Spec.Containers[0].Name
+		}
+	}
+
+	// Build the exec URL manually with query parameters
+	req := clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(opts.PodName).
+		Namespace(opts.Namespace).
+		SubResource("exec").
+		Param("container", container)
+
+	// Add command as query parameters
+	for _, cmd := range opts.Command {
+		req.Param("command", cmd)
+	}
+
+	// Also set stdin/stdout/stderr via query params for proper execution
+	req.Param("stdin", "false")
+	req.Param("stdout", "true")
+	req.Param("stderr", "true")
+	req.Param("tty", "false")
+
+	executor, err := remotecommand.NewSPDYExecutor(cfg, "POST", req.URL())
+	if err != nil {
+		return nil, err
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = executor.Stream(remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Tty:    false,
+	})
+
+	result := &ExecResult{
+		Output: stdout.String(),
+	}
+	if err != nil {
+		result.Error = stderr.String()
+	}
+
+	return result, nil
+}
+
+// GetClusterMetrics retrieves CPU and memory metrics for all nodes in a cluster
+func (m *ClusterManager) GetClusterMetrics(clusterName string) ([]NodeMetrics, error) {
+	ctx := context.Background()
+	kubeconfigPath := m.getKubeconfig(clusterName)
+
+	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return nil, err
+	}
+
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	var result []NodeMetrics
+	for _, n := range nodes.Items {
+		cpuCap := n.Status.Capacity.Cpu().String()
+		memCap := n.Status.Capacity.Memory().String()
+
+		// Calculate usage (Capacity - Allocated)
+		cpuAlloc := n.Status.Allocatable.Cpu()
+		memAlloc := n.Status.Allocatable.Memory()
+
+		cpuUsage := "0"
+		memUsage := "0"
+
+		if cpuAlloc != nil && n.Status.Capacity.Cpu() != nil {
+			cpuUsed := n.Status.Capacity.Cpu().DeepCopy()
+			cpuUsed.Sub(*cpuAlloc)
+			cpuUsage = cpuUsed.String()
+		}
+
+		if memAlloc != nil && n.Status.Capacity.Memory() != nil {
+			memUsed := n.Status.Capacity.Memory().DeepCopy()
+			memUsed.Sub(*memAlloc)
+			memUsage = memUsed.String()
+		}
+
+		// If we couldn't calculate usage, use allocatable as approximation
+		if cpuUsage == "0" && n.Status.Allocatable.Cpu() != nil {
+			cpuUsage = n.Status.Allocatable.Cpu().String()
+		}
+		if memUsage == "0" && n.Status.Allocatable.Memory() != nil {
+			memUsage = n.Status.Allocatable.Memory().String()
+		}
+
+		result = append(result, NodeMetrics{
+			Name:     n.Name,
+			CPUUsage: cpuUsage,
+			CPUCap:   cpuCap,
+			MemUsage: memUsage,
+			MemCap:   memCap,
+		})
+	}
+
+	return result, nil
+}
+
 // ScaleWorkload - 扩缩容
 func (m *ClusterManager) ScaleWorkload(clusterName, namespace, kind, name string, replicas int) error {
 	cmd := exec.Command(m.kubectlPath, "--kubeconfig", m.getKubeconfig(clusterName),
@@ -542,15 +750,39 @@ func countReady(conditions []v1.PodCondition) int {
 	return 0
 }
 
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 // HTTP handlers
 func (m *ClusterManager) ListClustersHTTP(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePagination(r)
 	clusters, err := m.ListClusters()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
+	// Apply pagination in-memory
+	total := len(clusters)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedClusters := clusters[start:end]
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(clusters)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedClusters, total, limit, offset))
 }
 
 func (m *ClusterManager) CreateClusterHTTP(w http.ResponseWriter, r *http.Request) {
@@ -560,7 +792,7 @@ func (m *ClusterManager) CreateClusterHTTP(w http.ResponseWriter, r *http.Reques
 		APIPort int    `json:"api_port"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 
@@ -573,7 +805,7 @@ func (m *ClusterManager) CreateClusterHTTP(w http.ResponseWriter, r *http.Reques
 
 	cluster, err := m.CreateCluster(input.Name, input.Agents, input.APIPort)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -584,7 +816,7 @@ func (m *ClusterManager) CreateClusterHTTP(w http.ResponseWriter, r *http.Reques
 func (m *ClusterManager) DeleteClusterHTTP(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	if err := m.DeleteCluster(name); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -594,7 +826,7 @@ func (m *ClusterManager) HealthCheckHTTP(w http.ResponseWriter, r *http.Request)
 	name := mux.Vars(r)["name"]
 	status, err := m.HealthCheck(name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -604,20 +836,32 @@ func (m *ClusterManager) HealthCheckHTTP(w http.ResponseWriter, r *http.Request)
 // Maintenance HTTP handlers
 func (m *ClusterManager) GetNodesHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := mux.Vars(r)["cluster"]
+	limit, offset := parsePagination(r)
 	nodes, err := m.GetNodes(cluster)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
+	// Apply pagination in-memory
+	total := len(nodes)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedNodes := nodes[start:end]
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(nodes)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedNodes, total, limit, offset))
 }
 
 func (m *ClusterManager) GetNamespacesHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := mux.Vars(r)["cluster"]
 	namespaces, err := m.GetNamespaces(cluster)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -630,30 +874,42 @@ func (m *ClusterManager) GetPodsHTTP(w http.ResponseWriter, r *http.Request) {
 	if namespace == "" {
 		namespace = "default"
 	}
+	limit, offset := parsePagination(r)
 	pods, err := m.GetPods(cluster, namespace)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
+	// Apply pagination in-memory
+	total := len(pods)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	paginatedPods := pods[start:end]
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pods)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(paginatedPods, total, limit, offset))
 }
 
 func (m *ClusterManager) MaintenanceOpHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.MethodNotAllowed(w)
 		return
 	}
 
 	var op MaintenanceOp
 	if err := json.NewDecoder(r.Body).Decode(&op); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 
 	result, err := m.ExecuteMaintenanceOp(&op)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -665,15 +921,107 @@ func (m *ClusterManager) GetPodLogsHTTP(w http.ResponseWriter, r *http.Request) 
 	namespace := r.URL.Query().Get("namespace")
 	podName := mux.Vars(r)["pod"]
 	if namespace == "" || podName == "" {
-		http.Error(w, "namespace and pod are required", http.StatusBadRequest)
+		apierror.ValidationError(w, "namespace and pod are required")
 		return
 	}
 
 	logs, err := m.GetPodLogs(cluster, namespace, podName, 100)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(logs))
+}
+
+// GetPodLogsWithNamespaceHTTP handles GET /api/k8s/clusters/:id/namespaces/:ns/pods/:pod/logs
+// Supports ?previous=true for previous container logs and ?lines=N for tail count
+func (m *ClusterManager) GetPodLogsWithNamespaceHTTP(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	cluster := vars["cluster"]
+	namespace := vars["ns"]
+	podName := vars["pod"]
+
+	previous := r.URL.Query().Get("previous") == "true"
+	lines := int64(100)
+	if linesStr := r.URL.Query().Get("lines"); linesStr != "" {
+		if l, err := strconv.ParseInt(linesStr, 10, 64); err == nil && l > 0 {
+			lines = l
+		}
+	}
+
+	opts := PodLogsOptions{
+		Namespace: namespace,
+		PodName:   podName,
+		Lines:     lines,
+		Previous:  previous,
+	}
+
+	logs, err := m.GetPodLogsWithOptions(cluster, opts)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(logs))
+}
+
+// PodExecHTTP handles POST /api/k8s/clusters/:id/namespaces/:ns/pods/:pod/exec
+func (m *ClusterManager) PodExecHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		apierror.MethodNotAllowed(w)
+		return
+	}
+
+	vars := mux.Vars(r)
+	cluster := vars["cluster"]
+	namespace := vars["ns"]
+	podName := vars["pod"]
+
+	var input struct {
+		Command   []string `json:"command"`
+		Container string   `json:"container,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		apierror.ValidationError(w, err.Error())
+		return
+	}
+
+	if len(input.Command) == 0 {
+		apierror.ValidationError(w, "command is required")
+		return
+	}
+
+	opts := ExecOptions{
+		Namespace: namespace,
+		PodName:   podName,
+		Container: input.Container,
+		Command:   input.Command,
+	}
+
+	result, err := m.PodExec(cluster, opts)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// GetClusterMetricsHTTP handles GET /api/k8s/clusters/:id/metrics
+func (m *ClusterManager) GetClusterMetricsHTTP(w http.ResponseWriter, r *http.Request) {
+	cluster := mux.Vars(r)["cluster"]
+
+	metrics, err := m.GetClusterMetrics(cluster)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"cluster": cluster,
+		"nodes":   metrics,
+	})
 }

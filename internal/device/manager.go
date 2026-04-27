@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/devops-toolkit/internal/apierror"
+	"github.com/devops-toolkit/internal/pagination"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
@@ -14,11 +17,21 @@ type Manager struct {
 	repo *Repository
 }
 
+// Environment represents the deployment environment
+type Environment string
+
+const (
+	EnvProd  Environment = "prod"
+	EnvDev   Environment = "dev"
+	EnvTest  Environment = "test"
+)
+
 type Device struct {
 	ID              string            `json:"id"`
 	Type            string            `json:"type"`
 	Name            string            `json:"name"`
 	Status          State             `json:"status"`
+	Environment     Environment       `json:"environment"`
 	Labels          map[string]string `json:"labels"`
 	BusinessUnit    string            `json:"business_unit,omitempty"`
 	ComputeCluster  string            `json:"compute_cluster,omitempty"`
@@ -42,6 +55,7 @@ type StateTransition struct {
 type RegisterOpts struct {
 	Type           string
 	Name           string
+	Environment    Environment
 	Labels         map[string]string
 	BusinessUnit   string
 	ComputeCluster string
@@ -60,11 +74,18 @@ func (m *Manager) RegisterDevice(opts RegisterOpts) (*Device, error) {
 	id := uuid.New().String()
 	now := time.Now()
 
+	// Default to dev environment if not specified
+	env := opts.Environment
+	if env == "" {
+		env = EnvDev
+	}
+
 	device := &Device{
 		ID:             id,
 		Type:           opts.Type,
 		Name:           opts.Name,
 		Status:         StatePending,
+		Environment:    env,
 		Labels:         opts.Labels,
 		BusinessUnit:   opts.BusinessUnit,
 		ComputeCluster: opts.ComputeCluster,
@@ -92,6 +113,22 @@ func (m *Manager) ListDevices() ([]*Device, error) {
 	return m.repo.List()
 }
 
+func (m *Manager) ListDevicesPaginated(limit, offset int) ([]*Device, int, error) {
+	return m.repo.ListPaginated(limit, offset)
+}
+
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 func (m *Manager) UpdateDevice(id string, updates map[string]interface{}) (*Device, error) {
 	device, err := m.repo.GetByID(id)
 	if err != nil || device == nil {
@@ -109,6 +146,9 @@ func (m *Manager) UpdateDevice(id string, updates map[string]interface{}) (*Devi
 	}
 	if cc, ok := updates["compute_cluster"].(string); ok {
 		device.ComputeCluster = cc
+	}
+	if env, ok := updates["environment"].(string); ok {
+		device.Environment = Environment(env)
 	}
 
 	if err := m.repo.Update(device); err != nil {
@@ -153,25 +193,26 @@ func (m *Manager) SearchDevices(labels map[string]string) ([]*Device, error) {
 
 // HTTP handlers
 func (m *Manager) ListDevicesHTTP(w http.ResponseWriter, r *http.Request) {
-	devices, err := m.ListDevices()
+	limit, offset := parsePagination(r)
+	devices, total, err := m.ListDevicesPaginated(limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(devices)
+	json.NewEncoder(w).Encode(pagination.NewPaginatedResponse(devices, total, limit, offset))
 }
 
 func (m *Manager) CreateDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 	var opts RegisterOpts
 	if err := json.NewDecoder(r.Body).Decode(&opts); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 
 	device, err := m.RegisterDevice(opts)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -183,11 +224,11 @@ func (m *Manager) GetDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	device, err := m.GetDevice(id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	if device == nil {
-		http.Error(w, "device not found", http.StatusNotFound)
+		apierror.NotFound(w, "device not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -198,13 +239,13 @@ func (m *Manager) UpdateDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	var updates map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		apierror.ValidationError(w, err.Error())
 		return
 	}
 
 	device, err := m.UpdateDevice(id, updates)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -214,7 +255,7 @@ func (m *Manager) UpdateDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 func (m *Manager) DeleteDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	if err := m.DeleteDevice(id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -231,7 +272,7 @@ func (m *Manager) SearchDevicesHTTP(w http.ResponseWriter, r *http.Request) {
 
 	devices, err := m.SearchDevices(labels)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

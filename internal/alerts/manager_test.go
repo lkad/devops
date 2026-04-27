@@ -9,12 +9,19 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/devops-toolkit/internal/metrics"
 )
 
+// mockMetricsCollector implements MetricsRecorder for testing
+type mockMetricsCollector struct {
+	alerts []struct{ name, severity string }
+}
+
+func (m *mockMetricsCollector) RecordAlert(alertName, severity string) {
+	m.alerts = append(m.alerts, struct{ name, severity string }{alertName, severity})
+}
+
 func TestManager_AddChannel(t *testing.T) {
-	metricsCollector := metrics.NewCollector()
+	metricsCollector := &mockMetricsCollector{}
 	m := NewManager(metricsCollector)
 
 	ch := &Channel{Name: "webhook-1", Type: "webhook", WebhookURL: "https://example.com/hook"}
@@ -33,7 +40,7 @@ func TestManager_AddChannel(t *testing.T) {
 }
 
 func TestManager_ListChannels(t *testing.T) {
-	metricsCollector := metrics.NewCollector()
+	metricsCollector := &mockMetricsCollector{}
 	m := NewManager(metricsCollector)
 
 	m.AddChannel(&Channel{Name: "ch1", Type: "log"})
@@ -46,7 +53,7 @@ func TestManager_ListChannels(t *testing.T) {
 }
 
 func TestManager_DeleteChannel(t *testing.T) {
-	metricsCollector := metrics.NewCollector()
+	metricsCollector := &mockMetricsCollector{}
 	m := NewManager(metricsCollector)
 
 	m.AddChannel(&Channel{Name: "to-delete", Type: "log"})
@@ -68,7 +75,7 @@ func TestManager_DeleteChannel(t *testing.T) {
 }
 
 func TestManager_TriggerAlert(t *testing.T) {
-	metricsCollector := metrics.NewCollector()
+	metricsCollector := &mockMetricsCollector{}
 	m := NewManager(metricsCollector)
 	m.AddChannel(&Channel{Name: "test-alert", Type: "log"})
 
@@ -87,7 +94,7 @@ func TestManager_TriggerAlert(t *testing.T) {
 }
 
 func TestManager_TriggerAlert_RateLimitExceeded(t *testing.T) {
-	metricsCollector := metrics.NewCollector()
+	metricsCollector := &mockMetricsCollector{}
 	m := NewManager(metricsCollector)
 	m.AddChannel(&Channel{Name: "rate-test", Type: "log"})
 
@@ -127,7 +134,7 @@ func TestRateLimiter_Allow(t *testing.T) {
 }
 
 func TestManager_GetHistory(t *testing.T) {
-	metricsCollector := metrics.NewCollector()
+	metricsCollector := &mockMetricsCollector{}
 	m := NewManager(metricsCollector)
 	m.AddChannel(&Channel{Name: "history-test", Type: "log"})
 
@@ -141,7 +148,7 @@ func TestManager_GetHistory(t *testing.T) {
 }
 
 func TestManager_ListChannelsHTTP(t *testing.T) {
-	metricsCollector := metrics.NewCollector()
+	metricsCollector := &mockMetricsCollector{}
 	m := NewManager(metricsCollector)
 	m.AddChannel(&Channel{Name: "http-test", Type: "webhook"})
 
@@ -159,7 +166,7 @@ func TestManager_ListChannelsHTTP(t *testing.T) {
 }
 
 func TestManager_AddChannelHTTP(t *testing.T) {
-	metricsCollector := metrics.NewCollector()
+	metricsCollector := &mockMetricsCollector{}
 	m := NewManager(metricsCollector)
 
 	body := `{"name":"new-channel","type":"slack"}`
@@ -175,7 +182,7 @@ func TestManager_AddChannelHTTP(t *testing.T) {
 }
 
 func TestManager_GetHistoryHTTP(t *testing.T) {
-	metricsCollector := metrics.NewCollector()
+	metricsCollector := &mockMetricsCollector{}
 	m := NewManager(metricsCollector)
 	m.AddChannel(&Channel{Name: "hist-http", Type: "log"})
 	m.TriggerAlert("hist-http", "warning", "test", nil)
