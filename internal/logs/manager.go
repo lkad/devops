@@ -290,7 +290,7 @@ func (b *LocalBackend) Query(opts QueryOptions) ([]*Entry, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	var results []*Entry
+	results := []*Entry{}
 	for _, e := range b.data.Logs {
 		if opts.Level != "" && e.Level != opts.Level {
 			continue

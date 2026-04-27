@@ -27,12 +27,24 @@ type AuthConfig struct {
 }
 
 type ServerConfig struct {
-	Port int    `yaml:"port"`
-	Host string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Host     string `yaml:"host"`
+	BasePath string `yaml:"base_path"`
 }
 
 func (s ServerConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", s.Host, s.Port)
+}
+
+func (s ServerConfig) StripBasePath(path string) string {
+	if s.BasePath == "" || s.BasePath == "/" {
+		return path
+	}
+	// Strip base_path prefix if present
+	if len(path) > len(s.BasePath) && path[:len(s.BasePath)] == s.BasePath {
+		return path[len(s.BasePath):]
+	}
+	return path
 }
 
 type DatabaseConfig struct {
@@ -140,6 +152,9 @@ func Load(path string) (*Config, error) {
 	}
 	if host := os.Getenv("HOST"); host != "" {
 		cfg.Server.Host = host
+	}
+	if basePath := os.Getenv("BASE_PATH"); basePath != "" {
+		cfg.Server.BasePath = basePath
 	}
 	if dbHost := os.Getenv("DB_HOST"); dbHost != "" {
 		cfg.Database.Host = dbHost

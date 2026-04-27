@@ -105,19 +105,62 @@ func main() {
 		})
 	})
 
-	// Health check
+	// Determine base path for API routes
+	basePath := cfg.Server.BasePath
+	if basePath == "" {
+		basePath = "/"
+	}
+
+	// Create API router using subrouter for base path
+	// When base path is set, routes must be registered WITH the base path on the subrouter
+	// For dual-path compatibility (direct and via proxy), we use main router directly
+	var apiRouter *mux.Router
+	if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
+		apiRouter = r.PathPrefix(cfg.Server.BasePath).Subrouter()
+		log.Printf("Base path configured: %s", cfg.Server.BasePath)
+	} else {
+		apiRouter = r
+	}
+
+	// Helper to register routes on both main router and API subrouter for dual access
+	registerRoute := func(path string, handler http.HandlerFunc) {
+		apiRouter.HandleFunc(path, handler)
+		if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
+			r.HandleFunc(path, handler)
+		}
+	}
+
+	// Health check (always at root for direct access and proxy health checks)
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 	})
 
+	// Health check on API subrouter too (for proxy access via base path)
+	if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
+		apiRouter.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+		})
+		// Static file handler - only serve known static asset paths
+		apiRouter.PathPrefix("/assets/").Handler(http.StripPrefix(cfg.Server.BasePath, http.FileServer(http.Dir("./devops-toolkit/frontend/dist"))))
+		// Serve favicon
+		apiRouter.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, "./devops-toolkit/frontend/dist/favicon.svg")
+		})
+		// Also serve root
+		apiRouter.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, "./devops-toolkit/frontend/dist/index.html")
+		})
+	}
+
 	// Auth routes
-	r.HandleFunc("/api/auth/login", authHandler.Login)
-	r.HandleFunc("/api/auth/logout", authHandler.Logout)
-	r.HandleFunc("/api/auth/me", authHandler.Me)
+	registerRoute("/api/auth/login", authHandler.Login)
+	registerRoute("/api/auth/logout", authHandler.Logout)
+	registerRoute("/api/auth/me", authHandler.Me)
 
 	// Device routes
-	r.HandleFunc("/api/devices", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/devices", func(w http.ResponseWriter, r *http.Request) {
 		if deviceMgr == nil {
 			http.Error(w, "device manager unavailable", http.StatusServiceUnavailable)
 			return
@@ -128,7 +171,7 @@ func main() {
 			deviceMgr.CreateDeviceHTTP(w, r)
 		}
 	})
-	r.HandleFunc("/api/devices/{id}", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/devices/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if deviceMgr == nil {
 			http.Error(w, "device manager unavailable", http.StatusServiceUnavailable)
 			return
@@ -141,7 +184,7 @@ func main() {
 			deviceMgr.DeleteDeviceHTTP(w, r)
 		}
 	})
-	r.HandleFunc("/api/devices/search", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/devices/search", func(w http.ResponseWriter, r *http.Request) {
 		if deviceMgr == nil {
 			http.Error(w, "device manager unavailable", http.StatusServiceUnavailable)
 			return
@@ -150,32 +193,32 @@ func main() {
 	})
 
 	// Pipeline routes
-	r.HandleFunc("/api/pipelines", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/pipelines", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			pipelineMgr.ListPipelinesHTTP(w, r)
 		} else if r.Method == "POST" {
 			pipelineMgr.CreatePipelineHTTP(w, r)
 		}
 	})
-	r.HandleFunc("/api/pipelines/{id}", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/pipelines/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			pipelineMgr.GetPipelineHTTP(w, r)
 		} else if r.Method == "DELETE" {
 			pipelineMgr.DeletePipelineHTTP(w, r)
 		}
 	})
-	r.HandleFunc("/api/pipelines/{id}/execute", pipelineMgr.ExecutePipelineHTTP)
+	registerRoute("/api/pipelines/{id}/execute", pipelineMgr.ExecutePipelineHTTP)
 
 	// Log routes
-	r.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/logs", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			logMgr.QueryLogsHTTP(w, r)
 		} else if r.Method == "POST" {
 			logMgr.CreateLogHTTP(w, r)
 		}
 	})
-	r.HandleFunc("/api/logs/stats", logMgr.GetStatsHTTP)
-	r.HandleFunc("/api/logs/alerts", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/logs/stats", logMgr.GetStatsHTTP)
+	registerRoute("/api/logs/alerts", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			logMgr.ListAlertRulesHTTP(w, r)
 		} else if r.Method == "POST" {
@@ -184,51 +227,48 @@ func main() {
 	})
 
 	// Metrics
-	r.HandleFunc("/metrics", metricsMgr.ServePrometheus)
-	r.HandleFunc("/api/metrics", metricsMgr.ServeJSON)
+	registerRoute("/metrics", metricsMgr.ServePrometheus)
+	registerRoute("/api/metrics", metricsMgr.ServeJSON)
 
 	// Alert routes
-	r.HandleFunc("/api/alerts/channels", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/alerts/channels", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			alertsMgr.ListChannelsHTTP(w, r)
 		} else if r.Method == "POST" {
 			alertsMgr.AddChannelHTTP(w, r)
 		}
 	})
-	r.HandleFunc("/api/alerts/history", alertsMgr.GetHistoryHTTP)
-
-	// WebSocket
-	r.HandleFunc("/ws", wsHub.HandleWebSocket)
+	registerRoute("/api/alerts/history", alertsMgr.GetHistoryHTTP)
 
 	// K8s routes
-	r.HandleFunc("/api/k8s/clusters", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/k8s/clusters", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			k8sMgr.ListClustersHTTP(w, r)
 		} else if r.Method == "POST" {
 			k8sMgr.CreateClusterHTTP(w, r)
 		}
 	})
-	r.HandleFunc("/api/k8s/clusters/{name}", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/k8s/clusters/{name}", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "DELETE" {
 			k8sMgr.DeleteClusterHTTP(w, r)
 		}
 	})
-	r.HandleFunc("/api/k8s/clusters/{name}/health", k8sMgr.HealthCheckHTTP)
-	r.HandleFunc("/api/k8s/clusters/{cluster}/nodes", k8sMgr.GetNodesHTTP)
-	r.HandleFunc("/api/k8s/clusters/{cluster}/namespaces", k8sMgr.GetNamespacesHTTP)
-	r.HandleFunc("/api/k8s/clusters/{cluster}/pods", k8sMgr.GetPodsHTTP)
-	r.HandleFunc("/api/k8s/clusters/{cluster}/pods/{pod}/logs", k8sMgr.GetPodLogsHTTP)
-	r.HandleFunc("/api/k8s/maintenance", k8sMgr.MaintenanceOpHTTP)
+	registerRoute("/api/k8s/clusters/{name}/health", k8sMgr.HealthCheckHTTP)
+	registerRoute("/api/k8s/clusters/{cluster}/nodes", k8sMgr.GetNodesHTTP)
+	registerRoute("/api/k8s/clusters/{cluster}/namespaces", k8sMgr.GetNamespacesHTTP)
+	registerRoute("/api/k8s/clusters/{cluster}/pods", k8sMgr.GetPodsHTTP)
+	registerRoute("/api/k8s/clusters/{cluster}/pods/{pod}/logs", k8sMgr.GetPodLogsHTTP)
+	registerRoute("/api/k8s/maintenance", k8sMgr.MaintenanceOpHTTP)
 
 	// Physical host routes
-	r.HandleFunc("/api/physical-hosts", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/physical-hosts", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			physicalhostMgr.ListHostsHTTP(w, r)
 		} else if r.Method == "POST" {
 			physicalhostMgr.CreateHostHTTP(w, r)
 		}
 	})
-	r.HandleFunc("/api/physical-hosts/{id}", func(w http.ResponseWriter, r *http.Request) {
+	registerRoute("/api/physical-hosts/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			physicalhostMgr.GetHostHTTP(w, r)
 		} else if r.Method == "DELETE" {
@@ -237,20 +277,27 @@ func main() {
 	})
 
 	// Discovery routes
-	r.HandleFunc("/api/discovery/status", discoveryMgr.GetStatusHTTP)
-	r.HandleFunc("/api/discovery/scan", discoveryMgr.ScanHTTP)
+	registerRoute("/api/discovery/status", discoveryMgr.GetStatusHTTP)
+	registerRoute("/api/discovery/scan", discoveryMgr.ScanHTTP)
+
+	// WebSocket (always at root for proxy compatibility)
+	r.HandleFunc("/ws", wsHub.HandleWebSocket)
+	// Also on subrouter for proxy access
+	if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
+		apiRouter.HandleFunc("/ws", wsHub.HandleWebSocket)
+	}
 
 	// Project management routes (if available)
 	if projectMgr != nil {
 		// Project Types
-		r.HandleFunc("/api/org/project-types", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/project-types", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" {
 				projectMgr.ListProjectTypesHTTP(w, r)
 			} else if r.Method == "POST" {
 				projectMgr.CreateProjectTypeHTTP(w, r)
 			}
 		})
-		r.HandleFunc("/api/org/project-types/{id}", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/project-types/{id}", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "PUT" {
 				projectMgr.UpdateProjectTypeHTTP(w, r)
 			} else if r.Method == "DELETE" {
@@ -259,14 +306,14 @@ func main() {
 		})
 
 		// Business Lines
-		r.HandleFunc("/api/org/business-lines", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/business-lines", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" {
 				projectMgr.ListBusinessLinesHTTP(w, r)
 			} else if r.Method == "POST" {
 				projectMgr.CreateBusinessLineHTTP(w, r)
 			}
 		})
-		r.HandleFunc("/api/org/business-lines/{id}", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/business-lines/{id}", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" {
 				projectMgr.GetBusinessLineHTTP(w, r)
 			} else if r.Method == "PUT" {
@@ -277,14 +324,14 @@ func main() {
 		})
 
 		// Systems
-		r.HandleFunc("/api/org/business-lines/{bl_id}/systems", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/business-lines/{bl_id}/systems", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" {
 				projectMgr.ListSystemsHTTP(w, r)
 			} else if r.Method == "POST" {
 				projectMgr.CreateSystemHTTP(w, r)
 			}
 		})
-		r.HandleFunc("/api/org/systems/{id}", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/systems/{id}", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" {
 				projectMgr.GetSystemHTTP(w, r)
 			} else if r.Method == "PUT" {
@@ -295,14 +342,14 @@ func main() {
 		})
 
 		// Projects
-		r.HandleFunc("/api/org/systems/{sys_id}/projects", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/systems/{sys_id}/projects", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" {
 				projectMgr.ListProjectsHTTP(w, r)
 			} else if r.Method == "POST" {
 				projectMgr.CreateProjectHTTP(w, r)
 			}
 		})
-		r.HandleFunc("/api/org/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" {
 				projectMgr.GetProjectHTTP(w, r)
 			} else if r.Method == "PUT" {
@@ -313,41 +360,41 @@ func main() {
 		})
 
 		// Resource linking
-		r.HandleFunc("/api/org/projects/{id}/resources", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/projects/{id}/resources", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" {
 				projectMgr.ListProjectResourcesHTTP(w, r)
 			} else if r.Method == "POST" {
 				projectMgr.LinkResourceHTTP(w, r)
 			}
 		})
-		r.HandleFunc("/api/org/projects/{id}/resources/{resource_id}", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/projects/{id}/resources/{resource_id}", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "DELETE" {
 				projectMgr.UnlinkResourceHTTP(w, r)
 			}
 		})
 
 		// Permissions
-		r.HandleFunc("/api/org/projects/{id}/permissions", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/projects/{id}/permissions", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" {
 				projectMgr.ListProjectPermissionsHTTP(w, r)
 			} else if r.Method == "POST" {
 				projectMgr.GrantPermissionHTTP(w, r)
 			}
 		})
-		r.HandleFunc("/api/org/permissions/{perm_id}", func(w http.ResponseWriter, r *http.Request) {
+		registerRoute("/api/org/permissions/{perm_id}", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "DELETE" {
 				projectMgr.RevokePermissionHTTP(w, r)
 			}
 		})
 
 		// FinOps export
-		r.HandleFunc("/api/org/reports/finops", projectMgr.ExportFinOpsHTTP)
+		registerRoute("/api/org/reports/finops", projectMgr.ExportFinOpsHTTP)
 
 		// Audit logs
-		r.HandleFunc("/api/org/audit-logs", projectMgr.ListAuditLogsHTTP)
+		registerRoute("/api/org/audit-logs", projectMgr.ListAuditLogsHTTP)
 	}
 
-	// Static files (frontend)
+	// Static files (frontend) - always served at root (proxy strips base path before forwarding)
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
 	frontendDir := filepath.Join(exeDir, "frontend", "dist")
@@ -374,7 +421,7 @@ func main() {
 
 	// Add JWT auth middleware for API routes (if LDAP is available or dev bypass enabled)
 	if ldapClient != nil || cfg.Auth.DevBypass {
-		r.Use(auth.Middleware(&cfg.Auth))
+		apiRouter.Use(auth.Middleware(&cfg.Auth))
 	}
 
 	// Start server
