@@ -9,6 +9,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestManager_NewManager(t *testing.T) {
@@ -21,6 +24,9 @@ func TestManager_NewManager(t *testing.T) {
 	}
 	if m.sshCfg.Timeout != 30*1e9 { // 30 seconds in nanoseconds
 		t.Error("expected default timeout 30 seconds")
+	}
+	if m.pool == nil {
+		t.Fatal("expected pool to be initialized")
 	}
 }
 
@@ -185,6 +191,136 @@ func TestManager_CreateHostHTTP_DefaultPort(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Errorf("expected status 201, got %d", w.Code)
+	}
+}
+
+// SSH Connection Pool Tests
+
+func TestDefaultSSHConnPoolConfig(t *testing.T) {
+	cfg := DefaultSSHConnPoolConfig()
+	if cfg.Timeout != 30*time.Second {
+		t.Errorf("expected timeout 30s, got %v", cfg.Timeout)
+	}
+	if cfg.MaxConns != 5 {
+		t.Errorf("expected MaxConns 5, got %d", cfg.MaxConns)
+	}
+	if cfg.ConnTTL != 5*time.Minute {
+		t.Errorf("expected ConnTTL 5m, got %v", cfg.ConnTTL)
+	}
+}
+
+func TestNewSSHConnPool(t *testing.T) {
+	cfg := &SSHConfig{
+		Timeout:  10 * time.Second,
+		MaxConns: 3,
+		ConnTTL:  2 * time.Minute,
+	}
+	dialer := func(host *Host) (*ssh.Client, error) {
+		return nil, nil
+	}
+	pool := NewSSHConnPool(cfg, dialer)
+	if pool == nil {
+		t.Fatal("expected non-nil pool")
+	}
+	if pool.maxConns != 3 {
+		t.Errorf("expected maxConns 3, got %d", pool.maxConns)
+	}
+	if pool.timeout != 10*time.Second {
+		t.Errorf("expected timeout 10s, got %v", pool.timeout)
+	}
+}
+
+func TestSSHConnPool_PoolKey(t *testing.T) {
+	cfg := DefaultSSHConnPoolConfig()
+	pool := NewSSHConnPool(cfg, nil)
+
+	host := &Host{
+		IP:       "192.168.1.10",
+		Port:     22,
+		Username: "admin",
+	}
+
+	key := pool.poolKey(host)
+	expected := "192.168.1.10:22:admin"
+	if key != expected {
+		t.Errorf("expected key '%s', got '%s'", expected, key)
+	}
+}
+
+func TestSSHConnPool_PutNilClient(t *testing.T) {
+	cfg := DefaultSSHConnPoolConfig()
+	pool := NewSSHConnPool(cfg, nil)
+
+	host := &Host{
+		IP:       "192.168.1.10",
+		Port:     22,
+		Username: "admin",
+	}
+
+	// Should not panic
+	pool.Put(host, nil)
+}
+
+func TestSSHConnPool_StatsEmptyPool(t *testing.T) {
+	cfg := DefaultSSHConnPoolConfig()
+	pool := NewSSHConnPool(cfg, nil)
+
+	host := &Host{
+		IP:       "192.168.1.10",
+		Port:     22,
+		Username: "admin",
+	}
+
+	avail, inUse := pool.Stats(host)
+	if avail != 0 || inUse != 0 {
+		t.Errorf("expected 0 avail, 0 inUse; got %d, %d", avail, inUse)
+	}
+}
+
+func TestSSHConnPool_CloseHostPool(t *testing.T) {
+	cfg := DefaultSSHConnPoolConfig()
+	pool := NewSSHConnPool(cfg, nil)
+
+	host := &Host{
+		IP:       "192.168.1.10",
+		Port:     22,
+		Username: "admin",
+	}
+
+	// Should not panic on empty pool
+	pool.CloseHostPool(host)
+}
+
+func TestSSHConnPool_Close(t *testing.T) {
+	cfg := DefaultSSHConnPoolConfig()
+	pool := NewSSHConnPool(cfg, nil)
+
+	// Should not panic on empty pool
+	pool.Close()
+}
+
+func TestManager_SSHPutConnection(t *testing.T) {
+	m := NewManager()
+
+	host := &Host{
+		IP:       "192.168.1.10",
+		Port:     22,
+		Username: "admin",
+	}
+
+	// Should not panic with nil client
+	m.sshPutConnection(host, nil)
+}
+
+func TestManager_PoolInitialized(t *testing.T) {
+	m := NewManager()
+	if m.pool == nil {
+		t.Fatal("expected pool to be initialized")
+	}
+	// Pool should be functional
+	cfg := DefaultSSHConnPoolConfig()
+	if m.pool.maxConns != cfg.MaxConns {
+		t.Errorf("expected pool maxConns %d, got %d", cfg.MaxConns, m.pool.maxConns)
 	}
 }
 

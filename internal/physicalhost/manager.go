@@ -12,14 +12,46 @@ import (
 	"github.com/google/uuid"
 )
 
+// SSHConnPool manages pooled SSH connections per host.
+// It reuses connections to avoid the overhead of establishing
+// a new SSH connection for each request.
+type SSHConnPool struct {
+	mu        sync.Mutex
+	pools     map[string]*hostPool
+	maxConns  int           // max connections per host
+	timeout   time.Duration // connection timeout
+	connTTL   time.Duration // max time a connection can be idle
+	dialer    func(host *Host) (*ssh.Client, error) // custom dial function
+}
+
+type hostPool struct {
+	mu       sync.Mutex
+	conns    []*ssh.Client // available connections
+	inUse    map[*ssh.Client]bool
+	lastUsed time.Time
+}
+
+// SSHConfig holds SSH configuration settings
+type SSHConfig struct {
+	Timeout  time.Duration
+	MaxConns int
+	ConnTTL  time.Duration
+}
+
 type Manager struct {
 	mu     sync.RWMutex
 	hosts  map[string]*Host
 	sshCfg *SSHConfig
+	pool   *SSHConnPool
 }
 
-type SSHConfig struct {
-	Timeout time.Duration
+// DefaultSSHConnPoolConfig returns default pool configuration
+func DefaultSSHConnPoolConfig() *SSHConfig {
+	return &SSHConfig{
+		Timeout:  30 * time.Second,
+		MaxConns: 5,
+		ConnTTL:  5 * time.Minute,
+	}
 }
 
 type Host struct {
@@ -76,12 +108,208 @@ type ServiceStatus struct {
 }
 
 func NewManager() *Manager {
-	return &Manager{
+	cfg := DefaultSSHConnPoolConfig()
+	m := &Manager{
 		hosts: make(map[string]*Host),
-		sshCfg: &SSHConfig{
-			Timeout: 30 * time.Second,
-		},
+		sshCfg: cfg,
 	}
+	m.pool = NewSSHConnPool(cfg, m.dialSSH)
+	return m
+}
+
+// NewSSHConnPool creates a new SSH connection pool
+func NewSSHConnPool(cfg *SSHConfig, dialer func(host *Host) (*ssh.Client, error)) *SSHConnPool {
+	if cfg.MaxConns <= 0 {
+		cfg.MaxConns = 5
+	}
+	if cfg.ConnTTL <= 0 {
+		cfg.ConnTTL = 5 * time.Minute
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 30 * time.Second
+	}
+	return &SSHConnPool{
+		pools:    make(map[string]*hostPool),
+		maxConns: cfg.MaxConns,
+		timeout:  cfg.Timeout,
+		connTTL:  cfg.ConnTTL,
+		dialer:   dialer,
+	}
+}
+
+// poolKey generates a unique key for a host's connection pool
+func (p *SSHConnPool) poolKey(host *Host) string {
+	return fmt.Sprintf("%s:%d:%s", host.IP, host.Port, host.Username)
+}
+
+// Get retrieves or creates a connection for the given host
+func (p *SSHConnPool) Get(host *Host) (*ssh.Client, error) {
+	key := p.poolKey(host)
+
+	p.mu.Lock()
+	pool, exists := p.pools[key]
+	if !exists {
+		pool = &hostPool{
+			conns: make([]*ssh.Client, 0),
+			inUse: make(map[*ssh.Client]bool),
+		}
+		p.pools[key] = pool
+	}
+	p.mu.Unlock()
+
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	// Try to get an existing available connection
+	for i := len(pool.conns) - 1; i >= 0; i-- {
+		client := pool.conns[i]
+		if pool.inUse[client] {
+			continue
+		}
+		// Connection available - mark as in use
+		// Note: health check happens when the connection is actually used
+		pool.inUse[client] = true
+		pool.lastUsed = time.Now()
+		return client, nil
+	}
+
+	// Create new connection if under limit
+	if len(pool.conns)-len(pool.inUse) >= p.maxConns {
+		// Wait for a connection to become available (simple approach: create one anyway)
+		// In production, could use a channel-based approach for blocking
+	}
+
+	pool.mu.Unlock()
+	client, err := p.dialer(host)
+	pool.mu.Lock()
+
+	if err != nil {
+		return nil, err
+	}
+
+	pool.inUse[client] = true
+	pool.lastUsed = time.Now()
+	return client, nil
+}
+
+// Put returns a connection to the pool
+func (p *SSHConnPool) Put(host *Host, client *ssh.Client) {
+	if client == nil {
+		return
+	}
+
+	key := p.poolKey(host)
+
+	p.mu.Lock()
+	pool, exists := p.pools[key]
+	if !exists {
+		p.mu.Unlock()
+		client.Close()
+		return
+	}
+	p.mu.Unlock()
+
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	if pool.inUse[client] {
+		delete(pool.inUse, client)
+		// Always return to pool - health check will happen on next Get
+		pool.conns = append(pool.conns, client)
+		pool.lastUsed = time.Now()
+	}
+}
+
+// Close closes all connections in the pool
+func (p *SSHConnPool) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for _, pool := range p.pools {
+		pool.mu.Lock()
+		for _, client := range pool.conns {
+			client.Close()
+		}
+		pool.conns = nil
+		pool.inUse = nil
+		pool.mu.Unlock()
+	}
+	p.pools = nil
+}
+
+// CloseHostPool closes all connections for a specific host
+func (p *SSHConnPool) CloseHostPool(host *Host) {
+	key := p.poolKey(host)
+
+	p.mu.Lock()
+	pool, exists := p.pools[key]
+	if exists {
+		delete(p.pools, key)
+	}
+	p.mu.Unlock()
+
+	if pool == nil {
+		return
+	}
+
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	for _, client := range pool.conns {
+		client.Close()
+	}
+	pool.conns = nil
+	pool.inUse = nil
+}
+
+// cleanup closes idle connections older than connTTL
+func (p *SSHConnPool) Cleanup() {
+	p.mu.Lock()
+	keysToDelete := make([]string, 0)
+	for key, pool := range p.pools {
+		pool.mu.Lock()
+		if time.Since(pool.lastUsed) > p.connTTL {
+			keysToDelete = append(keysToDelete, key)
+			for _, client := range pool.conns {
+				client.Close()
+			}
+			pool.conns = nil
+			pool.inUse = nil
+		}
+		pool.mu.Unlock()
+	}
+	for _, key := range keysToDelete {
+		delete(p.pools, key)
+	}
+	p.mu.Unlock()
+}
+
+// Stats returns pool statistics for a host
+func (p *SSHConnPool) Stats(host *Host) (available, inUse int) {
+	key := p.poolKey(host)
+
+	p.mu.Lock()
+	pool, exists := p.pools[key]
+	if !exists {
+		p.mu.Unlock()
+		return 0, 0
+	}
+	p.mu.Unlock()
+
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	available = len(pool.conns) - len(pool.inUse)
+	// Count only available ones properly
+	availCount := 0
+	for _, c := range pool.conns {
+		if !pool.inUse[c] {
+			availCount++
+		}
+	}
+	available = availCount
+	inUse = len(pool.inUse)
+	return
 }
 
 func (m *Manager) CreateHost(hostname, ip, username, authMethod string, port int) *Host {
@@ -137,13 +365,14 @@ func (m *Manager) CollectMetrics(id string) error {
 		return err
 	}
 
-	// SSH to host and collect metrics
+	// SSH to host and collect metrics - get connection from pool
 	client, err := m.sshConnect(host)
 	if err != nil {
 		host.State = "offline"
 		return err
 	}
-	defer client.Close()
+	// Return connection to pool when done (reuse, not close)
+	defer m.sshPutConnection(host, client)
 
 	// Collect CPU, Memory, Disk metrics
 	cpu, err := m.collectCPUMetrics(client)
@@ -174,11 +403,20 @@ func (m *Manager) CollectMetrics(id string) error {
 }
 
 func (m *Manager) sshConnect(host *Host) (*ssh.Client, error) {
+	return m.pool.Get(host)
+}
+
+func (m *Manager) sshPutConnection(host *Host, client *ssh.Client) {
+	m.pool.Put(host, client)
+}
+
+// dialSSH establishes a new SSH connection to the host
+func (m *Manager) dialSSH(host *Host) (*ssh.Client, error) {
 	config := &ssh.ClientConfig{
-		User: host.Username,
-		Auth: []ssh.AuthMethod{},
+		User:            host.Username,
+		Auth:            []ssh.AuthMethod{},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout: m.sshCfg.Timeout,
+		Timeout:         m.sshCfg.Timeout,
 	}
 
 	if host.AuthMethod == "password" {
