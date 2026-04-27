@@ -413,3 +413,254 @@ stages:
 		t.Errorf("expected name 'http-yaml-pipeline', got '%s'", pipeline.Name)
 	}
 }
+
+// Deployment Strategy Tests
+
+func TestExecuteDeployment_BlueGreen(t *testing.T) {
+	m := NewManager()
+
+	p := m.CreatePipeline("bg-pipeline", "", "", []string{"build", "deploy"})
+	strategy := &StrategyConfig{
+		Type:              "blue_green",
+		BlueGreenReplicas: 3,
+	}
+
+	deployment, err := m.ExecuteDeployment(p.ID, strategy)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deployment == nil {
+		t.Fatal("expected deployment, got nil")
+	}
+	if deployment.Strategy != StrategyBlueGreen {
+		t.Errorf("expected strategy blue_green, got %s", deployment.Strategy)
+	}
+	if deployment.Status != DeploymentStatusRunning && deployment.Status != DeploymentStatusPending {
+		t.Errorf("expected status pending or running, got %s", deployment.Status)
+	}
+	if deployment.TotalStages != 2 {
+		t.Errorf("expected 2 stages for blue-green, got %d", deployment.TotalStages)
+	}
+}
+
+func TestExecuteDeployment_Canary(t *testing.T) {
+	m := NewManager()
+
+	p := m.CreatePipeline("canary-pipeline", "", "", []string{"build", "deploy"})
+	strategy := &StrategyConfig{
+		Type:         "canary",
+		CanaryStages: []int{1, 5, 25, 100},
+	}
+
+	deployment, err := m.ExecuteDeployment(p.ID, strategy)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deployment == nil {
+		t.Fatal("expected deployment, got nil")
+	}
+	if deployment.Strategy != StrategyCanary {
+		t.Errorf("expected strategy canary, got %s", deployment.Strategy)
+	}
+	if deployment.TotalStages != 4 {
+		t.Errorf("expected 4 canary stages, got %d", deployment.TotalStages)
+	}
+}
+
+func TestExecuteDeployment_Rolling(t *testing.T) {
+	m := NewManager()
+
+	p := m.CreatePipeline("rolling-pipeline", "", "", []string{"build", "deploy"})
+	strategy := &StrategyConfig{
+		Type:           "rolling",
+		MaxSurge:       20,
+		MaxUnavailable: 10,
+	}
+
+	deployment, err := m.ExecuteDeployment(p.ID, strategy)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deployment == nil {
+		t.Fatal("expected deployment, got nil")
+	}
+	if deployment.Strategy != StrategyRolling {
+		t.Errorf("expected strategy rolling, got %s", deployment.Strategy)
+	}
+}
+
+func TestExecuteDeployment_PipelineNotFound(t *testing.T) {
+	m := NewManager()
+
+	strategy := &StrategyConfig{Type: "rolling"}
+	_, err := m.ExecuteDeployment("non-existent", strategy)
+	if err == nil {
+		t.Error("expected error for non-existent pipeline")
+	}
+}
+
+func TestExecuteDeployment_UnsupportedStrategy(t *testing.T) {
+	m := NewManager()
+
+	p := m.CreatePipeline("test", "", "", nil)
+	strategy := &StrategyConfig{Type: "unsupported"}
+
+	_, err := m.ExecuteDeployment(p.ID, strategy)
+	if err == nil {
+		t.Error("expected error for unsupported strategy")
+	}
+}
+
+func TestBlueGreenDeployer_GetNextStage(t *testing.T) {
+	deployer := NewBlueGreenDeployer(&BlueGreenConfig{
+		ActiveEnvironment:   "blue",
+		InactiveEnvironment: "green",
+		AutoSwitch:          true,
+	})
+
+	deployment := &Deployment{Stage: 1, TotalStages: 2}
+	next, total, err := deployer.GetNextStage(deployment)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if next != 2 {
+		t.Errorf("expected next stage 2, got %d", next)
+	}
+	if total != 2 {
+		t.Errorf("expected total 2, got %d", total)
+	}
+}
+
+func TestCanaryDeployer_GetNextStage(t *testing.T) {
+	deployer := NewCanaryDeployer(&CanaryConfig{
+		Stages: []CanaryStage{
+			{Percentage: 1, Name: "1%"},
+			{Percentage: 5, Name: "5%"},
+			{Percentage: 25, Name: "25%"},
+			{Percentage: 100, Name: "100%"},
+		},
+	})
+
+	deployment := &Deployment{Stage: 2, TotalStages: 4}
+	next, total, err := deployer.GetNextStage(deployment)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if next != 3 {
+		t.Errorf("expected next stage 3, got %d", next)
+	}
+	if total != 4 {
+		t.Errorf("expected total 4, got %d", total)
+	}
+}
+
+func TestRollingDeployer_GetNextStage(t *testing.T) {
+	deployer := NewRollingDeployer(&RollingConfig{
+		MaxSurge:       "20%",
+		MaxUnavailable: "10%",
+		BatchSize:       3,
+	})
+
+	deployment := &Deployment{Stage: 1, TotalStages: 3}
+	next, total, err := deployer.GetNextStage(deployment)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if next != 2 {
+		t.Errorf("expected next stage 2, got %d", next)
+	}
+	if total != 3 {
+		t.Errorf("expected total 3, got %d", total)
+	}
+}
+
+func TestConvertToRuntimeConfig_BlueGreen(t *testing.T) {
+	config := &StrategyConfig{
+		Type:              "blue_green",
+		BlueGreenReplicas: 3,
+	}
+
+	convertToRuntimeConfig(config)
+
+	if config.BlueGreen == nil {
+		t.Fatal("expected BlueGreen config to be set")
+	}
+	if config.BlueGreen.ActiveEnvironment != "blue" {
+		t.Errorf("expected active environment 'blue', got '%s'", config.BlueGreen.ActiveEnvironment)
+	}
+	if config.BlueGreen.InactiveEnvironment != "green" {
+		t.Errorf("expected inactive environment 'green', got '%s'", config.BlueGreen.InactiveEnvironment)
+	}
+	if !config.BlueGreen.AutoSwitch {
+		t.Error("expected AutoSwitch to be true")
+	}
+}
+
+func TestConvertToRuntimeConfig_Canary(t *testing.T) {
+	config := &StrategyConfig{
+		Type:         "canary",
+		CanaryStages: []int{1, 5, 25, 100},
+	}
+
+	convertToRuntimeConfig(config)
+
+	if config.Canary == nil {
+		t.Fatal("expected Canary config to be set")
+	}
+	if len(config.Canary.Stages) != 4 {
+		t.Errorf("expected 4 canary stages, got %d", len(config.Canary.Stages))
+	}
+	if config.Canary.Stages[0].Percentage != 1 {
+		t.Errorf("expected first stage 1%%, got %d%%", config.Canary.Stages[0].Percentage)
+	}
+	if !config.Canary.AutoPromote {
+		t.Error("expected AutoPromote to be true")
+	}
+}
+
+func TestConvertToRuntimeConfig_Rolling(t *testing.T) {
+	config := &StrategyConfig{
+		Type:           "rolling",
+		MaxSurge:       20,
+		MaxUnavailable: 10,
+	}
+
+	convertToRuntimeConfig(config)
+
+	if config.Rolling == nil {
+		t.Fatal("expected Rolling config to be set")
+	}
+	if config.Rolling.MaxSurge != "20%" {
+		t.Errorf("expected max_surge '20%%', got '%s'", config.Rolling.MaxSurge)
+	}
+	if config.Rolling.MaxUnavailable != "10%" {
+		t.Errorf("expected max_unavailable '10%%', got '%s'", config.Rolling.MaxUnavailable)
+	}
+	if config.Rolling.BatchSize != 2 {
+		t.Errorf("expected default batch size 2, got %d", config.Rolling.BatchSize)
+	}
+}
+
+func TestDeploymentTypes(t *testing.T) {
+	// Test DeploymentStrategy constants
+	if StrategyBlueGreen != "blue_green" {
+		t.Errorf("expected StrategyBlueGreen to be 'blue_green', got '%s'", StrategyBlueGreen)
+	}
+	if StrategyCanary != "canary" {
+		t.Errorf("expected StrategyCanary to be 'canary', got '%s'", StrategyCanary)
+	}
+	if StrategyRolling != "rolling" {
+		t.Errorf("expected StrategyRolling to be 'rolling', got '%s'", StrategyRolling)
+	}
+
+	// Test DeploymentStatus constants
+	if DeploymentStatusPending != "pending" {
+		t.Errorf("expected DeploymentStatusPending to be 'pending', got '%s'", DeploymentStatusPending)
+	}
+	if DeploymentStatusSuccess != "success" {
+		t.Errorf("expected DeploymentStatusSuccess to be 'success', got '%s'", DeploymentStatusSuccess)
+	}
+	if DeploymentStatusFailed != "failed" {
+		t.Errorf("expected DeploymentStatusFailed to be 'failed', got '%s'", DeploymentStatusFailed)
+	}
+}
