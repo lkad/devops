@@ -24,6 +24,9 @@ type Hub struct {
 	unregister chan *Client
 	mu         sync.RWMutex
 	subscriptions map[*Client]map[string]bool
+	// ContainerLogSubscribeHandler is called when a client subscribes to container_log channel
+	// It receives the subscription parameters and should start streaming logs
+	ContainerLogSubscribeHandler func(*Client, *ContainerLogSubscribeRequest)
 }
 
 type Client struct {
@@ -196,6 +199,16 @@ func (c *Client) readPump() {
 			c.hub.subscriptions[c][msg.Channel] = true
 			c.hub.mu.Unlock()
 
+			// Handle container_log subscription with payload
+			if msg.Channel == "container_log" && c.hub.ContainerLogSubscribeHandler != nil {
+				if payloadBytes, ok := msg.Payload.(json.RawMessage); ok {
+					var req ContainerLogSubscribeRequest
+					if err := json.Unmarshal(payloadBytes, &req); err == nil {
+						c.hub.ContainerLogSubscribeHandler(c, &req)
+					}
+				}
+			}
+
 		case "unsubscribe":
 			c.hub.mu.Lock()
 			if c.hub.subscriptions[c] != nil {
@@ -219,4 +232,69 @@ func (c *Client) writePump() {
 			return
 		}
 	}
+}
+
+// BroadcastToChannel sends a message only to clients subscribed to the specified channel
+func (h *Hub) BroadcastToChannel(channel string, msg *Message) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for client := range h.clients {
+		if h.subscriptions[client][channel] {
+			select {
+			case client.send <- data:
+			default:
+				close(client.send)
+				delete(h.clients, client)
+				delete(h.subscriptions, client)
+			}
+		}
+	}
+	return nil
+}
+
+// ContainerLogEntry represents a K8s container log message
+type ContainerLogEntry struct {
+	ClusterID   string `json:"clusterId"`
+	ClusterName string `json:"clusterName"`
+	Namespace   string `json:"namespace"`
+	Pod         string `json:"pod"`
+	Container   string `json:"container"`
+	Message     string `json:"message"`
+	Level       string `json:"level"`
+	Timestamp   string `json:"timestamp"`
+}
+
+// ContainerLogSubscribeRequest represents subscription params for container_log
+type ContainerLogSubscribeRequest struct {
+	ClusterID   string `json:"cluster_id"`
+	ClusterName string `json:"cluster_name"`
+	Namespace   string `json:"namespace"`
+	Pod         string `json:"pod"`
+	Container   string `json:"container,omitempty"`
+	Since       string `json:"since,omitempty"`
+}
+
+// BroadcastContainerLog sends a container log to all subscribers of the container_log channel
+func (h *Hub) BroadcastContainerLog(entry *ContainerLogEntry) error {
+	msg := Message{
+		Type:    "container_log",
+		Channel: "container_log",
+		Payload: entry,
+	}
+	return h.BroadcastToChannel("container_log", &msg)
+}
+
+// ContainerLogSubscribeHandler is called when a client subscribes to container_log channel
+// It receives the subscription parameters and should start streaming logs
+type ContainerLogSubscribeHandler func(*Client, *ContainerLogSubscribeRequest)
+
+// SetContainerLogSubscribeHandler sets the handler for container_log subscriptions
+func (h *Hub) SetContainerLogSubscribeHandler(handler ContainerLogSubscribeHandler) {
+	h.ContainerLogSubscribeHandler = handler
 }
