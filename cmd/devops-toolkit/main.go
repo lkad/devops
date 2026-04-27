@@ -225,6 +225,22 @@ func main() {
 			logMgr.CreateAlertRuleHTTP(w, r)
 		}
 	})
+	registerRoute("/api/logs/retention", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			logMgr.GetRetentionPolicyHTTP(w, r)
+		} else if r.Method == "PUT" {
+			logMgr.UpdateRetentionPolicyHTTP(w, r)
+		}
+	})
+	registerRoute("/api/logs/retention/apply", logMgr.ApplyRetentionPolicyHTTP)
+	registerRoute("/api/logs/filters", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			logMgr.ListSavedFiltersHTTP(w, r)
+		} else if r.Method == "POST" {
+			logMgr.CreateSavedFilterHTTP(w, r)
+		}
+	})
+	registerRoute("/api/logs/generate", logMgr.GenerateSampleLogsHTTP)
 
 	// Metrics
 	registerRoute("/metrics", metricsMgr.ServePrometheus)
@@ -278,6 +294,16 @@ func main() {
 			physicalhostMgr.GetHostHTTP(w, r)
 		} else if r.Method == "DELETE" {
 			physicalhostMgr.DeleteHostHTTP(w, r)
+		}
+	})
+	registerRoute("/api/physical-hosts/{id}/services", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			physicalhostMgr.ListServicesHTTP(w, r)
+		}
+	})
+	registerRoute("/api/physical-hosts/{id}/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			physicalhostMgr.PushConfigHTTP(w, r)
 		}
 	})
 

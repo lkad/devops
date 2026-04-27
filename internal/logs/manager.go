@@ -26,12 +26,14 @@ type Entry struct {
 }
 
 type Manager struct {
-	backend       StorageBackend
-	onLogAdded    func(*Entry)
-	mu            sync.RWMutex
-	entries       []*Entry
-	alertRules    []*AlertRule
-	retentionDays int
+	backend          StorageBackend
+	onLogAdded       func(*Entry)
+	mu               sync.RWMutex
+	entries          []*Entry
+	alertRules       []*AlertRule
+	savedFilters     []*SavedFilter
+	retentionPolicy  *RetentionPolicy
+	retentionDays    int
 }
 
 type StorageBackend interface {
@@ -63,6 +65,26 @@ type AlertRule struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type SavedFilter struct {
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Level     string                 `json:"level,omitempty"`
+	Source    string                 `json:"source,omitempty"`
+	Search    string                 `json:"search,omitempty"`
+	Resource  string                 `json:"resource,omitempty"`
+	Tags      []string               `json:"tags,omitempty"`
+	CreatedAt time.Time             `json:"created_at"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type RetentionPolicy struct {
+	Days           int       `json:"days"`
+	MaxLogs        int       `json:"max_logs,omitempty"`
+	ApplyEnabled   bool      `json:"apply_enabled"`
+	LastAppliedAt  time.Time `json:"last_applied_at,omitempty"`
+	LastAppliedBy  string    `json:"last_applied_by,omitempty"`
+}
+
 type Stats struct {
 	Total     int            `json:"total"`
 	ByLevel   map[string]int `json:"by_level"`
@@ -84,11 +106,13 @@ func NewManager(cfg LogsConfig, onLogAdded func(*Entry)) *Manager {
 	}
 
 	return &Manager{
-		backend:       backend,
-		onLogAdded:    onLogAdded,
-		entries:       make([]*Entry, 0),
-		alertRules:    make([]*AlertRule, 0),
-		retentionDays: cfg.RetentionDays,
+		backend:         backend,
+		onLogAdded:      onLogAdded,
+		entries:         make([]*Entry, 0),
+		alertRules:      make([]*AlertRule, 0),
+		savedFilters:    make([]*SavedFilter, 0),
+		retentionPolicy: &RetentionPolicy{Days: cfg.RetentionDays, ApplyEnabled: true},
+		retentionDays:   cfg.RetentionDays,
 	}
 }
 
@@ -159,6 +183,117 @@ func (m *Manager) DeleteAlertRule(id string) bool {
 		}
 	}
 	return false
+}
+
+// Retention policy management
+func (m *Manager) GetRetentionPolicy() *RetentionPolicy {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.retentionPolicy
+}
+
+func (m *Manager) UpdateRetentionPolicy(days int, maxLogs int, applyEnabled bool) *RetentionPolicy {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.retentionPolicy.Days = days
+	m.retentionPolicy.MaxLogs = maxLogs
+	m.retentionPolicy.ApplyEnabled = applyEnabled
+	return m.retentionPolicy
+}
+
+func (m *Manager) ApplyRetentionPolicy() (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cutoff := time.Now().AddDate(0, 0, -m.retentionPolicy.Days)
+	originalCount := len(m.entries)
+
+	var kept []*Entry
+	for _, e := range m.entries {
+		if e.Timestamp.After(cutoff) {
+			kept = append(kept, e)
+		}
+	}
+	m.entries = kept
+
+	m.retentionPolicy.LastAppliedAt = time.Now()
+	return originalCount - len(m.entries), nil
+}
+
+// Saved filter management
+func (m *Manager) CreateSavedFilter(name, level, source, search, resource string, tags []string) *SavedFilter {
+	filter := &SavedFilter{
+		ID:        uuid.New().String(),
+		Name:      name,
+		Level:     level,
+		Source:    source,
+		Search:    search,
+		Resource:  resource,
+		Tags:      tags,
+		CreatedAt: time.Now(),
+	}
+	m.mu.Lock()
+	m.savedFilters = append(m.savedFilters, filter)
+	m.mu.Unlock()
+	return filter
+}
+
+func (m *Manager) ListSavedFilters() []*SavedFilter {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.savedFilters
+}
+
+func (m *Manager) DeleteSavedFilter(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, f := range m.savedFilters {
+		if f.ID == id {
+			m.savedFilters = append(m.savedFilters[:i], m.savedFilters[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// Sample log generation
+func (m *Manager) GenerateSampleLogs(count int) []*Entry {
+	levels := []string{"debug", "info", "info", "info", "warning", "error"}
+	sources := []string{"api", "web", "worker", "database", "auth", "scheduler"}
+	messages := []string{
+		"Request processed successfully",
+		"Connection established",
+		"User authentication completed",
+		"Cache miss for key",
+		"Rate limit threshold reached",
+		"Database query slow",
+		"HTTP request timeout",
+		"Configuration reloaded",
+		"Health check passed",
+		"Background job completed",
+	}
+
+	entries := make([]*Entry, 0, count)
+	for i := 0; i < count; i++ {
+		entry := &Entry{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now().Add(-time.Duration(i) * time.Minute),
+			Level:     levels[i%len(levels)],
+			Message:   messages[i%len(messages)],
+			Source:    sources[i%len(sources)],
+			Metadata:  map[string]interface{}{"generated": true, "index": i},
+			Tags:      []string{},
+		}
+		if err := m.backend.Write(entry); err == nil {
+			entries = append(entries, entry)
+		}
+	}
+
+	m.mu.Lock()
+	m.entries = append(m.entries, entries...)
+	m.mu.Unlock()
+
+	return entries
 }
 
 func (m *Manager) CheckAlerts(entry *Entry) {
@@ -277,6 +412,93 @@ func (m *Manager) CreateAlertRuleHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(rule)
+}
+
+// Retention policy HTTP handlers
+func (m *Manager) GetRetentionPolicyHTTP(w http.ResponseWriter, r *http.Request) {
+	policy := m.GetRetentionPolicy()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(policy)
+}
+
+func (m *Manager) UpdateRetentionPolicyHTTP(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Days         int  `json:"days"`
+		MaxLogs      int  `json:"max_logs"`
+		ApplyEnabled bool `json:"apply_enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		apierror.ValidationError(w, err.Error())
+		return
+	}
+
+	if input.Days < 1 {
+		input.Days = 30 // default
+	}
+
+	policy := m.UpdateRetentionPolicy(input.Days, input.MaxLogs, input.ApplyEnabled)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(policy)
+}
+
+func (m *Manager) ApplyRetentionPolicyHTTP(w http.ResponseWriter, r *http.Request) {
+	deleted, err := m.ApplyRetentionPolicy()
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"deleted": deleted,
+		"status":  "completed",
+	})
+}
+
+// Saved filter HTTP handlers
+func (m *Manager) ListSavedFiltersHTTP(w http.ResponseWriter, r *http.Request) {
+	filters := m.ListSavedFilters()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(filters)
+}
+
+func (m *Manager) CreateSavedFilterHTTP(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name     string   `json:"name"`
+		Level    string   `json:"level"`
+		Source   string   `json:"source"`
+		Search   string   `json:"search"`
+		Resource string   `json:"resource"`
+		Tags     []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		apierror.ValidationError(w, err.Error())
+		return
+	}
+
+	filter := m.CreateSavedFilter(input.Name, input.Level, input.Source, input.Search, input.Resource, input.Tags)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(filter)
+}
+
+// Generate sample logs HTTP handler
+func (m *Manager) GenerateSampleLogsHTTP(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Count int `json:"count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		input.Count = 10 // default
+	}
+	if input.Count < 1 || input.Count > 1000 {
+		input.Count = 10
+	}
+
+	entries := m.GenerateSampleLogs(input.Count)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"generated": len(entries),
+		"entries":   entries,
+	})
 }
 
 type LogsConfig struct {

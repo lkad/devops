@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManager_AddLog(t *testing.T) {
@@ -255,5 +256,216 @@ func TestManager_CreateAlertRuleHTTP(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Errorf("expected status 201, got %d", w.Code)
+	}
+}
+
+// Retention policy tests
+func TestManager_GetRetentionPolicy(t *testing.T) {
+	cfg := LogsConfig{Backend: "local", RetentionDays: 30}
+	m := NewManager(cfg, nil)
+
+	policy := m.GetRetentionPolicy()
+	if policy.Days != 30 {
+		t.Errorf("expected days 30, got %d", policy.Days)
+	}
+}
+
+func TestManager_UpdateRetentionPolicy(t *testing.T) {
+	cfg := LogsConfig{Backend: "local", RetentionDays: 30}
+	m := NewManager(cfg, nil)
+
+	policy := m.UpdateRetentionPolicy(60, 10000, true)
+	if policy.Days != 60 {
+		t.Errorf("expected days 60, got %d", policy.Days)
+	}
+	if policy.MaxLogs != 10000 {
+		t.Errorf("expected max_logs 10000, got %d", policy.MaxLogs)
+	}
+	if !policy.ApplyEnabled {
+		t.Error("expected apply_enabled to be true")
+	}
+}
+
+func TestManager_ApplyRetentionPolicy(t *testing.T) {
+	cfg := LogsConfig{Backend: "local", RetentionDays: 30}
+	m := NewManager(cfg, nil)
+
+	// Add some old logs
+	m.AddLog("info", "old log", "test", nil)
+	// Override timestamp to be old
+	m.entries[0].Timestamp = time.Now().AddDate(0, 0, -60)
+
+	deleted, err := m.ApplyRetentionPolicy()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("expected 1 deleted, got %d", deleted)
+	}
+}
+
+func TestManager_GetRetentionPolicyHTTP(t *testing.T) {
+	cfg := LogsConfig{Backend: "local", RetentionDays: 30}
+	m := NewManager(cfg, nil)
+
+	req := httptest.NewRequest("GET", "/api/logs/retention", nil)
+	w := httptest.NewRecorder()
+
+	m.GetRetentionPolicyHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"days"`) {
+		t.Error("expected response to contain days field")
+	}
+}
+
+func TestManager_UpdateRetentionPolicyHTTP(t *testing.T) {
+	cfg := LogsConfig{Backend: "local", RetentionDays: 30}
+	m := NewManager(cfg, nil)
+
+	body := `{"days":60,"max_logs":5000,"apply_enabled":true}`
+	req := httptest.NewRequest("PUT", "/api/logs/retention", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	m.UpdateRetentionPolicyHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+func TestManager_ApplyRetentionPolicyHTTP(t *testing.T) {
+	cfg := LogsConfig{Backend: "local", RetentionDays: 30}
+	m := NewManager(cfg, nil)
+
+	req := httptest.NewRequest("POST", "/api/logs/retention/apply", nil)
+	w := httptest.NewRecorder()
+
+	m.ApplyRetentionPolicyHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"deleted"`) {
+		t.Error("expected response to contain deleted field")
+	}
+}
+
+// Saved filter tests
+func TestManager_CreateSavedFilter(t *testing.T) {
+	cfg := LogsConfig{Backend: "local"}
+	m := NewManager(cfg, nil)
+
+	filter := m.CreateSavedFilter("my-filter", "error", "api", "fail", "", nil)
+	if filter.Name != "my-filter" {
+		t.Errorf("expected name 'my-filter', got '%s'", filter.Name)
+	}
+	if filter.Level != "error" {
+		t.Errorf("expected level 'error', got '%s'", filter.Level)
+	}
+	if filter.ID == "" {
+		t.Error("expected non-empty ID")
+	}
+}
+
+func TestManager_ListSavedFilters(t *testing.T) {
+	cfg := LogsConfig{Backend: "local"}
+	m := NewManager(cfg, nil)
+
+	m.CreateSavedFilter("filter1", "info", "", "", "", nil)
+	m.CreateSavedFilter("filter2", "error", "", "", "", nil)
+
+	filters := m.ListSavedFilters()
+	if len(filters) != 2 {
+		t.Errorf("expected 2 filters, got %d", len(filters))
+	}
+}
+
+func TestManager_DeleteSavedFilter(t *testing.T) {
+	cfg := LogsConfig{Backend: "local"}
+	m := NewManager(cfg, nil)
+
+	filter := m.CreateSavedFilter("to-delete", "info", "", "", "", nil)
+
+	deleted := m.DeleteSavedFilter(filter.ID)
+	if !deleted {
+		t.Error("expected DeleteSavedFilter to return true")
+	}
+
+	filters := m.ListSavedFilters()
+	if len(filters) != 0 {
+		t.Errorf("expected 0 filters after delete, got %d", len(filters))
+	}
+}
+
+func TestManager_ListSavedFiltersHTTP(t *testing.T) {
+	cfg := LogsConfig{Backend: "local"}
+	m := NewManager(cfg, nil)
+	m.CreateSavedFilter("test-filter", "info", "", "", "", nil)
+
+	req := httptest.NewRequest("GET", "/api/logs/filters", nil)
+	w := httptest.NewRecorder()
+
+	m.ListSavedFiltersHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+func TestManager_CreateSavedFilterHTTP(t *testing.T) {
+	cfg := LogsConfig{Backend: "local"}
+	m := NewManager(cfg, nil)
+
+	body := `{"name":"new-filter","level":"warning","source":"api","search":"timeout"}`
+	req := httptest.NewRequest("POST", "/api/logs/filters", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	m.CreateSavedFilterHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected status 201, got %d", w.Code)
+	}
+}
+
+// Generate sample logs tests
+func TestManager_GenerateSampleLogs(t *testing.T) {
+	cfg := LogsConfig{Backend: "local"}
+	m := NewManager(cfg, nil)
+
+	entries := m.GenerateSampleLogs(5)
+	if len(entries) != 5 {
+		t.Errorf("expected 5 entries, got %d", len(entries))
+	}
+	for _, e := range entries {
+		if e.ID == "" {
+			t.Error("expected non-empty ID")
+		}
+		if e.Level == "" {
+			t.Error("expected non-empty level")
+		}
+	}
+}
+
+func TestManager_GenerateSampleLogsHTTP(t *testing.T) {
+	cfg := LogsConfig{Backend: "local"}
+	m := NewManager(cfg, nil)
+
+	body := `{"count":3}`
+	req := httptest.NewRequest("POST", "/api/logs/generate", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	m.GenerateSampleLogsHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"generated"`) {
+		t.Error("expected response to contain generated field")
 	}
 }
