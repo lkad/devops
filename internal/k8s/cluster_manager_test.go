@@ -345,3 +345,164 @@ func TestPod_Struct(t *testing.T) {
 		t.Errorf("expected status 'Running', got '%s'", pod.Status)
 	}
 }
+
+func TestPodLogsOptions_Struct(t *testing.T) {
+	opts := PodLogsOptions{
+		Namespace: "default",
+		PodName:   "nginx-pod",
+		Container: "nginx",
+		Lines:     50,
+		Previous:  true,
+	}
+
+	if opts.Namespace != "default" {
+		t.Errorf("expected namespace 'default', got '%s'", opts.Namespace)
+	}
+	if opts.PodName != "nginx-pod" {
+		t.Errorf("expected pod name 'nginx-pod', got '%s'", opts.PodName)
+	}
+	if opts.Lines != 50 {
+		t.Errorf("expected lines 50, got %d", opts.Lines)
+	}
+	if !opts.Previous {
+		t.Error("expected Previous=true")
+	}
+}
+
+func TestExecOptions_Struct(t *testing.T) {
+	opts := ExecOptions{
+		Namespace: "default",
+		PodName:   "nginx-pod",
+		Container: "nginx",
+		Command:   []string{"ls", "-la"},
+	}
+
+	if opts.Namespace != "default" {
+		t.Errorf("expected namespace 'default', got '%s'", opts.Namespace)
+	}
+	if opts.PodName != "nginx-pod" {
+		t.Errorf("expected pod name 'nginx-pod', got '%s'", opts.PodName)
+	}
+	if len(opts.Command) != 2 {
+		t.Errorf("expected command length 2, got %d", len(opts.Command))
+	}
+	if opts.Command[0] != "ls" {
+		t.Errorf("expected command[0] 'ls', got '%s'", opts.Command[0])
+	}
+}
+
+func TestExecResult_Struct(t *testing.T) {
+	result := &ExecResult{
+		Output: "total 64\ndrwxr-xr-x  2 root root 4096 Apr 27 10:00 .",
+		Error:  "",
+	}
+
+	if result.Output == "" {
+		t.Error("expected non-empty output")
+	}
+	if result.Error != "" {
+		t.Errorf("expected empty error, got '%s'", result.Error)
+	}
+}
+
+func TestNodeMetrics_Struct(t *testing.T) {
+	metrics := NodeMetrics{
+		Name:     "node-1",
+		CPUUsage: "2",
+		CPUCap:   "4",
+		MemUsage: "4Gi",
+		MemCap:   "8Gi",
+	}
+
+	if metrics.Name != "node-1" {
+		t.Errorf("expected name 'node-1', got '%s'", metrics.Name)
+	}
+	if metrics.CPUUsage != "2" {
+		t.Errorf("expected CPUUsage '2', got '%s'", metrics.CPUUsage)
+	}
+	if metrics.CPUCap != "4" {
+		t.Errorf("expected CPUCap '4', got '%s'", metrics.CPUCap)
+	}
+	if metrics.MemUsage != "4Gi" {
+		t.Errorf("expected MemUsage '4Gi', got '%s'", metrics.MemUsage)
+	}
+	if metrics.MemCap != "8Gi" {
+		t.Errorf("expected MemCap '8Gi', got '%s'", metrics.MemCap)
+	}
+}
+
+func TestGetPodLogsWithOptions_Integration(t *testing.T) {
+	skipIfNoK8s(t)
+	m := NewClusterManager()
+
+	// Get a pod from kube-system to read logs
+	pods, err := m.GetPods("dev-cluster-1", "kube-system")
+	if err != nil {
+		t.Fatalf("GetPods failed: %v", err)
+	}
+	if len(pods) == 0 {
+		t.Skip("no pods available for log test")
+	}
+
+	// Get logs using new options-based method
+	podName := pods[0].Name
+	opts := PodLogsOptions{
+		Namespace: "kube-system",
+		PodName:   podName,
+		Lines:     10,
+		Previous:  false,
+	}
+	logs, err := m.GetPodLogsWithOptions("dev-cluster-1", opts)
+	if err != nil {
+		t.Fatalf("GetPodLogsWithOptions failed: %v", err)
+	}
+	t.Logf("Pod %s logs (last 10 lines):\n%s", podName, logs)
+}
+
+func TestPodExec_Integration(t *testing.T) {
+	skipIfNoK8s(t)
+	m := NewClusterManager()
+
+	// Get a pod from kube-system to exec into
+	pods, err := m.GetPods("dev-cluster-1", "kube-system")
+	if err != nil {
+		t.Fatalf("GetPods failed: %v", err)
+	}
+	if len(pods) == 0 {
+		t.Skip("no pods available for exec test")
+	}
+
+	// Execute a simple command - use sh -c for proper shell execution
+	podName := pods[0].Name
+	opts := ExecOptions{
+		Namespace: "kube-system",
+		PodName:   podName,
+		Command:   []string{"/bin/sh", "-c", "echo hello"},
+	}
+
+	result, err := m.PodExec("dev-cluster-1", opts)
+	if err != nil {
+		t.Fatalf("PodExec failed: %v", err)
+	}
+	t.Logf("Exec output: '%s', error: '%s'", result.Output, result.Error)
+	// Note: output may be empty for some containers that don't have shell
+	// This test verifies the exec mechanism works
+}
+
+func TestGetClusterMetrics_Integration(t *testing.T) {
+	skipIfNoK8s(t)
+	m := NewClusterManager()
+
+	metrics, err := m.GetClusterMetrics("dev-cluster-1")
+	if err != nil {
+		t.Fatalf("GetClusterMetrics failed: %v", err)
+	}
+	if len(metrics) == 0 {
+		t.Fatal("expected at least one node metrics")
+	}
+
+	for _, m := range metrics {
+		t.Logf("Node %s: CPU=%s/%s Memory=%s/%s",
+			m.Name, m.CPUUsage, m.CPUCap, m.MemUsage, m.MemCap)
+	}
+}

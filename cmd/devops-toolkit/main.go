@@ -258,6 +258,11 @@ func main() {
 	registerRoute("/api/k8s/clusters/{cluster}/namespaces", k8sMgr.GetNamespacesHTTP)
 	registerRoute("/api/k8s/clusters/{cluster}/pods", k8sMgr.GetPodsHTTP)
 	registerRoute("/api/k8s/clusters/{cluster}/pods/{pod}/logs", k8sMgr.GetPodLogsHTTP)
+	// New routes per spec: /api/k8s/clusters/:id/namespaces/:ns/pods/:pod/logs
+	registerRoute("/api/k8s/clusters/{cluster}/namespaces/{ns}/pods/{pod}/logs", k8sMgr.GetPodLogsWithNamespaceHTTP)
+	registerRoute("/api/k8s/clusters/{cluster}/namespaces/{ns}/pods/{pod}/exec", k8sMgr.PodExecHTTP)
+	// Metrics endpoint: /api/k8s/clusters/:id/metrics
+	registerRoute("/api/k8s/clusters/{cluster}/metrics", k8sMgr.GetClusterMetricsHTTP)
 	registerRoute("/api/k8s/maintenance", k8sMgr.MaintenanceOpHTTP)
 
 	// Physical host routes
