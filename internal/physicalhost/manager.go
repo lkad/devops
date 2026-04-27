@@ -47,6 +47,7 @@ type Manager struct {
 	hosts  map[string]*Host
 	sshCfg *SSHConfig
 	pool   *SSHConnPool
+	cache  *MetricsCache
 }
 
 // DefaultSSHConnPoolConfig returns default pool configuration
@@ -111,6 +112,39 @@ type ServiceStatus struct {
 	LastCheck time.Time `json:"last_check"`
 }
 
+// DataStatus represents the freshness of cached metrics data
+type DataStatus string
+
+const (
+	DataStatusFresh       DataStatus = "fresh"
+	DataStatusStale       DataStatus = "stale"
+	DataStatusUnavailable DataStatus = "unavailable"
+)
+
+// MetricsCache provides local caching for metrics with TTL support
+type MetricsCache struct {
+	mu       sync.RWMutex
+	entries  map[string]*CachedMetrics
+	maxAge   time.Duration
+	staleAge time.Duration
+}
+
+// CachedMetrics wraps metrics with cache metadata
+type CachedMetrics struct {
+	Metrics    *HostMetrics
+	CachedAt   time.Time
+	DataStatus DataStatus
+}
+
+// MetricsResponse is returned by GetMetrics and includes data status
+type MetricsResponse struct {
+	HostID     string       `json:"host_id"`
+	Hostname   string       `json:"hostname"`
+	Metrics    *HostMetrics  `json:"metrics"`
+	DataStatus DataStatus    `json:"data_status"`
+	CachedAt   *time.Time    `json:"cached_at,omitempty"`
+}
+
 func NewManager() *Manager {
 	cfg := DefaultSSHConnPoolConfig()
 	m := &Manager{
@@ -118,7 +152,77 @@ func NewManager() *Manager {
 		sshCfg: cfg,
 	}
 	m.pool = NewSSHConnPool(cfg, m.dialSSH)
+	m.cache = NewMetricsCache(5*time.Minute, 2*time.Minute) // maxAge 5min, staleAge 2min
 	return m
+}
+
+// NewMetricsCache creates a new metrics cache with the specified TTL settings
+func NewMetricsCache(maxAge, staleAge time.Duration) *MetricsCache {
+	if maxAge <= 0 {
+		maxAge = 5 * time.Minute
+	}
+	if staleAge <= 0 {
+		staleAge = 2 * time.Minute
+	}
+	return &MetricsCache{
+		entries:  make(map[string]*CachedMetrics),
+		maxAge:   maxAge,
+		staleAge: staleAge,
+	}
+}
+
+// Get retrieves cached metrics for a host
+func (c *MetricsCache) Get(hostID string) (*CachedMetrics, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	entry, exists := c.entries[hostID]
+	if !exists {
+		return nil, false
+	}
+	return entry, true
+}
+
+// Set stores metrics in the cache
+func (c *MetricsCache) Set(hostID string, metrics *HostMetrics, status DataStatus) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[hostID] = &CachedMetrics{
+		Metrics:    metrics,
+		CachedAt:   time.Now(),
+		DataStatus: status,
+	}
+}
+
+// GetDataStatus determines the appropriate data status based on cache age
+func (c *MetricsCache) GetDataStatus(hostID string) DataStatus {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	entry, exists := c.entries[hostID]
+	if !exists {
+		return DataStatusUnavailable
+	}
+	age := time.Since(entry.CachedAt)
+	if age > c.maxAge {
+		return DataStatusUnavailable
+	}
+	if age > c.staleAge {
+		return DataStatusStale
+	}
+	return DataStatusFresh
+}
+
+// Delete removes cached metrics for a host
+func (c *MetricsCache) Delete(hostID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, hostID)
+}
+
+// Clear removes all cached entries
+func (c *MetricsCache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = make(map[string]*CachedMetrics)
 }
 
 // NewSSHConnPool creates a new SSH connection pool
@@ -358,11 +462,40 @@ func (m *Manager) DeleteHost(id string) bool {
 	defer m.mu.Unlock()
 	if _, ok := m.hosts[id]; ok {
 		delete(m.hosts, id)
+		m.cache.Delete(id)
 		return true
 	}
 	return false
 }
 
+// CheckNodeHealth performs an SSH health check on the host, independent of any database.
+// This implements the Node Status Layer - SSH connectivity determines node online/offline state.
+func (m *Manager) CheckNodeHealth(id string) error {
+	host, err := m.getHost(id)
+	if err != nil {
+		return err
+	}
+
+	// Try to establish SSH connection - this is the health check
+	client, err := m.sshConnect(host)
+	if err != nil {
+		// SSH check failed - node is offline
+		host.State = "offline"
+		return fmt.Errorf("SSH health check failed for host %s: %w", host.Hostname, err)
+	}
+	defer m.sshPutConnection(host, client)
+
+	// SSH check succeeded - node is online
+	now := time.Now()
+	host.LastHeartbeat = &now
+	host.State = "online"
+	return nil
+}
+
+// CollectMetrics collects metrics via SSH and caches them.
+// This implements the Data Query Layer with cache fallback.
+// On DB failure, it returns cached data with dataStatus=stale.
+// On both cache miss and DB down, it returns dataStatus=unavailable.
 func (m *Manager) CollectMetrics(id string) error {
 	host, err := m.getHost(id)
 	if err != nil {
@@ -372,8 +505,10 @@ func (m *Manager) CollectMetrics(id string) error {
 	// SSH to host and collect metrics - get connection from pool
 	client, err := m.sshConnect(host)
 	if err != nil {
+		// SSH check failed - node is offline (but don't update metrics)
 		host.State = "offline"
-		return err
+		// Try to return cached data with stale status
+		return m.handleMetricsFailure(id, err)
 	}
 	// Return connection to pool when done (reuse, not close)
 	defer m.sshPutConnection(host, client)
@@ -403,7 +538,59 @@ func (m *Manager) CollectMetrics(id string) error {
 	host.LastHeartbeat = &now
 	host.State = "online"
 
+	// Cache the fresh metrics
+	m.cache.Set(id, host.Metrics, DataStatusFresh)
+
 	return nil
+}
+
+// handleMetricsFailure handles the case when metrics collection fails.
+// It checks for cached data and returns appropriate status.
+func (m *Manager) handleMetricsFailure(id string, originalErr error) error {
+	cached, exists := m.cache.Get(id)
+	if exists {
+		// We have cached data - update status to stale
+		cached.DataStatus = DataStatusStale
+		return nil // Don't return error since we have fallback data
+	}
+	// No cached data available
+	return fmt.Errorf("metrics unavailable for host %s: %w", id, originalErr)
+}
+
+// GetMetrics returns the current metrics with their data status.
+// This method implements the data query layer with cache fallback.
+func (m *Manager) GetMetrics(id string) (*MetricsResponse, error) {
+	host, err := m.getHost(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// First, check the cache to see if we have recent data
+	cached, exists := m.cache.Get(id)
+	if exists {
+		return &MetricsResponse{
+			HostID:     host.ID,
+			Hostname:   host.Hostname,
+			Metrics:    cached.Metrics,
+			DataStatus: cached.DataStatus,
+			CachedAt:   &cached.CachedAt,
+		}, nil
+	}
+
+	// No cached data - this is a cache miss
+	// Return unavailable status but still include any in-memory metrics
+	return &MetricsResponse{
+		HostID:     host.ID,
+		Hostname:   host.Hostname,
+		Metrics:    host.Metrics,
+		DataStatus: DataStatusUnavailable,
+	}, nil
+}
+
+// RefreshMetrics forces a fresh metrics collection via SSH.
+// Use this when you need the latest metrics regardless of cache state.
+func (m *Manager) RefreshMetrics(id string) error {
+	return m.CollectMetrics(id)
 }
 
 func (m *Manager) sshConnect(host *Host) (*ssh.Client, error) {
@@ -776,5 +963,97 @@ func (m *Manager) PushConfigHTTP(w http.ResponseWriter, r *http.Request) {
 		"message": "config pushed successfully",
 		"host_id": id,
 		"path":    req.Path,
+	})
+}
+
+// GetMetricsHTTP handles GET /api/physical-hosts/:id/metrics
+// Returns metrics with dataStatus indicating freshness (fresh, stale, unavailable)
+func (m *Manager) GetMetricsHTTP(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+
+	// Check if host exists
+	host := m.GetHost(id)
+	if host == nil {
+		apierror.NotFound(w, "host not found")
+		return
+	}
+
+	metricsResp, err := m.GetMetrics(id)
+	if err != nil {
+		// If we have cached data, return it with unavailable status
+		if metricsResp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(metricsResp)
+			return
+		}
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metricsResp)
+}
+
+// RefreshMetricsHTTP handles POST /api/physical-hosts/:id/metrics/refresh
+// Forces a fresh metrics collection via SSH
+func (m *Manager) RefreshMetricsHTTP(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+
+	// Check if host exists
+	host := m.GetHost(id)
+	if host == nil {
+		apierror.NotFound(w, "host not found")
+		return
+	}
+
+	err := m.RefreshMetrics(id)
+	if err != nil {
+		// Even if refresh fails, try to return cached data
+		metricsResp, _ := m.GetMetrics(id)
+		if metricsResp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(metricsResp)
+			return
+		}
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+
+	metricsResp, _ := m.GetMetrics(id)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metricsResp)
+}
+
+// HealthCheckHTTP handles GET /api/physical-hosts/:id/health
+// Performs SSH health check without querying DB
+func (m *Manager) HealthCheckHTTP(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+
+	// Check if host exists
+	host := m.GetHost(id)
+	if host == nil {
+		apierror.NotFound(w, "host not found")
+		return
+	}
+
+	err := m.CheckNodeHealth(id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"host_id":  host.ID,
+			"hostname": host.Hostname,
+			"state":    "offline",
+			"error":    err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"host_id":        host.ID,
+		"hostname":       host.Hostname,
+		"state":          host.State,
+		"last_heartbeat": host.LastHeartbeat,
 	})
 }

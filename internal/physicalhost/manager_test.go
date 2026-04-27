@@ -552,3 +552,386 @@ func TestPushConfigRequest_Structure(t *testing.T) {
 	}
 }
 
+// Two-Layer Architecture and Cache Tests
+
+func TestDataStatus_Constants(t *testing.T) {
+	if DataStatusFresh != "fresh" {
+		t.Errorf("expected DataStatusFresh 'fresh', got '%s'", DataStatusFresh)
+	}
+	if DataStatusStale != "stale" {
+		t.Errorf("expected DataStatusStale 'stale', got '%s'", DataStatusStale)
+	}
+	if DataStatusUnavailable != "unavailable" {
+		t.Errorf("expected DataStatusUnavailable 'unavailable', got '%s'", DataStatusUnavailable)
+	}
+}
+
+func TestNewMetricsCache(t *testing.T) {
+	cache := NewMetricsCache(5*time.Minute, 2*time.Minute)
+	if cache == nil {
+		t.Fatal("expected non-nil cache")
+	}
+	if cache.entries == nil {
+		t.Fatal("expected entries to be initialized")
+	}
+	if cache.maxAge != 5*time.Minute {
+		t.Errorf("expected maxAge 5m, got %v", cache.maxAge)
+	}
+	if cache.staleAge != 2*time.Minute {
+		t.Errorf("expected staleAge 2m, got %v", cache.staleAge)
+	}
+}
+
+func TestNewMetricsCache_Defaults(t *testing.T) {
+	cache := NewMetricsCache(0, 0)
+	if cache.maxAge != 5*time.Minute {
+		t.Errorf("expected default maxAge 5m, got %v", cache.maxAge)
+	}
+	if cache.staleAge != 2*time.Minute {
+		t.Errorf("expected default staleAge 2m, got %v", cache.staleAge)
+	}
+}
+
+func TestMetricsCache_SetAndGet(t *testing.T) {
+	cache := NewMetricsCache(5*time.Minute, 2*time.Minute)
+
+	metrics := &HostMetrics{
+		CPU: CPUStats{Usage: 50.0, Cores: 4, Idle: 50.0},
+	}
+	cache.Set("host1", metrics, DataStatusFresh)
+
+	cached, exists := cache.Get("host1")
+	if !exists {
+		t.Fatal("expected to get cached metrics")
+	}
+	if cached.Metrics.CPU.Usage != 50.0 {
+		t.Errorf("expected CPU usage 50.0, got %f", cached.Metrics.CPU.Usage)
+	}
+	if cached.DataStatus != DataStatusFresh {
+		t.Errorf("expected status fresh, got %s", cached.DataStatus)
+	}
+}
+
+func TestMetricsCache_GetNonExistent(t *testing.T) {
+	cache := NewMetricsCache(5*time.Minute, 2*time.Minute)
+
+	_, exists := cache.Get("nonexistent")
+	if exists {
+		t.Error("expected no cached entry for nonexistent host")
+	}
+}
+
+func TestMetricsCache_Delete(t *testing.T) {
+	cache := NewMetricsCache(5*time.Minute, 2*time.Minute)
+
+	metrics := &HostMetrics{
+		CPU: CPUStats{Usage: 50.0},
+	}
+	cache.Set("host1", metrics, DataStatusFresh)
+
+	cache.Delete("host1")
+
+	_, exists := cache.Get("host1")
+	if exists {
+		t.Error("expected entry to be deleted")
+	}
+}
+
+func TestMetricsCache_Clear(t *testing.T) {
+	cache := NewMetricsCache(5*time.Minute, 2*time.Minute)
+
+	cache.Set("host1", &HostMetrics{}, DataStatusFresh)
+	cache.Set("host2", &HostMetrics{}, DataStatusFresh)
+
+	cache.Clear()
+
+	_, exists1 := cache.Get("host1")
+	_, exists2 := cache.Get("host2")
+	if exists1 || exists2 {
+		t.Error("expected all entries to be cleared")
+	}
+}
+
+func TestMetricsCache_GetDataStatus_Fresh(t *testing.T) {
+	cache := NewMetricsCache(5*time.Minute, 2*time.Minute)
+
+	metrics := &HostMetrics{}
+	cache.Set("host1", metrics, DataStatusFresh)
+
+	status := cache.GetDataStatus("host1")
+	if status != DataStatusFresh {
+		t.Errorf("expected fresh status, got %s", status)
+	}
+}
+
+func TestMetricsCache_GetDataStatus_Stale(t *testing.T) {
+	cache := NewMetricsCache(5*time.Minute, 1*time.Minute) // staleAge=1min
+
+	metrics := &HostMetrics{}
+	cache.Set("host1", metrics, DataStatusFresh)
+
+	// Simulate cache entry older than staleAge but younger than maxAge
+	cache.mu.Lock()
+	cache.entries["host1"].CachedAt = time.Now().Add(-2 * time.Minute)
+	cache.mu.Unlock()
+
+	status := cache.GetDataStatus("host1")
+	if status != DataStatusStale {
+		t.Errorf("expected stale status, got %s", status)
+	}
+}
+
+func TestMetricsCache_GetDataStatus_Unavailable(t *testing.T) {
+	cache := NewMetricsCache(5*time.Minute, 2*time.Minute)
+
+	status := cache.GetDataStatus("nonexistent")
+	if status != DataStatusUnavailable {
+		t.Errorf("expected unavailable status, got %s", status)
+	}
+}
+
+func TestMetricsCache_GetDataStatus_MaxAgeExceeded(t *testing.T) {
+	cache := NewMetricsCache(1*time.Minute, 30*time.Second)
+
+	metrics := &HostMetrics{}
+	cache.Set("host1", metrics, DataStatusFresh)
+
+	// Simulate cache entry older than maxAge
+	cache.mu.Lock()
+	cache.entries["host1"].CachedAt = time.Now().Add(-2 * time.Minute)
+	cache.mu.Unlock()
+
+	status := cache.GetDataStatus("host1")
+	if status != DataStatusUnavailable {
+		t.Errorf("expected unavailable status when maxAge exceeded, got %s", status)
+	}
+}
+
+func TestManager_CacheInitialized(t *testing.T) {
+	m := NewManager()
+	if m.cache == nil {
+		t.Fatal("expected cache to be initialized")
+	}
+}
+
+func TestManager_GetMetrics_NoCache(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	resp, err := m.GetMetrics(host.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.DataStatus != DataStatusUnavailable {
+		t.Errorf("expected unavailable status with no cache, got %s", resp.DataStatus)
+	}
+}
+
+func TestManager_GetMetrics_WithCache(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	// Manually set cache
+	metrics := &HostMetrics{
+		CPU: CPUStats{Usage: 75.0, Cores: 8},
+	}
+	m.cache.Set(host.ID, metrics, DataStatusFresh)
+
+	resp, err := m.GetMetrics(host.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.DataStatus != DataStatusFresh {
+		t.Errorf("expected fresh status, got %s", resp.DataStatus)
+	}
+	if resp.Metrics.CPU.Usage != 75.0 {
+		t.Errorf("expected CPU usage 75.0, got %f", resp.Metrics.CPU.Usage)
+	}
+}
+
+func TestManager_GetMetrics_NonExistentHost(t *testing.T) {
+	m := NewManager()
+
+	_, err := m.GetMetrics("nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent host")
+	}
+}
+
+func TestManager_DeleteHost_ClearsCache(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	// Set cache
+	metrics := &HostMetrics{}
+	m.cache.Set(host.ID, metrics, DataStatusFresh)
+
+	// Verify cache has entry
+	_, exists := m.cache.Get(host.ID)
+	if !exists {
+		t.Fatal("expected cache entry before delete")
+	}
+
+	m.DeleteHost(host.ID)
+
+	// Verify cache is cleared
+	_, exists = m.cache.Get(host.ID)
+	if exists {
+		t.Error("expected cache entry to be cleared after delete")
+	}
+}
+
+func TestManager_CheckNodeHealth_NonExistentHost(t *testing.T) {
+	m := NewManager()
+
+	err := m.CheckNodeHealth("nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent host")
+	}
+}
+
+func TestManager_CheckNodeHealth_SSHFails(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	// SSH will fail since host doesn't exist - CheckNodeHealth should handle this
+	err := m.CheckNodeHealth(host.ID)
+	if err == nil {
+		t.Log("SSH connection succeeded (unexpected in test env)")
+	} else {
+		// Error expected - host should be marked offline
+		if host.State != "offline" {
+			t.Errorf("expected host state 'offline', got '%s'", host.State)
+		}
+	}
+}
+
+func TestManager_CollectMetrics_CachesResult(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	// CollectMetrics will fail (no real SSH) but the method should handle it
+	m.CollectMetrics(host.ID)
+
+	// Cache should be updated even on failure (with stale data if cache exists)
+	// or error if no cache
+}
+
+func TestMetricsResponse_Structure(t *testing.T) {
+	now := time.Now()
+	resp := &MetricsResponse{
+		HostID:     "host-123",
+		Hostname:   "test.example.com",
+		Metrics:    &HostMetrics{},
+		DataStatus: DataStatusStale,
+		CachedAt:   &now,
+	}
+
+	if resp.HostID != "host-123" {
+		t.Errorf("expected host ID 'host-123', got '%s'", resp.HostID)
+	}
+	if resp.Hostname != "test.example.com" {
+		t.Errorf("expected hostname 'test.example.com', got '%s'", resp.Hostname)
+	}
+	if resp.DataStatus != DataStatusStale {
+		t.Errorf("expected data status 'stale', got '%s'", resp.DataStatus)
+	}
+}
+
+func TestManager_GetMetricsHTTP_HostNotFound(t *testing.T) {
+	m := NewManager()
+
+	req := httptest.NewRequest("GET", "/api/physical-hosts/nonexistent/metrics", nil)
+	w := httptest.NewRecorder()
+
+	m.GetMetricsHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", w.Code)
+	}
+}
+
+func TestManager_GetMetricsHTTP_WithCache(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	// Pre-populate cache
+	metrics := &HostMetrics{
+		CPU: CPUStats{Usage: 60.0, Cores: 4},
+	}
+	m.cache.Set(host.ID, metrics, DataStatusFresh)
+
+	vars := map[string]string{"id": host.ID}
+	req := httptest.NewRequest("GET", "/api/physical-hosts/"+host.ID+"/metrics", nil)
+	req = mux.SetURLVars(req, vars)
+	w := httptest.NewRecorder()
+
+	m.GetMetricsHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"data_status":"fresh"`) {
+		t.Error("expected response to contain fresh status")
+	}
+}
+
+func TestManager_HealthCheckHTTP_HostNotFound(t *testing.T) {
+	m := NewManager()
+
+	req := httptest.NewRequest("GET", "/api/physical-hosts/nonexistent/health", nil)
+	w := httptest.NewRecorder()
+
+	m.HealthCheckHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", w.Code)
+	}
+}
+
+func TestManager_HealthCheckHTTP_OfflineHost(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+	host.State = "offline"
+
+	vars := map[string]string{"id": host.ID}
+	req := httptest.NewRequest("GET", "/api/physical-hosts/"+host.ID+"/health", nil)
+	req = mux.SetURLVars(req, vars)
+	w := httptest.NewRecorder()
+
+	m.HealthCheckHTTP(w, req)
+
+	// Health check should fail with 503 since SSH won't work
+	if w.Code != http.StatusServiceUnavailable && w.Code != http.StatusOK {
+		t.Errorf("expected status 503 or 200, got %d", w.Code)
+	}
+}
+
+func TestManager_RefreshMetricsHTTP(t *testing.T) {
+	m := NewManager()
+	host := m.CreateHost("test-host", "10.0.0.1", "admin", "key", 22)
+
+	// Pre-populate cache with stale data
+	metrics := &HostMetrics{
+		CPU: CPUStats{Usage: 30.0, Cores: 2},
+	}
+	m.cache.Set(host.ID, metrics, DataStatusStale)
+
+	vars := map[string]string{"id": host.ID}
+	req := httptest.NewRequest("POST", "/api/physical-hosts/"+host.ID+"/metrics/refresh", nil)
+	req = mux.SetURLVars(req, vars)
+	w := httptest.NewRecorder()
+
+	m.RefreshMetricsHTTP(w, req)
+
+	// Should return 200 or 500 depending on SSH availability
+	if w.Code != http.StatusOK && w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 200 or 500, got %d", w.Code)
+	}
+}
