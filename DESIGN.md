@@ -81,6 +81,7 @@
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-04-19 | Initial design system created | Created by /design-consultation based on product context (SRE dashboard, dark theme, dual-datacenter infrastructure) |
+| 2026-04-28 | Mock testing framework | Add Fake*Client implementations for device management testing without real hardware |
 
 ## Multi-Cluster Kubernetes UI
 
@@ -111,3 +112,82 @@ Clusters must be visually distinguished by environment type using the following 
 - All clusters stored in `allK8sClusters` global variable for client-side filtering
 - `filterK8sClusters()` function handles both search and environment filtering
 - `getEnvStyle()` returns appropriate color scheme based on cluster type
+
+## Mock Testing Framework
+
+### Purpose
+在没有真实硬件的环境下进行开发和测试，使用模拟客户端替代真实的 vSphere、KVM、IPMI、SNMP 等连接。
+
+### Mock Client 文件位置
+`internal/device/fake/` 目录下包含所有模拟客户端实现：
+
+| 文件 | 用途 |
+|------|------|
+| `fake_vmware.go` | 模拟 vSphere/ESXi 虚拟化平台 |
+| `fake_kvm.go` | 模拟 KVM 虚拟化平台 |
+| `fake_ipmi.go` | 模拟 IPMI 智能平台管理接口 |
+| `fake_network.go` | 模拟 SNMP 网络设备 (交换机、路由器、防火墙) |
+| `fake_metrics.go` | 模拟指标采集 (CPU、内存、磁盘、网络) |
+| `fake_test.go` | 测试辅助工具 |
+
+### 使用方式
+
+```go
+import "github.com/devops-toolkit/internal/device/fake"
+
+// 创建模拟客户端
+vmClient := fake.NewFakeVMwareClient()
+kvmClient := fake.NewFakeKVMClient()
+ipmiClient := fake.NewFakeIPMIClient()
+networkClient := fake.NewFakeNetworkDeviceClient()
+metricsCollector := fake.NewFakeMetricsCollector()
+
+// 创建带模拟客户端的设备管理器
+manager := device.NewManagerWithClients(db, vmClient, metricsCollector, networkClient)
+
+// 使用 manager 进行操作
+vms, err := manager.DiscoverVMsFromHost(ctx, "host-1")
+```
+
+### 模拟数据
+
+**FakeVMwareClient:** 3 台 VM (web-server-01, db-server-01, app-server-01)
+**FakeKVMClient:** 2 台 VM (kvm-vm-01, kvm-vm-02)
+**FakeNetworkDeviceClient:** 3 台网络设备 (core-switch-01, access-switch-01, edge-firewall-01)
+
+### 接口对齐
+
+所有 Fake 客户端实现真实客户端的相同接口，确保测试环境与生产环境代码路径一致。
+
+**HypervisorClient 接口 (虚拟化平台):**
+```go
+type HypervisorClient interface {
+    ListVMs(ctx context.Context, hostID string) ([]*VM, error)
+    GetVM(ctx context.Context, vmID string) (*VM, error)
+    GetVMMetrics(ctx context.Context, vmID string) (*VMMetrics, error)
+    GetHostInfo(ctx context.Context, hostID string) (*GORMDevice, error)
+    GetHostMetrics(ctx context.Context, hostID string) (*HostMetrics, error)
+    GetHostPowerState(ctx context.Context, hostID string) (string, error)
+    SetHostPowerState(ctx context.Context, hostID string, state string) error
+}
+```
+
+**NetworkDeviceClient 接口 (网络设备):**
+```go
+type NetworkDeviceClient interface {
+    ListDevices(ctx context.Context) ([]*GORMDevice, error)
+    GetDevice(ctx context.Context, deviceID string) (*GORMDevice, error)
+    GetDeviceInterfaces(ctx context.Context, deviceID string) ([]*NetworkInterface, error)
+    GetDeviceMetrics(ctx context.Context, deviceID string) (*NetworkMetrics, error)
+    BackupConfig(ctx context.Context, deviceID string) (string, error)
+}
+```
+
+**MetricsCollector 接口 (指标采集):**
+```go
+type MetricsCollector interface {
+    CollectVMMetrics(ctx context.Context, vmID string) (*VMMetrics, error)
+    CollectHostMetrics(ctx context.Context, hostID string) (*HostMetrics, error)
+    CollectNetworkDeviceMetrics(ctx context.Context, deviceID string) (*NetworkMetrics, error)
+}
+```

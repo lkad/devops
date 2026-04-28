@@ -1,7 +1,7 @@
 # DevOps Toolkit - Product Requirements & Design Document
 
-**Version:** 1.4
-**Last Updated:** 2026-04-24
+**Version:** 1.5
+**Last Updated:** 2026-04-28
 
 ---
 
@@ -92,35 +92,223 @@ stages:
 
 | Type | Description | Protocol | Discovery |
 |------|-------------|----------|-----------|
-| PhysicalHost | Physical servers/VMs | SSH, WinRM | Active registration |
+| PhysicalHost | Physical servers/VMs | SSH, IPMI | Active registration |
+| VM | Virtual machines | vSphere, KVM, Xen, Hyper-V | Hypervisor discovery |
+| NetworkDevice | Switches, routers, firewalls | SNMP, NETCONF | Pull registration |
 | Container | Docker/K8s containers | StdIO, gRPC | Auto-discovery |
-| NetworkDevice | Switches, routers | SNMP, NETCONF | Pull registration |
-| LoadBalancer | HAProxy, Nginx | HTTP, REST API | Config import |
-| CloudInstance | EC2, GCE, VMs | SSH, Custom | Cloud API discovery |
+| LoadBalancer | HAProxy, Nginx, F5 | HTTP, REST API | Config import |
+| CloudInstance | EC2, GCE, Azure VMs | SSH, Custom | Cloud API discovery |
 | IoT_Device | Sensors, edge devices | MQTT, HTTP | OTA registration |
 
 ### 3.2 Device State Machine
 
+**通用状态机：**
 ```
 PENDING → AUTHENTICATED → REGISTERED → ACTIVE
-ACTIVE → MAINTENANCE → SUSPENDED → RETIRE
+                                ↓
+                        MAINTENANCE ↔ SUSPENDED
+                                ↓
+                              RETIRED
 ```
 
-### 3.3 Configuration Management
+**虚拟机状态机：**
+```
+PENDING → RUNNING → SUSPENDED
+              ↓          ↓
+           STOPPED    (resume)
+              ↓
+           RETIRED
+```
+
+**网络设备状态机：**
+```
+PENDING → DISCOVERED → ACTIVE
+                     ↓
+              MAINTENANCE → RETIRED
+```
+
+### 3.3 Physical Host (物理主机)
+
+**数据模型：**
+
+| Field | Type | Description | Example |
+|-------|------|-------------|---------|
+| Manufacturer | string | 厂商 | Dell, HP, Lenovo |
+| Model | string | 型号 | PowerEdge R740 |
+| SerialNo | string | 序列号 | SN123456789 |
+| BIOSVersion | string | BIOS版本 | 2.5.3 |
+| CPUModel | string | CPU型号 | Intel Xeon Gold 6248 |
+| CPUCores | int | 物理核心数 | 32 |
+| CPUThreads | int | 线程数 | 64 |
+| MemoryGB | int | 内存总容量 | 128 |
+| DiskTotalGB | int | 总存储 | 2000 |
+| MgmtIP | string | 管理网IP | 192.168.1.101 |
+| IPMIIP | string | IPMI/BMC IP | 192.168.1.100 |
+| Location | string | 数据中心/机房 | DC1-A |
+| Rack | string | 机柜编号 | A-01-20 |
+| PowerConsumptionWatts | int | 实时功耗 | 450 |
+| AssetNo | string | 资产编号 | AST-2024-0001 |
+| PurchaseDate | date | 采购日期 | 2024-01-15 |
+| WarrantyExpire | date | 保修到期 | 2027-01-15 |
+
+**验证规则：**
+- Name: 必填, 1-64字符, 唯一
+- SerialNo: 必填, 唯一
+- Manufacturer: 枚举: Dell, HP, Lenovo, Huawei, Inspur, SuperMicro
+- MgmtIP/IPMIIP: 有效的 IPv4 地址
+- Rack: 格式 `^[A-Z]-\d{2}-\d{2}$`
+
+### 3.4 Virtual Machine (虚拟机)
+
+**数据模型：**
+
+| Field | Type | Description | Example |
+|-------|------|-------------|---------|
+| VMID | string | 虚拟机唯一标识 | vm-100 |
+| Name | string | 虚拟机名称 | web-server-01 |
+| HypervisorType | string | 虚拟化平台 | vsphere, kvm, xen, hyperv |
+| HypervisorHost | string | 宿主物理机 ID | host-1 |
+| ResourcePool | string | 资源池 | RP-Production |
+| Cluster | string | 所属集群 | Cluster-01 |
+| VCPU | int | 虚拟 CPU 数量 | 4 |
+| MemoryMB | int | 内存 (MB) | 8192 |
+| DiskTotalGB | int | 总磁盘容量 | 100 |
+| IPAddresses | JSON | IP 地址列表 | ["192.168.1.10"] |
+| MACAddress | string | 主 MAC 地址 | 00:0c:29:ab:cd:ef |
+| PowerState | string | 电源状态 | on, off, suspended |
+| GuestOS | string | 操作系统 | ubuntu 22.04 |
+| CreatedTime | datetime | 创建时间 | |
+
+**验证规则：**
+- Name: 必填, 1-128字符
+- VMID: 必填, 唯一
+- HypervisorType: 枚举: vsphere, kvm, xen, hyperv
+- VCPU: 1-256
+- MemoryMB: 512-65536
+
+**电源操作：**
+- power-on: 开机
+- power-off: 关机
+- suspend: 暂停 (内存挂起)
+- resume: 恢复
+
+### 3.5 Network Device (网络设备)
+
+**数据模型：**
+
+| Field | Type | Description | Example |
+|-------|------|-------------|---------|
+| DeviceType | string | 设备类型 | switch, router, firewall |
+| Vendor | string | 厂商 | Cisco, Juniper, Huawei |
+| Model | string | 型号 | Catalyst 9300 |
+| OSVersion | string | 操作系统版本 | 17.6.1 |
+| SerialNo | string | 序列号 | FCW2233L0AA |
+| MgmtIP | string | 管理网 IP | 192.168.1.1 |
+| Interfaces | JSON | 端口配置列表 | 见下方 |
+| VLANs | JSON | VLAN 配置 | |
+| ConfigBackupStatus | string | 备份状态 | success, failed, pending |
+
+**网络接口结构：**
+```json
+{
+  "name": "GigabitEthernet0/0/1",
+  "description": "To-Core-SW-01",
+  "admin_status": "up",
+  "oper_status": "up",
+  "speed": "10G",
+  "vlan_access": 100,
+  "ip_address": "10.0.1.2/24",
+  "mac_address": "aabb.ccdd.eeff",
+  "counters": {
+    "in_bytes": 1234567890,
+    "out_bytes": 9876543210
+  }
+}
+```
+
+**设备类型枚举：**
+- switch: 二层/三层交换机
+- router: 路由器
+- firewall: 防火墙
+- loadbalancer: 负载均衡器
+- wireless: 无线控制器
+- storage: 存储网络设备
+- other: 其他
+
+**厂商枚举：**
+- Cisco, Juniper, Huawei, H3C, Arista, Fortinet, PaloAlto, other
+
+### 3.6 Mock Testing Framework (模拟测试框架)
+
+用于在没有真实硬件的环境下进行开发和测试。
+
+**客户端接口：**
+
+```go
+// HypervisorClient - 虚拟化平台客户端
+type HypervisorClient interface {
+    ListVMs(ctx context.Context, hostID string) ([]*VM, error)
+    GetVM(ctx context.Context, vmID string) (*VM, error)
+    GetVMMetrics(ctx context.Context, vmID string) (*VMMetrics, error)
+    GetHostInfo(ctx context.Context, hostID string) (*GORMDevice, error)
+    GetHostMetrics(ctx context.Context, hostID string) (*HostMetrics, error)
+    GetHostPowerState(ctx context.Context, hostID string) (string, error)
+    SetHostPowerState(ctx context.Context, hostID string, state string) error
+}
+
+// NetworkDeviceClient - 网络设备客户端
+type NetworkDeviceClient interface {
+    ListDevices(ctx context.Context) ([]*GORMDevice, error)
+    GetDevice(ctx context.Context, deviceID string) (*GORMDevice, error)
+    GetDeviceInterfaces(ctx context.Context, deviceID string) ([]*NetworkInterface, error)
+    GetDeviceMetrics(ctx context.Context, deviceID string) (*NetworkMetrics, error)
+    BackupConfig(ctx context.Context, deviceID string) (string, error)
+}
+
+// MetricsCollector - 指标采集客户端
+type MetricsCollector interface {
+    CollectVMMetrics(ctx context.Context, vmID string) (*VMMetrics, error)
+    CollectHostMetrics(ctx context.Context, hostID string) (*HostMetrics, error)
+    CollectNetworkDeviceMetrics(ctx context.Context, deviceID string) (*NetworkMetrics, error)
+}
+```
+
+**模拟客户端实现：**
+
+| 实现 | 用途 | 特性 |
+|------|------|------|
+| FakeVMwareClient | vSphere 模拟 | 3台VM，电源控制 |
+| FakeKVMClient | KVM 模拟 | 2台VM，CPU/内存指标 |
+| FakeIPMIClient | IPMI 模拟 | 物理主机电源控制 |
+| FakeNetworkDeviceClient | SNMP 模拟 | 3台网络设备，端口统计 |
+| FakeMetricsCollector | 指标模拟 | CPU/内存/磁盘/网络 |
+
+**使用示例：**
+```go
+// 创建带模拟客户端的设备管理器
+manager := NewManagerWithClients(
+    db,
+    &fake.FakeVMwareClient{},  // 模拟 vSphere
+    &fake.FakeMetricsCollector{},
+    &fake.FakeNetworkDeviceClient{},
+)
+```
+
+### 3.7 Configuration Management
 
 - **Template Engine**: Jinja2/Template2 with variables and logic
 - **Inheritance Chain**: Base template → Type override → Instance override
 - **Version Control**: Every change is traceable and reversible
 - **Gradual Push**: Push configs in batches by tag groups
 
-### 3.4 Group System
+### 3.8 Group System
 
 - **Flat Grouping**: Filter by tags (`label=env:prod`)
 - **Hierarchical Grouping**: Parent group contains child groups with auto-inheritance
 - **Dynamic Grouping**: Based on real-time attributes (`cluster=us-east && role=web`)
 - **Overlapping Groups**: Devices can belong to multiple groups
 
-### 3.5 Device Relationship Model
+### 3.9 Device Relationship Model
 
 ```
 PhysicalHost (rack-01)
@@ -132,6 +320,55 @@ NetworkDevice (core-01)
 ├─ VM (vm-jumpbox)
 └─ PhysicalHost (firewall-01)
 ```
+
+### 3.10 API Endpoints
+
+**通用设备 API：**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/devices` | GET | 列表 (分页、过滤) |
+| `/api/devices` | POST | 创建/注册 |
+| `/api/devices/:id` | GET | 获取单个 |
+| `/api/devices/:id` | PUT | 更新 |
+| `/api/devices/:id` | DELETE | 删除 |
+| `/api/devices/search` | GET | 标签搜索 |
+| `/api/devices/:id/metrics` | GET | 获取监控指标 |
+
+**物理主机 API：**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/devices/physical` | GET | 列表 |
+| `/api/devices/physical` | POST | 创建 |
+| `/api/devices/physical/:id` | GET | 获取 |
+| `/api/devices/physical/:id` | PUT | 更新 |
+| `/api/devices/physical/:id` | DELETE | 删除 |
+| `/api/devices/physical/:id/discover` | POST | 触发发现 |
+| `/api/devices/physical/:id/metrics` | GET | 采集指标 |
+
+**虚拟机 API：**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/devices/vm` | GET | 列表 |
+| `/api/devices/vm` | POST | 创建 |
+| `/api/devices/vm/:id` | GET | 获取 |
+| `/api/devices/vm/:id/power-on` | POST | 开机 |
+| `/api/devices/vm/:id/power-off` | POST | 关机 |
+| `/api/devices/vm/:id/suspend` | POST | 暂停 |
+| `/api/devices/vm/:id/resume` | POST | 恢复 |
+| `/api/devices/vm/:id/metrics` | GET | 获取监控指标 |
+| `/api/devices/vm/discover` | POST | 从 hypervisor 发现 |
+
+**网络设备 API：**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/devices/network` | GET | 列表 |
+| `/api/devices/network` | POST | 创建 |
+| `/api/devices/network/:id` | GET | 获取 |
+| `/api/devices/network/:id/interfaces` | GET | 获取端口列表 |
+| `/api/devices/network/:id/vlans` | GET | 获取 VLAN 配置 |
+| `/api/devices/network/:id/backup` | POST | 触发配置备份 |
+| `/api/devices/network/:id/metrics` | GET | 采集指标 |
+| `/api/devices/network/:id/discover` | POST | 触发发现 |
 
 ---
 
