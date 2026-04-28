@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,41 +11,22 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/devops-toolkit/internal/config"
-	"github.com/devops-toolkit/internal/device"
-	"github.com/devops-toolkit/internal/logs"
-	"github.com/devops-toolkit/internal/metrics"
 	"github.com/devops-toolkit/internal/alerts"
 	"github.com/devops-toolkit/internal/auth"
 	"github.com/devops-toolkit/internal/auth/ldap"
-	"github.com/devops-toolkit/internal/pipeline"
-	"github.com/devops-toolkit/internal/k8s"
+	"github.com/devops-toolkit/internal/config"
+	"github.com/devops-toolkit/internal/device"
 	"github.com/devops-toolkit/internal/discovery"
+	"github.com/devops-toolkit/internal/ginadapter"
+	"github.com/devops-toolkit/internal/k8s"
+	"github.com/devops-toolkit/internal/logs"
+	"github.com/devops-toolkit/internal/metrics"
 	"github.com/devops-toolkit/internal/physicalhost"
+	"github.com/devops-toolkit/internal/pipeline"
 	"github.com/devops-toolkit/internal/project"
 	"github.com/devops-toolkit/internal/websocket"
-	"github.com/gorilla/mux"
+	"github.com/gin-gonic/gin"
 )
-
-type statusCodeWriter struct {
-	http.ResponseWriter
-	statusCode int
-}
-
-func (w *statusCodeWriter) WriteHeader(code int) {
-	w.statusCode = code
-	w.ResponseWriter.WriteHeader(code)
-}
-
-// authUserProvider implements project.UserProvider by extracting user from request context
-type authUserProvider struct{}
-
-func (a *authUserProvider) GetUserFromRequest(r *http.Request) *project.User {
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
-		return &project.User{Username: user.Username}
-	}
-	return nil
-}
 
 func main() {
 	// Load configuration
@@ -93,373 +73,216 @@ func main() {
 		wsHub.BroadcastLog(entry)
 	})
 	metricsMgr := metrics.NewCollector()
-	// Use metrics.Collector directly since it implements the MetricsRecorder interface
 	alertsMgr := alerts.NewManager(metricsMgr)
 	pipelineMgr := pipeline.NewManager()
 	k8sMgr := k8s.NewClusterManager()
 	discoveryMgr := discovery.NewManager()
 	physicalhostMgr := physicalhost.NewManager()
 
-	// Create router
-	r := mux.NewRouter()
+	// Create Gin router
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+
+	// Global middleware
+	r.Use(gin.Recovery())
+	r.Use(gin.Logger())
 
 	// HTTP metrics middleware
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			start := time.Now()
-			path := r.URL.Path
-			method := r.Method
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		method := c.Request.Method
 
-			// Wrap response writer to capture status code
-			wrapped := &statusCodeWriter{ResponseWriter: w, statusCode: http.StatusOK}
-			next.ServeHTTP(wrapped, r)
+		c.Next()
 
-			duration := time.Since(start).Milliseconds()
-			status := fmt.Sprintf("%d", wrapped.statusCode)
-			metricsMgr.RecordHTTPRequest(path, method, status, float64(duration))
-		})
+		duration := time.Since(start).Milliseconds()
+		status := fmt.Sprintf("%d", c.Writer.Status())
+		metricsMgr.RecordHTTPRequest(path, method, status, float64(duration))
 	})
 
 	// Determine base path for API routes
 	basePath := cfg.Server.BasePath
-	if basePath == "" {
-		basePath = "/"
-	}
 
-	// Create API router using subrouter for base path
-	// When base path is set, routes must be registered WITH the base path on the subrouter
-	// For dual-path compatibility (direct and via proxy), we use main router directly
-	var apiRouter *mux.Router
-	if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
-		apiRouter = r.PathPrefix(cfg.Server.BasePath).Subrouter()
-		log.Printf("Base path configured: %s", cfg.Server.BasePath)
+	// Create API router using group for base path
+	var api gin.IRouter
+	if basePath != "" && basePath != "/" {
+		api = r.Group(basePath)
+		log.Printf("Base path configured: %s", basePath)
 	} else {
-		apiRouter = r
-	}
-
-	// Helper to register routes on both main router and API subrouter for dual access
-	registerRoute := func(path string, handler http.HandlerFunc) {
-		apiRouter.HandleFunc(path, handler)
-		if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
-			r.HandleFunc(path, handler)
-		}
+		api = r
 	}
 
 	// Health check (always at root for direct access and proxy health checks)
-	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
 	})
 
-	// Health check on API subrouter too (for proxy access via base path)
-	if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
-		apiRouter.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
-		})
-		// Static file handler - only serve known static asset paths
-		apiRouter.PathPrefix("/assets/").Handler(http.StripPrefix(cfg.Server.BasePath, http.FileServer(http.Dir("./devops-toolkit/frontend/dist"))))
-		// Serve favicon
-		apiRouter.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
-			http.ServeFile(w, r, "./devops-toolkit/frontend/dist/favicon.svg")
-		})
-		// Also serve root
-		apiRouter.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			http.ServeFile(w, r, "./devops-toolkit/frontend/dist/index.html")
-		})
+	// Auth routes (using Gin methods)
+	api.POST("/api/auth/login", authHandler.LoginGin)
+	api.POST("/api/auth/logout", authHandler.LogoutGin)
+	api.GET("/api/auth/me", authHandler.MeGin)
+
+	// Device routes (using adapter for existing HTTP handlers)
+	if deviceMgr != nil {
+		api.GET("/api/devices", ginfadapter.GinToHTTPHandler(deviceMgr.ListDevicesHTTP))
+		api.POST("/api/devices", ginfadapter.GinToHTTPHandler(deviceMgr.CreateDeviceHTTP))
+		api.GET("/api/devices/:id", ginfadapter.GinToHTTPHandler(deviceMgr.GetDeviceHTTP, "id"))
+		api.PUT("/api/devices/:id", ginfadapter.GinToHTTPHandler(deviceMgr.UpdateDeviceHTTP, "id"))
+		api.DELETE("/api/devices/:id", ginfadapter.GinToHTTPHandler(deviceMgr.DeleteDeviceHTTP, "id"))
+		api.GET("/api/devices/search", ginfadapter.GinToHTTPHandler(deviceMgr.SearchDevicesHTTP))
 	}
-
-	// Auth routes
-	registerRoute("/api/auth/login", authHandler.Login)
-	registerRoute("/api/auth/logout", authHandler.Logout)
-	registerRoute("/api/auth/me", authHandler.Me)
-
-	// Device routes
-	registerRoute("/api/devices", func(w http.ResponseWriter, r *http.Request) {
-		if deviceMgr == nil {
-			http.Error(w, "device manager unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		if r.Method == "GET" {
-			deviceMgr.ListDevicesHTTP(w, r)
-		} else if r.Method == "POST" {
-			deviceMgr.CreateDeviceHTTP(w, r)
-		}
-	})
-	registerRoute("/api/devices/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if deviceMgr == nil {
-			http.Error(w, "device manager unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		if r.Method == "GET" {
-			deviceMgr.GetDeviceHTTP(w, r)
-		} else if r.Method == "PUT" {
-			deviceMgr.UpdateDeviceHTTP(w, r)
-		} else if r.Method == "DELETE" {
-			deviceMgr.DeleteDeviceHTTP(w, r)
-		}
-	})
-	registerRoute("/api/devices/search", func(w http.ResponseWriter, r *http.Request) {
-		if deviceMgr == nil {
-			http.Error(w, "device manager unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		deviceMgr.SearchDevicesHTTP(w, r)
-	})
 
 	// Pipeline routes
-	registerRoute("/api/pipelines", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			pipelineMgr.ListPipelinesHTTP(w, r)
-		} else if r.Method == "POST" {
-			pipelineMgr.CreatePipelineHTTP(w, r)
-		}
-	})
-	registerRoute("/api/pipelines/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			pipelineMgr.GetPipelineHTTP(w, r)
-		} else if r.Method == "DELETE" {
-			pipelineMgr.DeletePipelineHTTP(w, r)
-		}
-	})
-	registerRoute("/api/pipelines/{id}/execute", pipelineMgr.ExecutePipelineHTTP)
+	api.GET("/api/pipelines", ginfadapter.GinToHTTPHandler(pipelineMgr.ListPipelinesHTTP))
+	api.POST("/api/pipelines", ginfadapter.GinToHTTPHandler(pipelineMgr.CreatePipelineHTTP))
+	api.GET("/api/pipelines/:id", ginfadapter.GinToHTTPHandler(pipelineMgr.GetPipelineHTTP, "id"))
+	api.DELETE("/api/pipelines/:id", ginfadapter.GinToHTTPHandler(pipelineMgr.DeletePipelineHTTP, "id"))
+	api.POST("/api/pipelines/:id/execute", ginfadapter.GinToHTTPHandler(pipelineMgr.ExecutePipelineHTTP, "id"))
 
 	// Log routes
-	registerRoute("/api/logs", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			logMgr.QueryLogsHTTP(w, r)
-		} else if r.Method == "POST" {
-			logMgr.CreateLogHTTP(w, r)
-		}
-	})
-	registerRoute("/api/logs/stats", logMgr.GetStatsHTTP)
-	registerRoute("/api/logs/alerts", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			logMgr.ListAlertRulesHTTP(w, r)
-		} else if r.Method == "POST" {
-			logMgr.CreateAlertRuleHTTP(w, r)
-		}
-	})
-	registerRoute("/api/logs/retention", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			logMgr.GetRetentionPolicyHTTP(w, r)
-		} else if r.Method == "PUT" {
-			logMgr.UpdateRetentionPolicyHTTP(w, r)
-		}
-	})
-	registerRoute("/api/logs/retention/apply", logMgr.ApplyRetentionPolicyHTTP)
-	registerRoute("/api/logs/filters", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			logMgr.ListSavedFiltersHTTP(w, r)
-		} else if r.Method == "POST" {
-			logMgr.CreateSavedFilterHTTP(w, r)
-		}
-	})
-	registerRoute("/api/logs/generate", logMgr.GenerateSampleLogsHTTP)
+	api.GET("/api/logs", ginfadapter.GinToHTTPHandler(logMgr.QueryLogsHTTP))
+	api.POST("/api/logs", ginfadapter.GinToHTTPHandler(logMgr.CreateLogHTTP))
+	api.GET("/api/logs/stats", ginfadapter.GinToHTTPHandler(logMgr.GetStatsHTTP))
+	api.GET("/api/logs/alerts", ginfadapter.GinToHTTPHandler(logMgr.ListAlertRulesHTTP))
+	api.POST("/api/logs/alerts", ginfadapter.GinToHTTPHandler(logMgr.CreateAlertRuleHTTP))
+	api.GET("/api/logs/retention", ginfadapter.GinToHTTPHandler(logMgr.GetRetentionPolicyHTTP))
+	api.PUT("/api/logs/retention", ginfadapter.GinToHTTPHandler(logMgr.UpdateRetentionPolicyHTTP))
+	api.POST("/api/logs/retention/apply", ginfadapter.GinToHTTPHandler(logMgr.ApplyRetentionPolicyHTTP))
+	api.GET("/api/logs/filters", ginfadapter.GinToHTTPHandler(logMgr.ListSavedFiltersHTTP))
+	api.POST("/api/logs/filters", ginfadapter.GinToHTTPHandler(logMgr.CreateSavedFilterHTTP))
+	api.POST("/api/logs/generate", ginfadapter.GinToHTTPHandler(logMgr.GenerateSampleLogsHTTP))
 
 	// Metrics
-	registerRoute("/metrics", metricsMgr.ServePrometheus)
-	registerRoute("/api/metrics", metricsMgr.ServeJSON)
+	r.GET("/metrics", func(c *gin.Context) {
+		metricsMgr.ServePrometheus(c.Writer, c.Request)
+	})
+	api.GET("/api/metrics", ginfadapter.GinToHTTPHandler(metricsMgr.ServeJSON))
 
 	// Alert routes
-	registerRoute("/api/alerts/channels", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			alertsMgr.ListChannelsHTTP(w, r)
-		} else if r.Method == "POST" {
-			alertsMgr.AddChannelHTTP(w, r)
-		}
-	})
-	registerRoute("/api/alerts/history", alertsMgr.GetHistoryHTTP)
+	api.GET("/api/alerts/channels", ginfadapter.GinToHTTPHandler(alertsMgr.ListChannelsHTTP))
+	api.POST("/api/alerts/channels", ginfadapter.GinToHTTPHandler(alertsMgr.AddChannelHTTP))
+	api.GET("/api/alerts/history", ginfadapter.GinToHTTPHandler(alertsMgr.GetHistoryHTTP))
 
 	// K8s routes
-	registerRoute("/api/k8s/clusters", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			k8sMgr.ListClustersHTTP(w, r)
-		} else if r.Method == "POST" {
-			k8sMgr.CreateClusterHTTP(w, r)
-		}
-	})
-	registerRoute("/api/k8s/clusters/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "DELETE" {
-			k8sMgr.DeleteClusterHTTP(w, r)
-		}
-	})
-	registerRoute("/api/k8s/clusters/{name}/health", k8sMgr.HealthCheckHTTP)
-	registerRoute("/api/k8s/clusters/{cluster}/nodes", k8sMgr.GetNodesHTTP)
-	registerRoute("/api/k8s/clusters/{cluster}/namespaces", k8sMgr.GetNamespacesHTTP)
-	registerRoute("/api/k8s/clusters/{cluster}/pods", k8sMgr.GetPodsHTTP)
-	registerRoute("/api/k8s/clusters/{cluster}/pods/{pod}/logs", k8sMgr.GetPodLogsHTTP)
-	// New routes per spec: /api/k8s/clusters/:id/namespaces/:ns/pods/:pod/logs
-	registerRoute("/api/k8s/clusters/{cluster}/namespaces/{ns}/pods/{pod}/logs", k8sMgr.GetPodLogsWithNamespaceHTTP)
-	registerRoute("/api/k8s/clusters/{cluster}/namespaces/{ns}/pods/{pod}/exec", k8sMgr.PodExecHTTP)
-	// Metrics endpoint: /api/k8s/clusters/:id/metrics
-	registerRoute("/api/k8s/clusters/{cluster}/metrics", k8sMgr.GetClusterMetricsHTTP)
-	registerRoute("/api/k8s/maintenance", k8sMgr.MaintenanceOpHTTP)
+	api.GET("/api/k8s/clusters", ginfadapter.GinToHTTPHandler(k8sMgr.ListClustersHTTP))
+	api.POST("/api/k8s/clusters", ginfadapter.GinToHTTPHandler(k8sMgr.CreateClusterHTTP))
+	api.DELETE("/api/k8s/clusters/:name", ginfadapter.GinToHTTPHandler(k8sMgr.DeleteClusterHTTP, "name"))
+	api.GET("/api/k8s/clusters/:name/health", ginfadapter.GinToHTTPHandler(k8sMgr.HealthCheckHTTP, "name"))
+	api.GET("/api/k8s/clusters/:cluster/nodes", ginfadapter.GinToHTTPHandler(k8sMgr.GetNodesHTTP, "cluster"))
+	api.GET("/api/k8s/clusters/:cluster/namespaces", ginfadapter.GinToHTTPHandler(k8sMgr.GetNamespacesHTTP, "cluster"))
+	api.GET("/api/k8s/clusters/:cluster/pods", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodsHTTP, "cluster"))
+	api.GET("/api/k8s/clusters/:cluster/pods/:pod/logs", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodLogsHTTP, "cluster", "pod"))
+	api.GET("/api/k8s/clusters/:cluster/namespaces/:ns/pods/:pod/logs", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodLogsWithNamespaceHTTP, "cluster", "ns", "pod"))
+	api.POST("/api/k8s/clusters/:cluster/namespaces/:ns/pods/:pod/exec", ginfadapter.GinToHTTPHandler(k8sMgr.PodExecHTTP, "cluster", "ns", "pod"))
+	api.GET("/api/k8s/clusters/:cluster/metrics", ginfadapter.GinToHTTPHandler(k8sMgr.GetClusterMetricsHTTP, "cluster"))
+	api.POST("/api/k8s/maintenance", ginfadapter.GinToHTTPHandler(k8sMgr.MaintenanceOpHTTP))
 
 	// Physical host routes
-	registerRoute("/api/physical-hosts", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			physicalhostMgr.ListHostsHTTP(w, r)
-		} else if r.Method == "POST" {
-			physicalhostMgr.CreateHostHTTP(w, r)
-		}
-	})
-	registerRoute("/api/physical-hosts/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			physicalhostMgr.GetHostHTTP(w, r)
-		} else if r.Method == "DELETE" {
-			physicalhostMgr.DeleteHostHTTP(w, r)
-		}
-	})
-	registerRoute("/api/physical-hosts/{id}/services", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			physicalhostMgr.ListServicesHTTP(w, r)
-		}
-	})
-	registerRoute("/api/physical-hosts/{id}/config", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
-			physicalhostMgr.PushConfigHTTP(w, r)
-		}
-	})
+	api.GET("/api/physical-hosts", ginfadapter.GinToHTTPHandler(physicalhostMgr.ListHostsHTTP))
+	api.POST("/api/physical-hosts", ginfadapter.GinToHTTPHandler(physicalhostMgr.CreateHostHTTP))
+	api.GET("/api/physical-hosts/:id", ginfadapter.GinToHTTPHandler(physicalhostMgr.GetHostHTTP, "id"))
+	api.DELETE("/api/physical-hosts/:id", ginfadapter.GinToHTTPHandler(physicalhostMgr.DeleteHostHTTP, "id"))
+	api.GET("/api/physical-hosts/:id/services", ginfadapter.GinToHTTPHandler(physicalhostMgr.ListServicesHTTP, "id"))
+	api.POST("/api/physical-hosts/:id/config", ginfadapter.GinToHTTPHandler(physicalhostMgr.PushConfigHTTP, "id"))
 
 	// Discovery routes
-	registerRoute("/api/discovery/status", discoveryMgr.GetStatusHTTP)
-	registerRoute("/api/discovery/scan", discoveryMgr.ScanHTTP)
+	api.GET("/api/discovery/status", ginfadapter.GinToHTTPHandler(discoveryMgr.GetStatusHTTP))
+	api.POST("/api/discovery/scan", ginfadapter.GinToHTTPHandler(discoveryMgr.ScanHTTP))
 
 	// WebSocket (always at root for proxy compatibility)
-	r.HandleFunc("/ws", wsHub.HandleWebSocket)
-	// Also on subrouter for proxy access
-	if cfg.Server.BasePath != "" && cfg.Server.BasePath != "/" {
-		apiRouter.HandleFunc("/ws", wsHub.HandleWebSocket)
-	}
+	r.GET("/ws", func(c *gin.Context) {
+		wsHub.HandleWebSocket(c.Writer, c.Request)
+	})
 
 	// Project management routes (if available)
 	if projectMgr != nil {
 		// Project Types
-		registerRoute("/api/org/project-types", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" {
-				projectMgr.ListProjectTypesHTTP(w, r)
-			} else if r.Method == "POST" {
-				projectMgr.CreateProjectTypeHTTP(w, r)
-			}
-		})
-		registerRoute("/api/org/project-types/{id}", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "PUT" {
-				projectMgr.UpdateProjectTypeHTTP(w, r)
-			} else if r.Method == "DELETE" {
-				projectMgr.DeleteProjectTypeHTTP(w, r)
-			}
-		})
+		api.GET("/api/org/project-types", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectTypesHTTP))
+		api.POST("/api/org/project-types", ginfadapter.GinToHTTPHandler(projectMgr.CreateProjectTypeHTTP))
+		api.PUT("/api/org/project-types/:id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateProjectTypeHTTP, "id"))
+		api.DELETE("/api/org/project-types/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteProjectTypeHTTP, "id"))
 
 		// Business Lines
-		registerRoute("/api/org/business-lines", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" {
-				projectMgr.ListBusinessLinesHTTP(w, r)
-			} else if r.Method == "POST" {
-				projectMgr.CreateBusinessLineHTTP(w, r)
-			}
-		})
-		registerRoute("/api/org/business-lines/{id}", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" {
-				projectMgr.GetBusinessLineHTTP(w, r)
-			} else if r.Method == "PUT" {
-				projectMgr.UpdateBusinessLineHTTP(w, r)
-			} else if r.Method == "DELETE" {
-				projectMgr.DeleteBusinessLineHTTP(w, r)
-			}
-		})
+		api.GET("/api/org/business-lines", ginfadapter.GinToHTTPHandler(projectMgr.ListBusinessLinesHTTP))
+		api.POST("/api/org/business-lines", ginfadapter.GinToHTTPHandler(projectMgr.CreateBusinessLineHTTP))
+		api.GET("/api/org/business-lines/:id", ginfadapter.GinToHTTPHandler(projectMgr.GetBusinessLineHTTP, "id"))
+		api.PUT("/api/org/business-lines/:id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateBusinessLineHTTP, "id"))
+		api.DELETE("/api/org/business-lines/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteBusinessLineHTTP, "id"))
 
 		// Systems
-		registerRoute("/api/org/business-lines/{bl_id}/systems", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" {
-				projectMgr.ListSystemsHTTP(w, r)
-			} else if r.Method == "POST" {
-				projectMgr.CreateSystemHTTP(w, r)
-			}
-		})
-		registerRoute("/api/org/systems/{id}", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" {
-				projectMgr.GetSystemHTTP(w, r)
-			} else if r.Method == "PUT" {
-				projectMgr.UpdateSystemHTTP(w, r)
-			} else if r.Method == "DELETE" {
-				projectMgr.DeleteSystemHTTP(w, r)
-			}
-		})
+		api.GET("/api/org/business-lines/:bl_id/systems", ginfadapter.GinToHTTPHandler(projectMgr.ListSystemsHTTP, "bl_id"))
+		api.POST("/api/org/business-lines/:bl_id/systems", ginfadapter.GinToHTTPHandler(projectMgr.CreateSystemHTTP, "bl_id"))
+		api.GET("/api/org/systems/:id", ginfadapter.GinToHTTPHandler(projectMgr.GetSystemHTTP, "id"))
+		api.PUT("/api/org/systems/:id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateSystemHTTP, "id"))
+		api.DELETE("/api/org/systems/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteSystemHTTP, "id"))
 
 		// Projects
-		registerRoute("/api/org/systems/{sys_id}/projects", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" {
-				projectMgr.ListProjectsHTTP(w, r)
-			} else if r.Method == "POST" {
-				projectMgr.CreateProjectHTTP(w, r)
-			}
-		})
-		registerRoute("/api/org/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" {
-				projectMgr.GetProjectHTTP(w, r)
-			} else if r.Method == "PUT" {
-				projectMgr.UpdateProjectHTTP(w, r)
-			} else if r.Method == "DELETE" {
-				projectMgr.DeleteProjectHTTP(w, r)
-			}
-		})
+		api.GET("/api/org/systems/:sys_id/projects", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectsHTTP, "sys_id"))
+		api.POST("/api/org/systems/:sys_id/projects", ginfadapter.GinToHTTPHandler(projectMgr.CreateProjectHTTP, "sys_id"))
+		api.GET("/api/org/projects/:id", ginfadapter.GinToHTTPHandler(projectMgr.GetProjectHTTP, "id"))
+		api.PUT("/api/org/projects/:id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateProjectHTTP, "id"))
+		api.DELETE("/api/org/projects/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteProjectHTTP, "id"))
 
 		// Resource linking
-		registerRoute("/api/org/projects/{id}/resources", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" {
-				projectMgr.ListProjectResourcesHTTP(w, r)
-			} else if r.Method == "POST" {
-				projectMgr.LinkResourceHTTP(w, r)
-			}
-		})
-		registerRoute("/api/org/projects/{id}/resources/{resource_id}", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "DELETE" {
-				projectMgr.UnlinkResourceHTTP(w, r)
-			}
-		})
+		api.GET("/api/org/projects/:id/resources", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectResourcesHTTP, "id"))
+		api.POST("/api/org/projects/:id/resources", ginfadapter.GinToHTTPHandler(projectMgr.LinkResourceHTTP, "id"))
+		api.DELETE("/api/org/projects/:id/resources/:resource_id", ginfadapter.GinToHTTPHandler(projectMgr.UnlinkResourceHTTP, "id", "resource_id"))
 
 		// Permissions
-		registerRoute("/api/org/projects/{id}/permissions", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" {
-				projectMgr.ListProjectPermissionsHTTP(w, r)
-			} else if r.Method == "POST" {
-				projectMgr.GrantPermissionHTTP(w, r)
-			}
-		})
-		registerRoute("/api/org/permissions/{perm_id}", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "DELETE" {
-				projectMgr.RevokePermissionHTTP(w, r)
-			}
-		})
+		api.GET("/api/org/projects/:id/permissions", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectPermissionsHTTP, "id"))
+		api.POST("/api/org/projects/:id/permissions", ginfadapter.GinToHTTPHandler(projectMgr.GrantPermissionHTTP, "id"))
+		api.DELETE("/api/org/permissions/:perm_id", ginfadapter.GinToHTTPHandler(projectMgr.RevokePermissionHTTP, "perm_id"))
 
 		// FinOps export
-		registerRoute("/api/org/reports/finops", projectMgr.ExportFinOpsHTTP)
+		api.GET("/api/org/reports/finops", ginfadapter.GinToHTTPHandler(projectMgr.ExportFinOpsHTTP))
 
 		// Audit logs
-		registerRoute("/api/org/audit-logs", projectMgr.ListAuditLogsHTTP)
+		api.GET("/api/org/audit-logs", ginfadapter.GinToHTTPHandler(projectMgr.ListAuditLogsHTTP))
 	}
 
 	// Static files (frontend) - always served at root (proxy strips base path before forwarding)
-	exePath, _ := os.Executable()
-	exeDir := filepath.Dir(exePath)
-	frontendDir := filepath.Join(exeDir, "frontend", "dist")
-	if _, err := os.Stat(frontendDir); err == nil {
-		r.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendDir)))
-		log.Printf("Serving static files from %s", frontendDir)
-	} else {
-		// Fallback: try frontend without dist
-		frontendDir = filepath.Join(exeDir, "frontend")
+	if basePath != "" && basePath != "/" {
+		exePath, _ := os.Executable()
+		exeDir := filepath.Dir(exePath)
+		frontendDir := filepath.Join(exeDir, "frontend", "dist")
 		if _, err := os.Stat(frontendDir); err == nil {
-			r.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendDir)))
+			r.Static("/assets", filepath.Join(frontendDir, "assets"))
+			r.GET("/favicon.svg", func(c *gin.Context) {
+				c.File(filepath.Join(frontendDir, "favicon.svg"))
+			})
+			r.NoRoute(func(c *gin.Context) {
+				c.File(filepath.Join(frontendDir, "index.html"))
+			})
+			log.Printf("Serving static files from %s", frontendDir)
+		}
+	} else {
+		exePath, _ := os.Executable()
+		exeDir := filepath.Dir(exePath)
+		frontendDir := filepath.Join(exeDir, "frontend", "dist")
+		if _, err := os.Stat(frontendDir); err == nil {
+			r.Static("/assets", filepath.Join(frontendDir, "assets"))
+			r.GET("/favicon.svg", func(c *gin.Context) {
+				c.File(filepath.Join(frontendDir, "favicon.svg"))
+			})
+			r.NoRoute(func(c *gin.Context) {
+				c.File(filepath.Join(frontendDir, "index.html"))
+			})
 			log.Printf("Serving static files from %s", frontendDir)
 		} else {
 			// Fallback: try relative path from current working directory
 			if _, err := os.Stat("./devops-toolkit/frontend/dist"); err == nil {
-				r.PathPrefix("/").Handler(http.FileServer(http.Dir("./devops-toolkit/frontend/dist")))
+				r.Static("/assets", "./devops-toolkit/frontend/dist/assets")
+				r.GET("/favicon.svg", func(c *gin.Context) {
+					c.File("./devops-toolkit/frontend/dist/favicon.svg")
+				})
+				r.NoRoute(func(c *gin.Context) {
+					c.File("./devops-toolkit/frontend/dist/index.html")
+				})
 				log.Printf("Serving static files from ./devops-toolkit/frontend/dist")
 			} else if _, err := os.Stat("./devops-toolkit/frontend"); err == nil {
-				r.PathPrefix("/").Handler(http.FileServer(http.Dir("./devops-toolkit/frontend")))
+				r.NoRoute(func(c *gin.Context) {
+					c.File("./devops-toolkit/frontend/index.html")
+				})
 				log.Printf("Serving static files from ./devops-toolkit/frontend")
 			}
 		}
@@ -467,7 +290,7 @@ func main() {
 
 	// Add JWT auth middleware for API routes (if LDAP is available or dev bypass enabled)
 	if ldapClient != nil || cfg.Auth.DevBypass {
-		apiRouter.Use(auth.Middleware(&cfg.Auth))
+		api.Use(auth.MiddlewareGin(&cfg.Auth))
 	}
 
 	// Start server
@@ -492,4 +315,14 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)
+}
+
+// authUserProvider implements project.UserProvider by extracting user from request context
+type authUserProvider struct{}
+
+func (a *authUserProvider) GetUserFromRequest(r *http.Request) *project.User {
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		return &project.User{Username: user.Username}
+	}
+	return nil
 }
