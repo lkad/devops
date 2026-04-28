@@ -26,7 +26,7 @@ func TestCheckDevicePermission_SuperAdmin(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := contextWithUser("testuser", []string{RoleSuperAdmin}, []string{PermAll})
+			ctx := contextWithUser("testuser", []string{string(RoleSuperAdmin)}, []string{"all"})
 			result := CheckDevicePermission(ctx, tt.operation, tt.environment)
 			if result != tt.expected {
 				t.Errorf("CheckDevicePermission() = %v, want %v", result, tt.expected)
@@ -57,7 +57,7 @@ func TestCheckDevicePermission_Operator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := contextWithUser("testuser", []string{RoleOperator}, []string{PermDeploy, PermConfigManage, PermExecute, PermRead})
+			ctx := contextWithUser("testuser", []string{string(RoleOperator)}, []string{"deploy", "config-manage", "execute", "read"})
 			result := CheckDevicePermission(ctx, tt.operation, tt.environment)
 			if result != tt.expected {
 				t.Errorf("CheckDevicePermission() = %v, want %v", result, tt.expected)
@@ -84,7 +84,7 @@ func TestCheckDevicePermission_Developer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := contextWithUser("testuser", []string{RoleDeveloper}, []string{PermRead, PermTestDeploy})
+			ctx := contextWithUser("testuser", []string{string(RoleDeveloper)}, []string{"read", "test-deploy"})
 			result := CheckDevicePermission(ctx, tt.operation, tt.environment)
 			if result != tt.expected {
 				t.Errorf("CheckDevicePermission() = %v, want %v", result, tt.expected)
@@ -110,7 +110,7 @@ func TestCheckDevicePermission_Auditor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := contextWithUser("testuser", []string{RoleAuditor}, []string{PermRead, PermAuditRead})
+			ctx := contextWithUser("testuser", []string{string(RoleAuditor)}, []string{"read", "audit-read"})
 			result := CheckDevicePermission(ctx, tt.operation, tt.environment)
 			if result != tt.expected {
 				t.Errorf("CheckDevicePermission() = %v, want %v", result, tt.expected)
@@ -134,10 +134,10 @@ func TestRequireRole_Middleware(t *testing.T) {
 		requiredRoles  []string
 		expectedStatus int
 	}{
-		{"SuperAdmin passes Operator requirement", []string{RoleSuperAdmin}, []string{RoleOperator}, http.StatusOK},
-		{"Operator passes Operator requirement", []string{RoleOperator}, []string{RoleOperator}, http.StatusOK},
-		{"Developer fails Operator requirement", []string{RoleDeveloper}, []string{RoleOperator}, http.StatusForbidden},
-		{"No user fails", []string{}, []string{RoleOperator}, http.StatusUnauthorized},
+		{"SuperAdmin passes Operator requirement", []string{string(RoleSuperAdmin)}, []string{string(RoleOperator)}, http.StatusOK},
+		{"Operator passes Operator requirement", []string{string(RoleOperator)}, []string{string(RoleOperator)}, http.StatusOK},
+		{"Developer fails Operator requirement", []string{string(RoleDeveloper)}, []string{string(RoleOperator)}, http.StatusForbidden},
+		{"No user fails", []string{}, []string{string(RoleOperator)}, http.StatusUnauthorized},
 	}
 
 	for _, tt := range tests {
@@ -170,5 +170,5 @@ func contextWithUser(username string, roles []string, permissions []string) cont
 		Roles:       roles,
 		Permissions: permissions,
 	}
-	return context.WithValue(context.Background(), userContextKey, user)
+	return context.WithValue(context.Background(), contextKey("user"), user)
 }

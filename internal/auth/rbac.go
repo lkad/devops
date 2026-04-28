@@ -7,14 +7,6 @@ import (
 	"github.com/devops-toolkit/internal/apierror"
 )
 
-// Role constants
-const (
-	RoleSuperAdmin = "SuperAdmin"
-	RoleOperator   = "Operator"
-	RoleDeveloper  = "Developer"
-	RoleAuditor    = "Auditor"
-)
-
 // DeviceOperation represents types of device operations
 type DeviceOperation string
 
@@ -35,14 +27,14 @@ func CheckDevicePermission(ctx context.Context, op DeviceOperation, environment 
 
 	// SuperAdmin can do everything
 	for _, role := range user.Roles {
-		if role == RoleSuperAdmin {
+		if role == string(RoleSuperAdmin) {
 			return true
 		}
 	}
 
 	// Operator restrictions
 	for _, role := range user.Roles {
-		if role == RoleOperator {
+		if role == string(RoleOperator) {
 			switch op {
 			case OpDeviceRead:
 				return true
@@ -64,7 +56,7 @@ func CheckDevicePermission(ctx context.Context, op DeviceOperation, environment 
 
 	// Developer can read and test-deploy only
 	for _, role := range user.Roles {
-		if role == RoleDeveloper {
+		if role == string(RoleDeveloper) {
 			switch op {
 			case OpDeviceRead:
 				return true
@@ -76,7 +68,7 @@ func CheckDevicePermission(ctx context.Context, op DeviceOperation, environment 
 
 	// Auditor can read only
 	for _, role := range user.Roles {
-		if role == RoleAuditor {
+		if role == string(RoleAuditor) {
 			if op == OpDeviceRead {
 				return true
 			}
@@ -130,7 +122,7 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 
 			// SuperAdmin passes any role check
 			for _, userRole := range user.Roles {
-				if userRole == RoleSuperAdmin {
+				if userRole == string(RoleSuperAdmin) {
 					next.ServeHTTP(w, r)
 					return
 				}

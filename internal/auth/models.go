@@ -16,15 +16,16 @@ const (
 )
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	Username  string    `json:"username"`
-	Email     string    `json:"email"`
-	Role      Role      `json:"role"`
-	Roles     []string  `json:"roles"`
-	Group     string    `json:"group"` // group for label-based access control
-	LDAPDN    string    `json:"ldapDn,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID          uuid.UUID `json:"id"`
+	Username    string    `json:"username"`
+	Email       string    `json:"email"`
+	Role        Role      `json:"role"`
+	Roles       []string  `json:"roles"`
+	Permissions []string  `json:"permissions"`
+	Group       string    `json:"group"` // group for label-based access control
+	LDAPDN      string    `json:"ldapDn,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 type LoginRequest struct {
