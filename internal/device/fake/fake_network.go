@@ -116,22 +116,22 @@ func (f *FakeNetworkDeviceClient) GetDeviceInterfaces(ctx context.Context, devic
 	switch deviceID {
 	case "sw-001":
 		return []*device.NetworkInterface{
-			{Name: "Gi0/0/1", Description: "To-Core-SW-02", Status: "up", Speed: "10G", VLAN: 100, MACAddress: "aabb.ccdd.ee01"},
-			{Name: "Gi0/0/2", Description: "To-Access-SW-01", Status: "up", Speed: "10G", VLAN: 200, MACAddress: "aabb.ccdd.ee02"},
-			{Name: "Gi0/0/3", Description: "To-FW-01", Status: "up", Speed: "10G", VLAN: 300, MACAddress: "aabb.ccdd.ee03"},
-			{Name: "Gi0/0/4", Description: "Unused", Status: "down", Speed: "1G", VLAN: 1, MACAddress: "aabb.ccdd.ee04"},
+			{Name: "Gi0/0/1", Description: "To-Core-SW-02", AdminStatus: "up", OperStatus: "up", Speed: "10G", VLANAccess: 100, MACAddress: "aabb.ccdd.ee01"},
+			{Name: "Gi0/0/2", Description: "To-Access-SW-01", AdminStatus: "up", OperStatus: "up", Speed: "10G", VLANAccess: 200, MACAddress: "aabb.ccdd.ee02"},
+			{Name: "Gi0/0/3", Description: "To-FW-01", AdminStatus: "up", OperStatus: "up", Speed: "10G", VLANAccess: 300, MACAddress: "aabb.ccdd.ee03"},
+			{Name: "Gi0/0/4", Description: "Unused", AdminStatus: "down", OperStatus: "down", Speed: "1G", VLANAccess: 1, MACAddress: "aabb.ccdd.ee04"},
 		}, nil
 	case "sw-002":
 		return []*device.NetworkInterface{
-			{Name: "ge-0/0/1", Description: "To-Core", Status: "up", Speed: "10G", VLAN: 100},
-			{Name: "ge-0/0/2", Description: "To-Server", Status: "up", Speed: "1G", VLAN: 200},
-			{Name: "ge-0/0/3", Description: "Unused", Status: "down", Speed: "1G", VLAN: 1},
+			{Name: "ge-0/0/1", Description: "To-Core", AdminStatus: "up", OperStatus: "up", Speed: "10G", VLANAccess: 100},
+			{Name: "ge-0/0/2", Description: "To-Server", AdminStatus: "up", OperStatus: "up", Speed: "1G", VLANAccess: 200},
+			{Name: "ge-0/0/3", Description: "Unused", AdminStatus: "down", OperStatus: "down", Speed: "1G", VLANAccess: 1},
 		}, nil
 	case "fw-001":
 		return []*device.NetworkInterface{
-			{Name: "GigabitEthernet0/0/0", Description: "WAN", Status: "up", Speed: "1G", VLAN: 0, IPAddress: "10.0.0.1/24"},
-			{Name: "GigabitEthernet0/0/1", Description: "LAN", Status: "up", Speed: "10G", VLAN: 100, IPAddress: "192.168.1.1/24"},
-			{Name: "GigabitEthernet0/0/2", Description: "DMZ", Status: "up", Speed: "10G", VLAN: 200, IPAddress: "172.16.0.1/24"},
+			{Name: "GigabitEthernet0/0/0", Description: "WAN", AdminStatus: "up", OperStatus: "up", Speed: "1G", VLANAccess: 0, IPAddress: "10.0.0.1/24"},
+			{Name: "GigabitEthernet0/0/1", Description: "LAN", AdminStatus: "up", OperStatus: "up", Speed: "10G", VLANAccess: 100, IPAddress: "192.168.1.1/24"},
+			{Name: "GigabitEthernet0/0/2", Description: "DMZ", AdminStatus: "up", OperStatus: "up", Speed: "10G", VLANAccess: 200, IPAddress: "172.16.0.1/24"},
 		}, nil
 	default:
 		return []*device.NetworkInterface{}, nil

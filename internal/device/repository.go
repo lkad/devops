@@ -1,220 +1,228 @@
 package device
 
 import (
-	"database/sql"
-	"encoding/json"
-	"fmt"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Repository struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewRepository(dsn string) (*Repository, error) {
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := db.Ping(); err != nil {
-		return nil, err
-	}
-
-	repo := &Repository{db: db}
-	if err := repo.migrate(); err != nil {
-		return nil, err
-	}
-
-	return repo, nil
+func NewRepository(db *gorm.DB) *Repository {
+	return &Repository{db: db}
 }
 
 func (r *Repository) migrate() error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS devices (
-		id TEXT PRIMARY KEY,
-		type TEXT NOT NULL,
-		name TEXT NOT NULL,
-		status TEXT NOT NULL DEFAULT 'pending',
-		environment TEXT NOT NULL DEFAULT 'dev',
-		labels JSONB DEFAULT '{}',
-		business_unit TEXT,
-		compute_cluster TEXT,
-		parent_id TEXT,
-		config JSONB DEFAULT '{}',
-		metadata JSONB DEFAULT '{}',
-		registered_at TIMESTAMP,
-		last_seen TIMESTAMP,
-		last_config_sync TIMESTAMP,
-		created_at TIMESTAMP DEFAULT NOW(),
-		updated_at TIMESTAMP DEFAULT NOW()
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);
-	CREATE INDEX IF NOT EXISTS idx_devices_type ON devices(type);
-	CREATE INDEX IF NOT EXISTS idx_devices_labels ON devices USING GIN(labels);
-	CREATE INDEX IF NOT EXISTS idx_devices_environment ON devices(environment);
-	`
-
-	_, err := r.db.Exec(schema)
-	return err
+	return nil // GORM AutoMigrate handles this
 }
 
 func (r *Repository) Create(d *Device) error {
-	query := `
-		INSERT INTO devices (id, type, name, status, environment, labels, business_unit, compute_cluster, parent_id, config, metadata, registered_at, last_seen, last_config_sync)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-	`
-	labelsJSON, _ := json.Marshal(d.Labels)
-	configJSON, _ := json.Marshal(d.Config)
-	metadataJSON, _ := json.Marshal(d.Metadata)
-	_, err := r.db.Exec(query, d.ID, d.Type, d.Name, d.Status, d.Environment, labelsJSON, d.BusinessUnit, d.ComputeCluster, d.ParentID, configJSON, metadataJSON, d.RegisteredAt, d.LastSeen, d.LastConfigSync)
-	return err
+	device := r.toGORMDevice(d)
+	return r.db.Create(device).Error
 }
 
 func (r *Repository) GetByID(id string) (*Device, error) {
-	query := `
-		SELECT id, type, name, status, environment, labels, business_unit, compute_cluster, parent_id, config, metadata, registered_at, last_seen, last_config_sync, created_at, updated_at
-		FROM devices WHERE id = $1
-	`
-	d := &Device{}
-	var labels, config, metadata []byte
-	err := r.db.QueryRow(query, id).Scan(
-		&d.ID, &d.Type, &d.Name, &d.Status, &d.Environment, &labels, &d.BusinessUnit, &d.ComputeCluster, &d.ParentID, &config, &metadata, &d.RegisteredAt, &d.LastSeen, &d.LastConfigSync, &d.CreatedAt, &d.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
+	var device GORMDevice
+	if err := r.db.First(&device, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
 		return nil, err
 	}
-	json.Unmarshal(labels, &d.Labels)
-	json.Unmarshal(config, &d.Config)
-	json.Unmarshal(metadata, &d.Metadata)
-	return d, nil
+	return r.fromGORMDevice(&device), nil
 }
 
 func (r *Repository) List() ([]*Device, error) {
-	query := `
-		SELECT id, type, name, status, environment, labels, business_unit, compute_cluster, parent_id, config, metadata, registered_at, last_seen, last_config_sync, created_at, updated_at
-		FROM devices ORDER BY created_at DESC
-	`
-	rows, err := r.db.Query(query)
-	if err != nil {
+	var devices []GORMDevice
+	if err := r.db.Order("created_at DESC").Find(&devices).Error; err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var devices []*Device
-	for rows.Next() {
-		d := &Device{}
-		var labels, config, metadata []byte
-		if err := rows.Scan(&d.ID, &d.Type, &d.Name, &d.Status, &d.Environment, &labels, &d.BusinessUnit, &d.ComputeCluster, &d.ParentID, &config, &metadata, &d.RegisteredAt, &d.LastSeen, &d.LastConfigSync, &d.CreatedAt, &d.UpdatedAt); err != nil {
-			return nil, err
-		}
-		json.Unmarshal(labels, &d.Labels)
-		json.Unmarshal(config, &d.Config)
-		json.Unmarshal(metadata, &d.Metadata)
-		devices = append(devices, d)
-	}
-	return devices, nil
+	return r.fromGORMDevices(devices), nil
 }
 
 func (r *Repository) ListPaginated(limit, offset int) ([]*Device, int, error) {
-	// Get total count
-	var total int
-	countQuery := `SELECT COUNT(*) FROM devices`
-	if err := r.db.QueryRow(countQuery).Scan(&total); err != nil {
+	var total int64
+	if err := r.db.Model(&GORMDevice{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// Get paginated results
-	query := `
-		SELECT id, type, name, status, environment, labels, business_unit, compute_cluster, parent_id, config, metadata, registered_at, last_seen, last_config_sync, created_at, updated_at
-		FROM devices ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2
-	`
-	rows, err := r.db.Query(query, limit, offset)
-	if err != nil {
+	var devices []GORMDevice
+	if err := r.db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&devices).Error; err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	return r.fromGORMDevices(devices), int(total), nil
+}
 
-	var devices []*Device
-	for rows.Next() {
-		d := &Device{}
-		var labels, config, metadata []byte
-		if err := rows.Scan(&d.ID, &d.Type, &d.Name, &d.Status, &d.Environment, &labels, &d.BusinessUnit, &d.ComputeCluster, &d.ParentID, &config, &metadata, &d.RegisteredAt, &d.LastSeen, &d.LastConfigSync, &d.CreatedAt, &d.UpdatedAt); err != nil {
-			return nil, 0, err
-		}
-		json.Unmarshal(labels, &d.Labels)
-		json.Unmarshal(config, &d.Config)
-		json.Unmarshal(metadata, &d.Metadata)
-		devices = append(devices, d)
+// ListByType returns devices filtered by type
+func (r *Repository) ListByType(deviceType string, limit, offset int) ([]*Device, int, error) {
+	var total int64
+	if err := r.db.Model(&GORMDevice{}).Where("type = ?", deviceType).Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
-	return devices, total, nil
+
+	var devices []GORMDevice
+	if err := r.db.Where("type = ?", deviceType).Order("created_at DESC").Limit(limit).Offset(offset).Find(&devices).Error; err != nil {
+		return nil, 0, err
+	}
+	return r.fromGORMDevices(devices), int(total), nil
 }
 
 func (r *Repository) Update(d *Device) error {
-	query := `
-		UPDATE devices SET
-			type = $2, name = $3, status = $4, environment = $5, labels = $6, business_unit = $7, compute_cluster = $8, parent_id = $9, config = $10, metadata = $11, last_seen = $12, last_config_sync = $13, updated_at = $14
-		WHERE id = $1
-	`
 	d.UpdatedAt = time.Now()
-	labelsJSON, _ := json.Marshal(d.Labels)
-	configJSON, _ := json.Marshal(d.Config)
-	metadataJSON, _ := json.Marshal(d.Metadata)
-	_, err := r.db.Exec(query, d.ID, d.Type, d.Name, d.Status, d.Environment, labelsJSON, d.BusinessUnit, d.ComputeCluster, d.ParentID, configJSON, metadataJSON, d.LastSeen, d.LastConfigSync, d.UpdatedAt)
-	return err
+	device := r.toGORMDevice(d)
+	return r.db.Save(device).Error
 }
 
 func (r *Repository) Delete(id string) error {
-	query := `DELETE FROM devices WHERE id = $1`
-	_, err := r.db.Exec(query, id)
-	return err
+	return r.db.Delete(&GORMDevice{}, "id = ?", id).Error
 }
 
 func (r *Repository) UpdateStatus(id string, status State) error {
-	query := `UPDATE devices SET status = $2, updated_at = $3 WHERE id = $1`
-	_, err := r.db.Exec(query, id, status, time.Now())
-	return err
+	return r.db.Model(&GORMDevice{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":     status,
+		"updated_at": time.Now(),
+	}).Error
 }
 
+// SearchByLabels searches devices by label key-value pairs
 func (r *Repository) SearchByLabels(labels map[string]string) ([]*Device, error) {
-	query := `SELECT id, type, name, status, environment, labels, business_unit, compute_cluster, parent_id, config, metadata, registered_at, last_seen, last_config_sync, created_at, updated_at FROM devices WHERE 1=1`
-	args := []interface{}{}
-	argIdx := 1
-
+	query := r.db.Model(&GORMDevice{})
 	for k, v := range labels {
-		query += fmt.Sprintf(" AND labels->>'%s' = $%d", k, argIdx)
-		args = append(args, v)
-		argIdx++
+		query = query.Where("labels->>? = ?", k, v)
 	}
+	var devices []GORMDevice
+	if err := query.Find(&devices).Error; err != nil {
+		return nil, err
+	}
+	return r.fromGORMDevices(devices), nil
+}
 
-	rows, err := r.db.Query(query, args...)
+// RecordStateTransition logs a state change
+func (r *Repository) RecordStateTransition(deviceID string, fromState, toState State, triggeredBy, reason string) error {
+	uid, err := uuid.Parse(deviceID)
+	if err != nil {
+		return err
+	}
+	transition := &DeviceStateTransition{
+		DeviceID:    uid,
+		FromState:   string(fromState),
+		ToState:     string(toState),
+		TriggeredBy: triggeredBy,
+		Reason:      reason,
+	}
+	return r.db.Create(transition).Error
+}
+
+// GetStateHistory retrieves state transition history for a device
+func (r *Repository) GetStateHistory(deviceID string) ([]*DeviceStateTransition, error) {
+	uid, err := uuid.Parse(deviceID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var devices []*Device
-	for rows.Next() {
-		d := &Device{}
-		var labels, config, metadata []byte
-		if err := rows.Scan(&d.ID, &d.Type, &d.Name, &d.Status, &d.Environment, &labels, &d.BusinessUnit, &d.ComputeCluster, &d.ParentID, &config, &metadata, &d.RegisteredAt, &d.LastSeen, &d.LastConfigSync, &d.CreatedAt, &d.UpdatedAt); err != nil {
-			return nil, err
-		}
-		json.Unmarshal(labels, &d.Labels)
-		json.Unmarshal(config, &d.Config)
-		json.Unmarshal(metadata, &d.Metadata)
-		devices = append(devices, d)
+	var transitions []DeviceStateTransition
+	if err := r.db.Where("device_id = ?", uid).Order("created_at DESC").Find(&transitions).Error; err != nil {
+		return nil, err
 	}
-	return devices, nil
+	result := make([]*DeviceStateTransition, len(transitions))
+	for i := range transitions {
+		result[i] = &transitions[i]
+	}
+	return result, nil
+}
+
+// ListByStatus returns devices filtered by status
+func (r *Repository) ListByStatus(status string, limit, offset int) ([]*Device, int, error) {
+	var total int64
+	if err := r.db.Model(&GORMDevice{}).Where("status = ?", status).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var devices []GORMDevice
+	if err := r.db.Where("status = ?", status).Order("created_at DESC").Limit(limit).Offset(offset).Find(&devices).Error; err != nil {
+		return nil, 0, err
+	}
+	return r.fromGORMDevices(devices), int(total), nil
+}
+
+// ListByParent returns child devices of a parent
+func (r *Repository) ListByParent(parentID string) ([]*Device, error) {
+	var devices []GORMDevice
+	if err := r.db.Where("parent_id = ?", parentID).Find(&devices).Error; err != nil {
+		return nil, err
+	}
+	return r.fromGORMDevices(devices), nil
 }
 
 func (r *Repository) Close() error {
-	return r.db.Close()
+	sqlDB, err := r.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}
+
+// toGORMDevice converts Device to GORMDevice
+func (r *Repository) toGORMDevice(d *Device) *GORMDevice {
+	labels := StringMap{}
+	if d.Labels != nil {
+		labels = d.Labels
+	}
+	return &GORMDevice{
+		ID:             d.ID,
+		Type:           DeviceType(d.Type),
+		Name:           d.Name,
+		Status:         string(d.Status),
+		Environment:    string(d.Environment),
+		Labels:         labels,
+		BusinessUnit:   d.BusinessUnit,
+		ComputeCluster: d.ComputeCluster,
+		ParentID:       d.ParentID,
+		Config:         d.Config,
+		Metadata:       d.Metadata,
+		RegisteredAt:   d.RegisteredAt,
+		LastSeen:       d.LastSeen,
+		LastConfigSync: d.LastConfigSync,
+		Model: gorm.Model{
+			CreatedAt: d.CreatedAt,
+			UpdatedAt: d.UpdatedAt,
+		},
+	}
+}
+
+// fromGORMDevice converts GORMDevice to Device
+func (r *Repository) fromGORMDevice(d *GORMDevice) *Device {
+	labels := map[string]string{}
+	if d.Labels != nil {
+		labels = d.Labels
+	}
+	return &Device{
+		ID:             d.ID,
+		Type:           string(d.Type),
+		Name:           d.Name,
+		Status:         State(d.Status),
+		Environment:    Environment(d.Environment),
+		Labels:         labels,
+		BusinessUnit:   d.BusinessUnit,
+		ComputeCluster: d.ComputeCluster,
+		ParentID:       d.ParentID,
+		Config:         d.Config,
+		Metadata:       d.Metadata,
+		RegisteredAt:   d.RegisteredAt,
+		LastSeen:       d.LastSeen,
+		LastConfigSync: d.LastConfigSync,
+		CreatedAt:      d.CreatedAt,
+		UpdatedAt:      d.UpdatedAt,
+	}
+}
+
+// fromGORMDevices converts multiple GORMDevices to Devices
+func (r *Repository) fromGORMDevices(devices []GORMDevice) []*Device {
+	result := make([]*Device, len(devices))
+	for i := range devices {
+		result[i] = r.fromGORMDevice(&devices[i])
+	}
+	return result
 }
