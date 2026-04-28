@@ -65,11 +65,44 @@ func SetGORM(d *gorm.DB) {
 	db = d
 }
 
+// addMissingDeletedAtColumns adds deleted_at columns to existing tables
+// that were created before gorm.Model soft delete was enabled
+func addMissingDeletedAtColumns() error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	tables := []string{"project_types", "systems", "projects", "project_resources", "project_permissions"}
+	for _, table := range tables {
+		// Check if column exists
+		var count int64
+		err := db.Raw(fmt.Sprintf(`
+			SELECT COUNT(*) FROM information_schema.columns
+			WHERE table_name = '%s' AND column_name = 'deleted_at'
+		`, table)).Count(&count).Error
+		if err != nil {
+			continue
+		}
+		if count == 0 {
+			// Add the column
+			if err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN deleted_at TIMESTAMP", table)).Error; err != nil {
+				return fmt.Errorf("failed to add deleted_at column to %s: %w", table, err)
+			}
+		}
+	}
+	return nil
+}
+
 // AutoMigrate runs database migrations
 func AutoMigrate() error {
 	if db == nil {
 		return fmt.Errorf("database not initialized")
 	}
+	// First add missing deleted_at columns to existing tables
+	// This must happen BEFORE AutoMigrate runs, as some tables were created before gorm.Model soft delete
+	if err := addMissingDeletedAtColumns(); err != nil {
+		return err
+	}
+	// Run AutoMigrate
 	return db.AutoMigrate(
 		&device.GORMDevice{},
 		&device.DeviceStateTransition{},
