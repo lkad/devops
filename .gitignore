@@ -54,3 +54,6 @@ temp/
 
 # Vendor (if using go vendor)
 vendor/
+
+# Worktrees
+.worktrees/
