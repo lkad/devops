@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ProjectType represents the type of project
@@ -192,3 +193,87 @@ func NewPermission(level string, projectID, systemID, blID *string, role Role, s
 		CreatedAt:      time.Now(),
 	}
 }
+
+// GORM Models
+
+type GORMBusinessLine struct {
+	gorm.Model
+	ID          string        `gorm:"type:text;primaryKey" json:"id"`
+	Name        string        `gorm:"type:varchar(255);uniqueIndex;not null" json:"name"`
+	Description string        `gorm:"type:text" json:"description,omitempty"`
+	Systems     []GORMSystem  `gorm:"foreignKey:BusinessLineID" json:"systems,omitempty"`
+}
+
+func (GORMBusinessLine) TableName() string {
+	return "business_lines"
+}
+
+type GORMProjectType struct {
+	gorm.Model
+	ID          string `gorm:"type:text;primaryKey" json:"id"`
+	Name        string `gorm:"type:varchar(255);uniqueIndex;not null" json:"name"`
+	Description string `gorm:"type:text" json:"description,omitempty"`
+	Color       string `gorm:"type:text;default:'#64748b'" json:"color,omitempty"`
+}
+
+func (GORMProjectType) TableName() string {
+	return "project_types"
+}
+
+type GORMSystem struct {
+	gorm.Model
+	ID             string        `gorm:"type:text;primaryKey" json:"id"`
+	BusinessLineID string        `gorm:"type:text;not null" json:"business_line_id"`
+	Name           string        `gorm:"type:varchar(255);not null" json:"name"`
+	Description    string        `gorm:"type:text" json:"description,omitempty"`
+	BusinessLine   GORMBusinessLine `gorm:"foreignKey:BusinessLineID" json:"-"`
+	Projects       []GORMProject `gorm:"foreignKey:SystemID" json:"projects,omitempty"`
+}
+
+func (GORMSystem) TableName() string {
+	return "systems"
+}
+
+type GORMProject struct {
+	gorm.Model
+	ID          string           `gorm:"type:text;primaryKey" json:"id"`
+	SystemID    string           `gorm:"type:text;not null" json:"system_id"`
+	Name        string           `gorm:"type:varchar(255);not null" json:"name"`
+	Type        ProjectType      `gorm:"type:text;not null" json:"type"`
+	Description string           `gorm:"type:text" json:"description,omitempty"`
+	System      GORMSystem       `gorm:"foreignKey:SystemID" json:"-"`
+	Resources   []GORMResource   `gorm:"foreignKey:ProjectID" json:"resources,omitempty"`
+}
+
+func (GORMProject) TableName() string {
+	return "projects"
+}
+
+type GORMResource struct {
+	gorm.Model
+	ID           string       `gorm:"type:text;primaryKey" json:"id"`
+	ProjectID    string       `gorm:"type:text;not null" json:"project_id"`
+	ResourceType ResourceType `gorm:"type:text;not null" json:"resource_type"`
+	ResourceID   string       `gorm:"type:text;not null" json:"resource_id"`
+	Project      GORMProject  `gorm:"foreignKey:ProjectID" json:"-"`
+}
+
+func (GORMResource) TableName() string {
+	return "project_resources"
+}
+
+type GORMPermission struct {
+	gorm.Model
+	ID             string    `gorm:"type:text;primaryKey" json:"id"`
+	Level          string    `gorm:"type:text;not null" json:"level"`
+	ProjectID      *string   `gorm:"type:text" json:"project_id,omitempty"`
+	SystemID       *string   `gorm:"type:text" json:"system_id,omitempty"`
+	BusinessLineID *string   `gorm:"type:text" json:"business_line_id,omitempty"`
+	Role           Role      `gorm:"type:text;not null" json:"role"`
+	Subject        string    `gorm:"type:text;not null" json:"subject"`
+}
+
+func (GORMPermission) TableName() string {
+	return "project_permissions"
+}
+

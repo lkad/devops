@@ -1,6 +1,6 @@
 # DevOps Toolkit - 待办事项
 
-**最后更新:** 2026-04-26
+**最后更新:** 2026-04-28
 
 ## 状态总览
 
@@ -18,6 +18,7 @@
 | 物理主机管理 | ✅ 完成 | SSH连接管理，状态监控，指标采集 |
 | 项目管理 | ✅ 完成 | 事业群 → 系统 → 项目层级，FinOps 报表 |
 | 审计日志 | ✅ 完成 | 项目管理变动记录，审计界面 |
+| GORM ORM | ✅ 完成 | database/sql 迁移到 GORM |
 
 ---
 
@@ -114,6 +115,15 @@
 - [x] 服务监控 (systemctl/service)
 - [x] 通过 SSH 推送配置
 - [x] 状态变化事件发送
+
+### GORM ORM 迁移
+- [x] `database/sql` + `lib/pq` → `gorm.io/gorm` + `gorm.io/driver/postgres`
+- [x] Device 模块 GORM Model (GORMDevice, StringMap, JSONMap)
+- [x] Project 模块 GORM Model (BusinessLine, System, Project, Resource, Permission, AuditLog)
+- [x] Repository 层重写 (Device, Project)
+- [x] Manager 层更新接受 `*gorm.DB`
+- [x] AutoMigrate 支持 (需首次部署时调用)
+- [x] 移除手写 SQL，修复 SQL 注入风险
 
 ---
 

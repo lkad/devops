@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/devops-toolkit/internal/device"
+	"github.com/devops-toolkit/internal/project"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -61,4 +63,23 @@ func GetGORM() *gorm.DB {
 
 func SetGORM(d *gorm.DB) {
 	db = d
+}
+
+// AutoMigrate runs database migrations
+func AutoMigrate() error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	return db.AutoMigrate(
+		&device.GORMDevice{},
+		&device.DeviceStateTransition{},
+		&device.DeviceGroup{},
+		&project.GORMBusinessLine{},
+		&project.GORMSystem{},
+		&project.GORMProject{},
+		&project.GORMProjectType{},
+		&project.GORMResource{},
+		&project.GORMPermission{},
+		&project.AuditLog{},
+	)
 }

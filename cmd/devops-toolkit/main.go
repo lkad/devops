@@ -25,6 +25,7 @@ import (
 	"github.com/devops-toolkit/internal/pipeline"
 	"github.com/devops-toolkit/internal/project"
 	"github.com/devops-toolkit/internal/websocket"
+	"github.com/devops-toolkit/pkg/database"
 	"github.com/gin-gonic/gin"
 )
 
@@ -52,20 +53,31 @@ func main() {
 	// Initialize auth handler
 	authHandler := auth.NewHandler(ldapClient, &cfg.Auth)
 
-	deviceMgr, err := device.NewManager(cfg.Database.DSN())
+	// Initialize database
+	db, err := database.NewGORM(&database.GORMConfig{
+		Host:     cfg.Database.Host,
+		Port:     cfg.Database.Port,
+		User:     cfg.Database.User,
+		Password: cfg.Database.Password,
+		Name:     cfg.Database.Name,
+		SSLMode:  cfg.Database.SSLMode,
+	})
 	if err != nil {
-		log.Printf("Warning: Device manager unavailable (DB connection failed): %v", err)
-		deviceMgr = nil
+		log.Printf("Warning: Database connection failed: %v", err)
+	} else {
+		database.SetGORM(db)
+		// Run auto migrations
+		if err := database.AutoMigrate(); err != nil {
+			log.Printf("Warning: AutoMigrate failed: %v", err)
+		}
 	}
+
+	deviceMgr := device.NewManager(db)
 
 	// Create user provider that extracts user from request context
 	userProvider := &authUserProvider{}
 
-	projectMgr, err := project.NewManagerWithDSN(cfg.Database.DSN(), userProvider)
-	if err != nil {
-		log.Printf("Warning: Project manager unavailable (DB connection failed): %v", err)
-		projectMgr = nil
-	}
+	projectMgr := project.NewManagerWithDB(db, userProvider)
 	logMgr := logs.NewManager(logs.LogsConfig{
 		Backend:       cfg.Logs.Backend,
 		RetentionDays: cfg.Logs.RetentionDays,
@@ -168,13 +180,13 @@ func main() {
 	api.POST("/api/k8s/clusters", ginfadapter.GinToHTTPHandler(k8sMgr.CreateClusterHTTP))
 	api.DELETE("/api/k8s/clusters/:name", ginfadapter.GinToHTTPHandler(k8sMgr.DeleteClusterHTTP, "name"))
 	api.GET("/api/k8s/clusters/:name/health", ginfadapter.GinToHTTPHandler(k8sMgr.HealthCheckHTTP, "name"))
-	api.GET("/api/k8s/clusters/:cluster/nodes", ginfadapter.GinToHTTPHandler(k8sMgr.GetNodesHTTP, "cluster"))
-	api.GET("/api/k8s/clusters/:cluster/namespaces", ginfadapter.GinToHTTPHandler(k8sMgr.GetNamespacesHTTP, "cluster"))
-	api.GET("/api/k8s/clusters/:cluster/pods", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodsHTTP, "cluster"))
-	api.GET("/api/k8s/clusters/:cluster/pods/:pod/logs", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodLogsHTTP, "cluster", "pod"))
-	api.GET("/api/k8s/clusters/:cluster/namespaces/:ns/pods/:pod/logs", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodLogsWithNamespaceHTTP, "cluster", "ns", "pod"))
-	api.POST("/api/k8s/clusters/:cluster/namespaces/:ns/pods/:pod/exec", ginfadapter.GinToHTTPHandler(k8sMgr.PodExecHTTP, "cluster", "ns", "pod"))
-	api.GET("/api/k8s/clusters/:cluster/metrics", ginfadapter.GinToHTTPHandler(k8sMgr.GetClusterMetricsHTTP, "cluster"))
+	api.GET("/api/k8s/clusters/:name/nodes", ginfadapter.GinToHTTPHandler(k8sMgr.GetNodesHTTP, "name"))
+	api.GET("/api/k8s/clusters/:name/namespaces", ginfadapter.GinToHTTPHandler(k8sMgr.GetNamespacesHTTP, "name"))
+	api.GET("/api/k8s/clusters/:name/pods", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodsHTTP, "name"))
+	api.GET("/api/k8s/clusters/:name/pods/:pod/logs", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodLogsHTTP, "name", "pod"))
+	api.GET("/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/logs", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodLogsWithNamespaceHTTP, "name", "ns", "pod"))
+	api.POST("/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/exec", ginfadapter.GinToHTTPHandler(k8sMgr.PodExecHTTP, "name", "ns", "pod"))
+	api.GET("/api/k8s/clusters/:name/metrics", ginfadapter.GinToHTTPHandler(k8sMgr.GetClusterMetricsHTTP, "name"))
 	api.POST("/api/k8s/maintenance", ginfadapter.GinToHTTPHandler(k8sMgr.MaintenanceOpHTTP))
 
 	// Physical host routes
@@ -210,15 +222,15 @@ func main() {
 		api.DELETE("/api/org/business-lines/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteBusinessLineHTTP, "id"))
 
 		// Systems
-		api.GET("/api/org/business-lines/:bl_id/systems", ginfadapter.GinToHTTPHandler(projectMgr.ListSystemsHTTP, "bl_id"))
-		api.POST("/api/org/business-lines/:bl_id/systems", ginfadapter.GinToHTTPHandler(projectMgr.CreateSystemHTTP, "bl_id"))
+		api.GET("/api/org/business-lines/:id/systems", ginfadapter.GinToHTTPHandler(projectMgr.ListSystemsHTTP, "id"))
+		api.POST("/api/org/business-lines/:id/systems", ginfadapter.GinToHTTPHandler(projectMgr.CreateSystemHTTP, "id"))
 		api.GET("/api/org/systems/:id", ginfadapter.GinToHTTPHandler(projectMgr.GetSystemHTTP, "id"))
 		api.PUT("/api/org/systems/:id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateSystemHTTP, "id"))
 		api.DELETE("/api/org/systems/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteSystemHTTP, "id"))
 
 		// Projects
-		api.GET("/api/org/systems/:sys_id/projects", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectsHTTP, "sys_id"))
-		api.POST("/api/org/systems/:sys_id/projects", ginfadapter.GinToHTTPHandler(projectMgr.CreateProjectHTTP, "sys_id"))
+		api.GET("/api/org/systems/:id/projects", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectsHTTP, "id"))
+		api.POST("/api/org/systems/:id/projects", ginfadapter.GinToHTTPHandler(projectMgr.CreateProjectHTTP, "id"))
 		api.GET("/api/org/projects/:id", ginfadapter.GinToHTTPHandler(projectMgr.GetProjectHTTP, "id"))
 		api.PUT("/api/org/projects/:id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateProjectHTTP, "id"))
 		api.DELETE("/api/org/projects/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteProjectHTTP, "id"))

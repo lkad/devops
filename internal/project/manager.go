@@ -11,6 +11,7 @@ import (
 
 	"github.com/devops-toolkit/internal/apierror"
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 )
 
 // UserProvider defines the interface for getting user information from request context
@@ -39,12 +40,9 @@ func NewManager(repo *Repository, userProvider UserProvider) *Manager {
 	return &Manager{repo: repo, userProvider: userProvider}
 }
 
-func NewManagerWithDSN(dsn string, userProvider UserProvider) (*Manager, error) {
-	repo, err := NewRepository(dsn)
-	if err != nil {
-		return nil, err
-	}
-	return &Manager{repo: repo, userProvider: userProvider}, nil
+func NewManagerWithDB(db *gorm.DB, userProvider UserProvider) *Manager {
+	repo := NewRepository(db)
+	return &Manager{repo: repo, userProvider: userProvider}
 }
 
 func (m *Manager) parsePagination(r *http.Request) (limit, offset int) {
@@ -314,7 +312,7 @@ func (m *Manager) DeleteBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 
 // System handlers
 func (m *Manager) ListSystemsHTTP(w http.ResponseWriter, r *http.Request) {
-	blID := mux.Vars(r)["bl_id"]
+	blID := mux.Vars(r)["id"]
 	if blID != "" {
 		systems, err := m.repo.ListSystemsByBusinessLine(blID)
 		if err != nil {
@@ -337,7 +335,7 @@ func (m *Manager) ListSystemsHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) CreateSystemHTTP(w http.ResponseWriter, r *http.Request) {
-	blID := mux.Vars(r)["bl_id"]
+	blID := mux.Vars(r)["id"]
 	if blID == "" {
 		apierror.ValidationError(w, "business line ID is required")
 		return
@@ -471,7 +469,7 @@ func (m *Manager) DeleteSystemHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Project handlers
 func (m *Manager) ListProjectsHTTP(w http.ResponseWriter, r *http.Request) {
-	sysID := mux.Vars(r)["sys_id"]
+	sysID := mux.Vars(r)["id"]
 	if sysID != "" {
 		projects, err := m.repo.ListProjectsBySystem(sysID)
 		if err != nil {
@@ -494,7 +492,7 @@ func (m *Manager) ListProjectsHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) CreateProjectHTTP(w http.ResponseWriter, r *http.Request) {
-	sysID := mux.Vars(r)["sys_id"]
+	sysID := mux.Vars(r)["id"]
 	if sysID == "" {
 		apierror.ValidationError(w, "system ID is required")
 		return
