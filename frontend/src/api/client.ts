@@ -27,7 +27,14 @@ async function request<T>(
 
   let queryString = ''
   if (params) {
-    const searchParams = new URLSearchParams(params)
+    // Filter out undefined values to avoid "?key=undefined" in URL
+    const definedParams: Record<string, string> = {}
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        definedParams[key] = value
+      }
+    }
+    const searchParams = new URLSearchParams(definedParams)
     queryString = searchParams.toString() ? `?${searchParams.toString()}` : ''
   }
 
