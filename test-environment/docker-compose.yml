@@ -1,0 +1,85 @@
+# Docker Compose for DevOps Toolkit Development Environment
+version: '2.4'
+
+services:
+  influxdb:
+    image: influxdb:2.7
+    container_name: devops-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - INFLUXDB_DB=devops
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=adminpassword
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    networks:
+      - devops-network
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: devops-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - devops-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: devops-grafana
+    ports:
+      - "3030:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - devops-network
+    depends_on:
+      - prometheus
+      - influxdb
+
+  loki:
+    image: grafana/loki:2.8.0
+    container_name: devops-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+    networks:
+      - devops-network
+
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: devops-node-exporter
+    ports:
+      - "9100:9100"
+    networks:
+      - devops-network
+
+networks:
+  devops-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+
+volumes:
+  influxdb-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:

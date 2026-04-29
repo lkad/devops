@@ -1,0 +1,117 @@
+# Containerlab 双数据中心拓扑
+# 用于 DevOps Toolkit 集成测试环境
+name: devops-toolkit-test
+
+# 顶点 (Topology)
+topology:
+  # 节点定义
+  nodes:
+    # DC1 交换机
+    dc1-sw1:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool:latest
+      mgmt-ipv4: 172.30.30.11
+      ports:
+        - "161:161/udp"  # SNMP
+      exec:
+        - ip addr add 10.0.1.1/24 dev eth1
+        - ip link set eth1 up
+
+    dc1-sw2:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool:latest
+      mgmt-ipv4: 172.30.30.12
+      ports:
+        - "162:161/udp"  # SNMP
+      exec:
+        - ip addr add 10.0.1.2/24 dev eth1
+        - ip link set eth1 up
+
+    # DC1 服务器
+    dc1-web:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool:latest
+      mgmt-ipv4: 172.30.30.21
+      ports:
+        - "2221:22"  # SSH
+      exec:
+        - ip addr add 10.0.1.21/24 dev eth1
+        - ip link set eth1 up
+        - # 安装 SSH 服务器
+        - apt-get update && apt-get install -y openssh-server
+
+    dc1-db:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool:latest
+      mgmt-ipv4: 172.30.30.22
+      ports:
+        - "2222:22"  # SSH
+      exec:
+        - ip addr add 10.0.1.22/24 dev eth1
+        - ip link set eth1 up
+        - apt-get update && apt-get install -y openssh-server
+
+    # DC2 交换机
+    dc2-sw1:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool:latest
+      mgmt-ipv4: 172.30.30.31
+      ports:
+        - "361:161/udp"  # SNMP
+      exec:
+        - ip addr add 10.0.2.1/24 dev eth1
+        - ip link set eth1 up
+
+    dc2-sw2:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool:latest
+      mgmt-ipv4: 172.30.30.32
+      ports:
+        - "362:161/udp"  # SNMP
+      exec:
+        - ip addr add 10.0.2.2/24 dev eth1
+        - ip link set eth1 up
+
+    # DC2 服务器
+    dc2-web:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool:latest
+      mgmt-ipv4: 172.30.30.41
+      ports:
+        - "4221:22"  # SSH
+      exec:
+        - ip addr add 10.0.2.41/24 dev eth1
+        - ip link set eth1 up
+        - apt-get update && apt-get install -y openssh-server
+
+    dc2-db:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool:latest
+      mgmt-ipv4: 172.30.30.42
+      ports:
+        - "4222:22"  # SSH
+      exec:
+        - ip addr add 10.0.2.42/24 dev eth1
+        - ip link set eth1 up
+        - apt-get update && apt-get install -y openssh-server
+
+  # 链路定义
+  links:
+    # DC1 内部链路
+    - endpoints: ["dc1-sw1:eth1", "dc1-sw2:eth1"]
+    - endpoints: ["dc1-sw2:eth2", "dc1-web:eth1"]
+    - endpoints: ["dc1-sw2:eth3", "dc1-db:eth1"]
+
+    # DC2 内部链路
+    - endpoints: ["dc2-sw1:eth1", "dc2-sw2:eth1"]
+    - endpoints: ["dc2-sw2:eth2", "dc2-web:eth1"]
+    - endpoints: ["dc2-sw2:eth3", "dc2-db:eth1"]
+
+    # DC 间 trunk 链路 (双链路高可用)
+    - endpoints: ["dc1-sw1:eth2", "dc2-sw1:eth2"]
+    - endpoints: ["dc1-sw1:eth3", "dc2-sw1:eth3"]
+
+# 配置默认值
+mgmt:
+  network: bridge
+  ipv4-subnet: 172.30.30.0/24

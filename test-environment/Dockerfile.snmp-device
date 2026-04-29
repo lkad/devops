@@ -1,0 +1,24 @@
+FROM ubuntu:22.04
+
+# 安装 SNMP 守护进程
+RUN apt-get update && apt-get install -y \
+    snmpd \
+    snmp \
+    iputils-ping \
+    net-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# 配置 SNMP
+RUN echo 'rocommunity public' > /etc/snmp/snmpd.conf
+RUN echo 'rwcommunity private' >> /etc/snmp/snmpd.conf
+RUN echo 'syslocation "Test Data Center"' >> /etc/snmp/snmpd.conf
+RUN echo 'syscontact "admin@example.com"' >> /etc/snmp/snmpd.conf
+RUN echo 'sysservices 76' >> /etc/snmp/snmpd.conf
+
+# 设置接口描述
+RUN echo 'interface 1' >> /etc/snmp/snmpd.conf
+RUN echo 'interface 2' >> /etc/snmp/snmpd.conf
+
+EXPOSE 161/udp
+
+CMD ["snmpd", "-f", "-Lo", "-c", "/etc/snmp/snmpd.conf", "-m", "ALL"]

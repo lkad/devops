@@ -1,0 +1,33 @@
+FROM ubuntu:22.04
+
+# 安装 SSH 服务器和系统工具
+RUN apt-get update && apt-get install -y \
+    openssh-server \
+    iputils-ping \
+    net-tools \
+    htop \
+    curl \
+    wget \
+    vim \
+    snmp \
+    snmpd \
+    traceroute \
+    mtr \
+    && rm -rf /var/lib/apt/lists/*
+
+# 配置 SSH
+RUN mkdir /var/run/sshd
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+# 添加测试用户
+RUN useradd -m -s /bin/bash testuser && echo "testuser:testpass" | chpasswd
+
+# 配置 SNMP
+RUN echo 'rocommunity public' > /etc/snmp/snmpd.conf
+RUN echo 'syslocation "Test Data Center"' >> /etc/snmp/snmpd.conf
+RUN echo 'syscontact "admin@example.com"' >> /etc/snmp/snmpd.conf
+
+EXPOSE 22 161/udp
+
+CMD /usr/sbin/sshd -D && snmpd -f -Lo -c /etc/snmp/snmpd.conf
