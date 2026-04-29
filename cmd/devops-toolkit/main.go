@@ -66,8 +66,8 @@ func main() {
 		log.Printf("Warning: Database connection failed: %v", err)
 	} else {
 		database.SetGORM(db)
-		// Run auto migrations
-		if err := database.AutoMigrate(); err != nil {
+		// Run auto migrations with fallback for k8s_clusters table
+		if err := database.AutoMigrateWithFallback(); err != nil {
 			log.Printf("Warning: AutoMigrate failed: %v", err)
 		}
 	}

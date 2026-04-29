@@ -103,7 +103,7 @@ func AutoMigrate() error {
 	if err := addMissingDeletedAtColumns(); err != nil {
 		return err
 	}
-	// Run AutoMigrate
+	// Run AutoMigrate - continue even if some models fail (handle legacy constraints)
 	return db.AutoMigrate(
 		&device.GORMDevice{},
 		&device.DeviceStateTransition{},
@@ -117,4 +117,24 @@ func AutoMigrate() error {
 		&project.AuditLog{},
 		&k8s.GORMCluster{},
 	)
+}
+
+// AutoMigrateWithFallback runs migrations and creates k8s_clusters table if needed
+func AutoMigrateWithFallback() error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	// Try AutoMigrate first
+	if err := AutoMigrate(); err != nil {
+		// Log error but continue - this handles legacy DB with stale constraints
+		fmt.Printf("Warning: AutoMigrate partially failed: %v\n", err)
+	}
+	// Ensure k8s_clusters table exists (create if missing)
+	if !db.Migrator().HasTable(&k8s.GORMCluster{}) {
+		if err := db.Migrator().CreateTable(&k8s.GORMCluster{}); err != nil {
+			return fmt.Errorf("failed to create k8s_clusters table: %w", err)
+		}
+		fmt.Println("Created k8s_clusters table")
+	}
+	return nil
 }
