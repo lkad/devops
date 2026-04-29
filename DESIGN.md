@@ -1,193 +1,401 @@
 # Design System — DevOps Toolkit
 
-## Product Context
-- **What this is:** Internal SRE/DevOps dashboard for managing dual-datacenter infrastructure (Containerlab-based test environment)
-- **Who it's for:** DevOps/SRE engineers managing 8+ nodes across DC1 and DC2
-- **Space/industry:** Network infrastructure management, ops tooling
-- **Project type:** Data-dense dashboard / internal tool
+**状态:** Active
+**最后更新:** 2026-04-29
+**基于:** PRD.md v2.1
 
-## Aesthetic Direction
-- **Direction:** Industrial/Utilitarian — function-first, terminal-inspired, no decorative fluff
-- **Decoration level:** Minimal — typography and color do all the work, subtle surface hierarchy
-- **Mood:** Feels like an extension of the command line. Data-dense for fast scanning during incidents. Technical credibility over polish.
-- **Reference sites:** Grafana, Datadog, k9s — dark ops dashboards
+---
 
-## Typography
-- **Display/Hero:** Geist 700 — gradient text for brand moments only (header title)
-- **Body:** Geist 400/500 — all UI text, labels, body copy
-- **UI/Labels:** Geist 500/600 — headings, section titles, button labels
-- **Data/Tables:** JetBrains Mono 400/500 — device IDs, IP addresses, SSH commands, metrics values (must support tabular-nums)
-- **Code:** JetBrains Mono — log entries, config snippets
-- **Loading:** Google Fonts CDN — Geist + JetBrains Mono
-- **Scale:**
-  - Hero: 3rem (gradient text, brand use only)
-  - H1: 2rem / H2: 1.5rem / H3: 1.1rem
-  - Body: 1rem / Small: 0.875rem / Caption: 0.8rem
-  - Mono data: 0.85rem
+## 产品背景
 
-## Color
-- **Approach:** Restrained — cyan accent is rare and meaningful, not everywhere
-- **Primary:** `#22d3ee` — cyan, used for active states, primary actions, links, key data
-- **Primary hover:** `#06b6d4`
-- **Primary muted:** `rgba(34, 211, 238, 0.15)` — backgrounds behind cyan elements
-- **Background:** `#0c1220` — near-black blue-tinted dark
-- **Surface:** `#151d2e` — card/panel backgrounds
-- **Surface elevated:** `#1c2940` — hover states, elevated cards
-- **Border:** `#2a3a54` — standard borders
-- **Border subtle:** `#1e2d42` — inside cards, dividers
-- **Text primary:** `#f1f5f9`
-- **Text secondary:** `#94a3b8` — labels, descriptions
-- **Text muted:** `#64748b` — timestamps, captions
-- **Semantic:**
-  - Success: `#22c55e`
-  - Warning: `#f59e0b`
-  - Error: `#ef4444`
-  - Info: `#3b82f6`
-- **Dark mode:** Dark-first (no light mode redesign needed yet — dark is the primary product)
+- **产品类型:** 内部 SRE/DevOps 仪表板
+- **目标用户:** DevOps/SRE 工程师，管理 8+ 节点跨 DC1 和 DC2
+- **行业:** 网络基础设施管理，运维工具
+- **特点:** 数据密集，用于快速扫描和事件处理
 
-## Spacing
-- **Base unit:** 8px
-- **Density:** Comfortable — not cramped for data scanning, not airy
-- **Scale:**
-  - 1: 4px — micro gaps, badge padding
-  - 2: 8px — icon margins, standard gaps
-  - 3: 12px — card inner padding
-  - 4: 16px — section padding, component spacing
-  - 5: 20px — form element spacing
-  - 6: 24px — card padding, section gaps
-  - 7: 32px — major section spacing
-  - 8: 48px — page section spacing
+---
 
-## Layout
-- **Approach:** Grid-disciplined — strict columns, predictable alignment, max ~1400px content width
-- **Grid:** 4-column stats grid, 1-column device lists, 2-column detail grids
-- **Max content width:** 1400px
-- **Border radius:**
-  - sm: 4px — badges, tags
-  - md: 8px — buttons, inputs
-  - lg: 12px — cards, panels
-  - xl: 16px — modals, large cards
+## 美学方向
 
-## Motion
-- **Approach:** Minimal-functional — only transitions that aid comprehension
-- **Easing:** ease-out on enter, ease-in on exit, ease-in-out on move
-- **Duration:**
-  - Micro: 50-100ms — hover states, button feedback
-  - Short: 150-250ms — panel transitions, tab switches
-  - Medium: 250-400ms — modals, drawers
-- **No choreography** — no entrance animations, no staggered lists, no scroll-driven effects
+**方向:** 工业/实用主义 — 功能优先，终端风格，无装饰性元素
 
-## Decisions Log
-| Date | Decision | Rationale |
-|------|----------|-----------|
-| 2026-04-19 | Initial design system created | Created by /design-consultation based on product context (SRE dashboard, dark theme, dual-datacenter infrastructure) |
-| 2026-04-28 | Mock testing framework | Add Fake*Client implementations for device management testing without real hardware |
-
-## Multi-Cluster Kubernetes UI
-
-### Environment Color Coding
-Clusters must be visually distinguished by environment type using the following color scheme:
-
-| Environment | Background | Border | Label |
-|------------|------------|--------|-------|
-| dev | rgba(59, 130, 246, 0.15) | #3b82f6 | 开发 |
-| test | rgba(245, 158, 11, 0.15) | #f59e0b | 测试 |
-| uat | rgba(168, 85, 247, 0.15) | #a855f7 | UAT |
-| prod | rgba(239, 68, 68, 0.15) | #ef4444 | 生产 |
-| default | rgba(148, 163, 184, 0.1) | #94a3b8 | 标准 |
-
-### Filtering Requirements
-- **Search input**: Filter clusters by name (case-insensitive substring match)
-- **Environment dropdown**: Filter by environment type (dev/test/uat/prod)
-- Both filters work together (AND logic)
-- Filtered results update in real-time as user types/selects
-
-### Selected Cluster Highlighting
-- Selected cluster has a cyan border (3px solid #22d3ee)
-- Selected cluster has a cyan glow shadow: `box-shadow: 0 0 20px rgba(34, 211, 238, 0.3)`
-- Selected cluster has a cyan dot indicator in top-right corner
-
-### Implementation Notes
-- Cluster type is determined by parsing the `type` field (case-insensitive match for keywords: dev, test, uat, prod)
-- All clusters stored in `allK8sClusters` global variable for client-side filtering
-- `filterK8sClusters()` function handles both search and environment filtering
-- `getEnvStyle()` returns appropriate color scheme based on cluster type
-
-## Mock Testing Framework
-
-### Purpose
-在没有真实硬件的环境下进行开发和测试，使用模拟客户端替代真实的 vSphere、KVM、IPMI、SNMP 等连接。
-
-### Mock Client 文件位置
-`internal/device/fake/` 目录下包含所有模拟客户端实现：
-
-| 文件 | 用途 |
+| 属性 | 说明 |
 |------|------|
-| `fake_vmware.go` | 模拟 vSphere/ESXi 虚拟化平台 |
-| `fake_kvm.go` | 模拟 KVM 虚拟化平台 |
-| `fake_ipmi.go` | 模拟 IPMI 智能平台管理接口 |
-| `fake_network.go` | 模拟 SNMP 网络设备 (交换机、路由器、防火墙) |
-| `fake_metrics.go` | 模拟指标采集 (CPU、内存、磁盘、网络) |
-| `fake_test.go` | 测试辅助工具 |
+| 装饰级别 | 极简 — 字体和颜色完成所有工作 |
+| 情绪 | 像是命令行的延伸，数据密集以便快速扫描 |
+| 参考 | Grafana, Datadog, k9s — 暗色 ops 仪表板 |
+| 信任来源 | 技术可信度，而非美观度 |
 
-### 使用方式
+---
 
-```go
-import "github.com/devops-toolkit/internal/device/fake"
+## 字体
 
-// 创建模拟客户端
-vmClient := fake.NewFakeVMwareClient()
-kvmClient := fake.NewFakeKVMClient()
-ipmiClient := fake.NewFakeIPMIClient()
-networkClient := fake.NewFakeNetworkDeviceClient()
-metricsCollector := fake.NewFakeMetricsCollector()
+### 字体族
 
-// 创建带模拟客户端的设备管理器
-manager := device.NewManagerWithClients(db, vmClient, metricsCollector, networkClient)
+| 用途 | 字体 | 特点 |
+|------|------|------|
+| 标题/品牌 | Geist 700 | 仅用于首屏标题，使用渐变色 |
+| 正文/UI | Geist 400/500 | 所有 UI 文本、标签、正文 |
+| 标题标签 | Geist 500/600 | 标题、分段标题、按钮标签 |
+| 数据/表格 | JetBrains Mono 400/500 | 设备 ID、IP 地址、SSH 命令、指标值（必须支持 tabular-nums） |
+| 代码 | JetBrains Mono | 日志条目、配置片段 |
 
-// 使用 manager 进行操作
-vms, err := manager.DiscoverVMsFromHost(ctx, "host-1")
+### 字体加载
+
+```html
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 ```
 
-### 模拟数据
+### 字号
 
-**FakeVMwareClient:** 3 台 VM (web-server-01, db-server-01, app-server-01)
-**FakeKVMClient:** 2 台 VM (kvm-vm-01, kvm-vm-02)
-**FakeNetworkDeviceClient:** 3 台网络设备 (core-switch-01, access-switch-01, edge-firewall-01)
+| 层级 | 尺寸 | 行高 | 用途 |
+|------|------|------|------|
+| Hero | 3rem (48px) | 1.1 | 品牌首屏标题，使用渐变 |
+| H1 | 2rem (32px) | 1.2 | 页面标题 |
+| H2 | 1.5rem (24px) | 1.3 | 区块标题 |
+| H3 | 1.1rem (18px) | 1.4 | 卡片标题 |
+| Body | 1rem (16px) | 1.5 | 正文 |
+| Small | 0.875rem (14px) | 1.4 | 次要文本 |
+| Caption | 0.8rem (13px) | 1.3 | 时间戳、说明 |
+| Mono | 0.85rem (14px) | 1.4 | 数据表格、代码 |
 
-### 接口对齐
+---
 
-所有 Fake 客户端实现真实客户端的相同接口，确保测试环境与生产环境代码路径一致。
+## 颜色
 
-**HypervisorClient 接口 (虚拟化平台):**
-```go
-type HypervisorClient interface {
-    ListVMs(ctx context.Context, hostID string) ([]*VM, error)
-    GetVM(ctx context.Context, vmID string) (*VM, error)
-    GetVMMetrics(ctx context.Context, vmID string) (*VMMetrics, error)
-    GetHostInfo(ctx context.Context, hostID string) (*GORMDevice, error)
-    GetHostMetrics(ctx context.Context, hostID string) (*HostMetrics, error)
-    GetHostPowerState(ctx context.Context, hostID string) (string, error)
-    SetHostPowerState(ctx context.Context, hostID string, state string) error
+### 颜色系统
+
+| 用途 | 色值 | 说明 |
+|------|------|------|
+| Primary | `#22d3ee` | 强调色，用于活跃状态、主要操作、链接、关键数据 |
+| Primary Hover | `#06b6d4` | 主色悬停 |
+| Primary Muted | `rgba(34, 211, 238, 0.15)` | 主色元素背景 |
+| Background | `#0c1220` | 近黑蓝底色 |
+| Surface | `#151d2e` | 卡片/面板背景 |
+| Surface Elevated | `#1c2940` | 悬停状态、提升卡片 |
+| Border | `#2a3a54` | 标准边框 |
+| Border Subtle | `#1e2d42` | 卡片内、分隔线 |
+| Text Primary | `#f1f5f9` | 主文本 |
+| Text Secondary | `#94a3b8` | 标签、描述 |
+| Text Muted | `#64748b` | 时间戳、说明 |
+
+### 语义色
+
+| 用途 | 色值 | 说明 |
+|------|------|------|
+| Success | `#22c55e` | 成功、在线、正常 |
+| Warning | `#f59e0b` | 警告、监控异常 |
+| Error | `#ef4444` | 错误、离线、故障 |
+| Info | `#3b82f6` | 信息、进行中 |
+
+### 环境色（K8s 集群）
+
+| 环境 | 背景 | 边框 | 标签 |
+|------|------|------|------|
+| dev | `rgba(59, 130, 246, 0.15)` | `#3b82f6` | 开发 |
+| test | `rgba(245, 158, 11, 0.15)` | `#f59e0b` | 测试 |
+| uat | `rgba(168, 85, 247, 0.15)` | `#a855f7` | UAT |
+| prod | `rgba(239, 68, 68, 0.15)` | `#ef4444` | 生产 |
+
+### 状态色（物理主机）
+
+| 状态 | 色值 | 说明 |
+|------|------|------|
+| online | `#22c55e` (Success) | 监控正常，SSH 正常 |
+| monitoring_issue | `#f59e0b` (Warning) | 监控 DOWN，SSH 正常 |
+| offline | `#ef4444` (Error) | 监控 DOWN，SSH 失败 |
+
+---
+
+## 间距
+
+### 基础单位
+
+**8px** — 所有间距基于此倍数
+
+### 间距比例
+
+| 层级 | 像素 | 用途 |
+|------|------|------|
+| 1 | 4px | 微间距、徽章内边距 |
+| 2 | 8px | 图标边距、标准间距 |
+| 3 | 12px | 卡片内边距 |
+| 4 | 16px | 分段内边距、组件间距 |
+| 5 | 20px | 表单元素间距 |
+| 6 | 24px | 卡片边距、分段间距 |
+| 7 | 32px | 主要分段间距 |
+| 8 | 48px | 页面分段间距 |
+
+---
+
+## 布局
+
+### 结构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Header (56px)                                                  │
+├────────┬────────────────────────────────────────────────────────┤
+│        │                                                        │
+│ SideNav│                   Main Content                         │
+│ (240px)│              (max-width: 1400px)                       │
+│        │                                                        │
+│        │                                                        │
+└────────┴────────────────────────────────────────────────────────┘
+```
+
+### 网格
+
+| 场景 | 列数 | 说明 |
+|------|------|------|
+| 统计卡片 | 4 列 | 指标概览 |
+| 设备列表 | 1 列 | 单列显示更多数据 |
+| 详情面板 | 2 列 | 左右布局 |
+
+### 最大宽度
+
+**1400px** — 内容区域最大宽度，居中显示
+
+### 圆角
+
+| 层级 | 像素 | 用途 |
+|------|------|------|
+| sm | 4px | 徽章、标签 |
+| md | 8px | 按钮、输入框 |
+| lg | 12px | 卡片、面板 |
+| xl | 16px | 模态框、大型卡片 |
+
+---
+
+## 动效
+
+### 原则
+
+功能性动效 — 仅用于帮助理解的过渡，不做装饰
+
+### 时长
+
+| 层级 | 范围 | 用途 |
+|------|------|------|
+| Micro | 50-100ms | 悬停状态、按钮反馈 |
+| Short | 150-250ms | 面板切换、Tab 切换 |
+| Medium | 250-400ms | 模态框、抽屉 |
+
+### 缓动
+
+| 类型 | 曲线 | 用途 |
+|------|------|------|
+| Enter | ease-out | 元素进入 |
+| Exit | ease-in | 元素离开 |
+| Move | ease-in-out | 元素移动 |
+
+### 禁止
+
+- 无入场动画
+- 无交错列表
+- 无滚动驱动效果
+
+---
+
+## 组件
+
+### 按钮
+
+```css
+.btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background-color 100ms ease-out;
+}
+
+/* 变体 */
+.btn-primary { background: #22d3ee; color: #0c1220; }
+.btn-primary:hover { background: #06b6d4; }
+.btn-secondary { background: transparent; border: 1px solid #2a3a54; color: #f1f5f9; }
+.btn-secondary:hover { background: #1c2940; }
+.btn-danger { background: #ef4444; color: white; }
+```
+
+### 卡片
+
+```css
+.card {
+  background: #151d2e;
+  border: 1px solid #2a3a54;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.card-elevated {
+  background: #1c2940;
 }
 ```
 
-**NetworkDeviceClient 接口 (网络设备):**
-```go
-type NetworkDeviceClient interface {
-    ListDevices(ctx context.Context) ([]*GORMDevice, error)
-    GetDevice(ctx context.Context, deviceID string) (*GORMDevice, error)
-    GetDeviceInterfaces(ctx context.Context, deviceID string) ([]*NetworkInterface, error)
-    GetDeviceMetrics(ctx context.Context, deviceID string) (*NetworkMetrics, error)
-    BackupConfig(ctx context.Context, deviceID string) (string, error)
+### 输入框
+
+```css
+.input {
+  background: #151d2e;
+  border: 1px solid #2a3a54;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #f1f5f9;
+  font-size: 0.875rem;
+}
+
+.input:focus {
+  border-color: #22d3ee;
+  outline: none;
 }
 ```
 
-**MetricsCollector 接口 (指标采集):**
-```go
-type MetricsCollector interface {
-    CollectVMMetrics(ctx context.Context, vmID string) (*VMMetrics, error)
-    CollectHostMetrics(ctx context.Context, hostID string) (*HostMetrics, error)
-    CollectNetworkDeviceMetrics(ctx context.Context, deviceID string) (*NetworkMetrics, error)
+### 表格
+
+```css
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table-header {
+  background: #1c2940;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+}
+
+.table-row {
+  border-bottom: 1px solid #1e2d42;
+}
+
+.table-row:hover {
+  background: #1c2940;
+}
+
+/* 表格数据使用等宽字体 */
+.table-cell-mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
 }
 ```
+
+### 徽章
+
+```css
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* 状态徽章 */
+.badge-success { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.badge-warning { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.badge-error { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.badge-info { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+```
+
+### 模态框
+
+```css
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  background: #151d2e;
+  border: 1px solid #2a3a54;
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 500px;
+  width: 90%;
+}
+```
+
+---
+
+## 交互状态
+
+### 空状态
+
+每个空状态需要包含：
+- 图标或插图（简单线条风格）
+- 主文案（说明当前状态）
+- 副文案（解释原因）
+- 操作按钮（如果有）
+
+```html
+<div class="empty-state">
+  <svg class="empty-icon">...</svg>
+  <h3 class="empty-title">No devices found</h3>
+  <p class="empty-description">No devices match your current filters.</p>
+  <button class="btn-primary">Add Device</button>
+</div>
+```
+
+### 加载状态
+
+- 骨架屏：与实际布局一致，使用 `#1c2940` 闪烁
+- 按钮加载：按钮内显示 spinner，禁用交互
+- 表格加载：显示骨架行而非 spinner
+
+### 错误状态
+
+- Inline 错误：在表单字段下方显示红色文本
+- Toast 错误：3秒自动消失，带重试按钮
+- 全页错误：显示错误插图、操作按钮、错误ID
+
+### 成功状态
+
+- Toast 成功：绿色边框，3秒自动消失
+- 操作确认：对于不可逆操作，显示确认对话框
+
+---
+
+## 响应式断点
+
+| 断点 | 宽度 | 行为 |
+|------|------|------|
+| Desktop | ≥ 1024px | 完整布局（SideNav + Main） |
+| Tablet | 768-1023px | SideNav 收起为 64px 图标模式 |
+| Mobile | < 768px | SideNav 隐藏，汉堡菜单触发 |
+
+### 响应式行为
+
+- SideNav 收起时只显示图标，不显示文字
+- DataTable 在窄屏下水平滚动
+- 统计卡片在移动端变为单列
+- 表单字段在移动端全宽
+
+---
+
+## 无障碍
+
+- 键盘导航：所有交互元素可 Tab 访问
+- ARIA 标记：模态框、折叠面板、标签页
+- 对比度：文本对背景至少 4.5:1
+- 触摸目标：最小 44x44px
+
+---
+
+## 设计决策记录
+
+| 日期 | 决策 | 原因 |
+|------|------|------|
+| 2026-04-29 | 创建新的设计系统 | 旧的 DESIGN.md 已废弃 |
+
+---
+
+**文档状态:** Active
