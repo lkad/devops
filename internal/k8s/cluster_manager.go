@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -144,6 +145,62 @@ func (m *ClusterManager) getKubeconfigFromDB(clusterName string) (string, error)
 		return "", fmt.Errorf("cluster not found: %w", err)
 	}
 	return cluster.Kubeconfig, nil
+}
+
+// ImportExistingK3dClusters imports existing k3d clusters from ~/.kube/config-* files into DB
+// This is called during startup to migrate from file-based to database-backed registry
+func (m *ClusterManager) ImportExistingK3dClusters() error {
+	if m.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	// Run k3d cluster list to get existing clusters
+	cmd := exec.Command(m.k3dPath, "cluster", "list")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to list k3d clusters: %w", err)
+	}
+
+	lines := parseK3dList(string(output))
+	imported := 0
+	for _, line := range lines {
+		clusterName := line["name"]
+		if clusterName == "" {
+			continue
+		}
+
+		// Check if cluster already exists in DB
+		var existing GORMCluster
+		if err := m.db.Where("name = ?", clusterName).First(&existing).Error; err == nil {
+			// Cluster already in DB, skip
+			continue
+		}
+
+		// Export kubeconfig for this cluster
+		kubeconfigCmd := exec.Command(m.k3dPath, "kubeconfig", "get", clusterName)
+		kubeconfigOutput, err := kubeconfigCmd.Output()
+		if err != nil {
+			log.Printf("Failed to export kubeconfig for cluster %s: %v", clusterName, err)
+			continue
+		}
+
+		// Register cluster in DB
+		cluster := &GORMCluster{
+			Name:       clusterName,
+			Type:       ClusterTypeK3d,
+			Env:        ClusterEnvDev,
+			Kubeconfig: string(kubeconfigOutput),
+			Status:     ClusterStatusUnknown,
+		}
+		if err := m.db.Create(cluster).Error; err != nil {
+			log.Printf("Failed to register cluster %s in DB: %v", clusterName, err)
+			continue
+		}
+		imported++
+	}
+	if imported > 0 {
+		log.Printf("Imported %d existing k3d clusters into database", imported)
+	}
+	return nil
 }
 
 // getClusterByName retrieves a cluster from database by name

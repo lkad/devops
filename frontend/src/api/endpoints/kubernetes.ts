@@ -1,6 +1,7 @@
 import { apiClient } from '../client'
 
 export interface K8sCluster {
+  id?: number
   name: string
   type: string
   status: string
@@ -10,6 +11,7 @@ export interface K8sCluster {
   pods?: number
   namespaces?: number
   created_at?: string
+  kubeconfig?: string
 }
 
 export interface K8sNode {
@@ -63,6 +65,8 @@ export interface K8sMetrics {
 export interface CreateClusterRequest {
   name: string
   type: string
+  environment?: string
+  kubeconfig: string
   version?: string
 }
 

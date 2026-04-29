@@ -89,6 +89,13 @@ func main() {
 	pipelineMgr := pipeline.NewManager()
 	k8sMgr := k8s.NewClusterManager(db)
 	k8s.SetGlobalClusterManager(k8sMgr)
+
+	// Import existing k3d clusters on startup (migrate from file-based to DB)
+	if db != nil {
+		if err := k8sMgr.ImportExistingK3dClusters(); err != nil {
+			log.Printf("Warning: Failed to import existing k3d clusters: %v", err)
+		}
+	}
 	discoveryMgr := discovery.NewManager()
 	physicalhostMgr := physicalhost.NewManager()
 

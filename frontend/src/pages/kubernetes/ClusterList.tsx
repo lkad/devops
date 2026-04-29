@@ -48,8 +48,9 @@ export function ClusterList() {
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [formData, setFormData] = useState<CreateClusterRequest>({
     name: '',
-    type: 'dev',
-    version: '1.28',
+    type: 'k3d',
+    environment: 'dev',
+    kubeconfig: '',
   })
 
   const { data, isLoading } = useQuery({
@@ -87,7 +88,7 @@ export function ClusterList() {
   }
 
   const openForm = () => {
-    setFormData({ name: '', type: 'dev', version: '1.28' })
+    setFormData({ name: '', type: 'k3d', environment: 'dev', kubeconfig: '' })
     setIsFormOpen(true)
   }
 
@@ -186,14 +187,14 @@ export function ClusterList() {
       <Modal
         isOpen={isFormOpen}
         onClose={closeForm}
-        title="Create Cluster"
+        title="Register Cluster"
         footer={
           <>
             <Button variant="secondary" onClick={closeForm} disabled={createMutation.isPending}>
               Cancel
             </Button>
             <Button variant="primary" onClick={handleSubmit} loading={createMutation.isPending}>
-              Create
+              Register
             </Button>
           </>
         }
@@ -206,9 +207,19 @@ export function ClusterList() {
             placeholder="my-cluster"
           />
           <Select
-            label="Environment"
+            label="Cluster Type"
             value={formData.type}
             onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+            options={[
+              { value: 'k3d', label: 'k3d (Local Dev)' },
+              { value: 'kind', label: 'kind (Local Dev)' },
+              { value: 'standard', label: 'Standard (Production)' },
+            ]}
+          />
+          <Select
+            label="Environment"
+            value={formData.environment || 'dev'}
+            onChange={(e) => setFormData({ ...formData, environment: e.target.value })}
             options={[
               { value: 'dev', label: 'Development' },
               { value: 'test', label: 'Testing' },
@@ -216,12 +227,26 @@ export function ClusterList() {
               { value: 'prod', label: 'Production' },
             ]}
           />
-          <Input
-            label="Kubernetes Version"
-            value={formData.version || ''}
-            onChange={(e) => setFormData({ ...formData, version: e.target.value })}
-            placeholder="1.28"
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            <label style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>Kubeconfig</label>
+            <textarea
+              value={formData.kubeconfig}
+              onChange={(e) => setFormData({ ...formData, kubeconfig: e.target.value })}
+              placeholder="Paste kubeconfig content here..."
+              rows={10}
+              style={{
+                width: '100%',
+                padding: 'var(--space-3)',
+                fontFamily: 'monospace',
+                fontSize: 'var(--text-sm)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--bg-primary)',
+                color: 'var(--text-primary)',
+                resize: 'vertical',
+              }}
+            />
+          </div>
         </div>
       </Modal>
     </div>
