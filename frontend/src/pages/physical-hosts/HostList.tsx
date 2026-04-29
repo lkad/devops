@@ -1,48 +1,45 @@
-import { useQuery } from '@tanstack/react-query'
-import { Server, Activity } from 'lucide-react'
-import { apiClient } from '@/api/client'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Server, Activity, Plus } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-
-interface PhysicalHost {
-  id: string
-  hostname: string
-  ip: string
-  state: string
-  lastAgentUpdate?: string
-  labels?: Record<string, string>
-}
-
-interface HostListResponse {
-  hosts: PhysicalHost[]
-  total: number
-}
+import { HostForm } from './HostForm'
+import { physicalHostsApi, type CreatePhysicalHostRequest } from '@/api/endpoints/physicalHosts'
 
 const stateVariant = (state: string): 'success' | 'warning' | 'error' | 'info' | 'default' => {
   switch (state.toLowerCase()) {
     case 'online':
-    case 'active':
       return 'success'
-    case 'offline':
-    case 'inactive':
-      return 'error'
-    case 'pending':
+    case 'monitoring_issue':
       return 'warning'
+    case 'offline':
+      return 'error'
     default:
       return 'default'
   }
 }
 
-const formatLastUpdate = (lastUpdate?: string) => {
-  if (!lastUpdate) return 'Never'
-  const date = new Date(lastUpdate)
+const formatLastHeartbeat = (lastHeartbeat?: string) => {
+  if (!lastHeartbeat) return 'Never'
+  const date = new Date(lastHeartbeat)
   return date.toLocaleString()
 }
 
 export function HostList() {
+  const [isFormOpen, setIsFormOpen] = useState(false)
+  const queryClient = useQueryClient()
+
   const { data, isLoading } = useQuery({
     queryKey: ['physical-hosts'],
-    queryFn: () => apiClient.get<HostListResponse>('/api/physical-hosts'),
+    queryFn: physicalHostsApi.listHosts,
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (data: CreatePhysicalHostRequest) => physicalHostsApi.createHost(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['physical-hosts'] })
+      setIsFormOpen(false)
+    },
   })
 
   const hosts = data?.hosts ?? []
@@ -51,6 +48,13 @@ export function HostList() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-text">Physical Hosts</h1>
+        <button
+          onClick={() => setIsFormOpen(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          Add Host
+        </button>
       </div>
 
       {isLoading ? (
@@ -60,6 +64,7 @@ export function HostList() {
           <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
             <Server className="w-12 h-12 mb-4 opacity-50" />
             <p>No physical hosts found</p>
+            <p className="text-sm mt-1">Click "Add Host" to register your first host</p>
           </div>
         </Card>
       ) : (
@@ -73,21 +78,28 @@ export function HostList() {
                   </div>
                   <div>
                     <p className="font-medium text-text">{host.hostname}</p>
-                    <p className="text-sm text-text-secondary">{host.ip}</p>
+                    <p className="text-sm text-text-secondary">{host.ip}:{host.port}</p>
                   </div>
                 </div>
                 <Badge variant={stateVariant(host.state)}>
-                  {host.state}
+                  {host.state.replace('_', ' ')}
                 </Badge>
               </div>
               <div className="flex items-center gap-2 text-sm text-text-secondary">
                 <Activity className="w-4 h-4" />
-                <span>Last update: {formatLastUpdate(host.lastAgentUpdate)}</span>
+                <span>Last heartbeat: {formatLastHeartbeat(host.lastHeartbeat)}</span>
               </div>
             </Card>
           ))}
         </div>
       )}
+
+      <HostForm
+        isOpen={isFormOpen}
+        onClose={() => setIsFormOpen(false)}
+        onSubmit={createMutation.mutate}
+        isLoading={createMutation.isPending}
+      />
     </div>
   )
 }

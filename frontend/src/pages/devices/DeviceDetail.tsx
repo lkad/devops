@@ -1,14 +1,21 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Wrench, Pause, Trash2 } from 'lucide-react'
+import { ArrowLeft, Wrench, Pause, Trash2, Pencil, FolderOpen } from 'lucide-react'
 import { devicesApi } from '@/api/endpoints/devices'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { DeviceForm } from './DeviceForm'
 import { useToast } from '@/components/ui/Toast'
 import styles from './DeviceDetail.module.css'
+
+interface LinkedProject {
+  id: string
+  name: string
+  type: 'frontend' | 'backend'
+}
 
 const statusVariant = (status: string): 'success' | 'warning' | 'error' | 'info' | 'default' => {
   switch (status.toLowerCase()) {
@@ -39,12 +46,32 @@ export function DeviceDetail() {
   const [showSuspendDialog, setShowSuspendDialog] = useState(false)
   const [showRetireDialog, setShowRetireDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
 
   const { data: device, isLoading } = useQuery({
     queryKey: ['device', id],
     queryFn: () => devicesApi.get(id!),
     enabled: !!id,
   })
+
+  // Fetch linked projects for this device
+  const { data: linkedProjectsData } = useQuery({
+    queryKey: ['device', id, 'projects'],
+    queryFn: async () => {
+      // In production, this would be an API call like:
+      // return apiClient.get<LinkedProject[]>(`/api/devices/${id}/projects`)
+      // For now, return mock data
+      return {
+        data: [
+          { id: 'proj-1', name: 'Web Frontend', type: 'frontend' as const },
+          { id: 'proj-2', name: 'API Backend', type: 'backend' as const },
+        ]
+      }
+    },
+    enabled: !!id,
+  })
+
+  const linkedProjects: LinkedProject[] = linkedProjectsData?.data ?? []
 
   const updateMutation = useMutation({
     mutationFn: (data: { status?: string }) => devicesApi.update(id!, data),
@@ -88,6 +115,10 @@ export function DeviceDetail() {
         </button>
         <h1 className={styles.title}>{device.name}</h1>
         <div className={styles.actions}>
+          <Button variant="secondary" onClick={() => setShowEditModal(true)}>
+            <Pencil size={16} />
+            Edit
+          </Button>
           <Button variant="secondary" onClick={() => setShowMaintenanceDialog(true)}>
             <Wrench size={16} />
             Maintenance
@@ -132,6 +163,31 @@ export function DeviceDetail() {
               <span className={styles.detailValue}>{formatDate(device.registeredAt)}</span>
             </div>
           </div>
+        </Card>
+
+        <Card className={styles.linkedSection}>
+          <div className={styles.linkedHeader}>
+            <FolderOpen size={18} className={styles.linkedIcon} />
+            <h3 className={styles.linkedTitle}>Linked Projects</h3>
+          </div>
+          {linkedProjects.length === 0 ? (
+            <p className={styles.emptyText}>No projects linked to this device</p>
+          ) : (
+            <div className={styles.linkedList}>
+              {linkedProjects.map((project) => (
+                <button
+                  key={project.id}
+                  className={styles.linkedItem}
+                  onClick={() => navigate(`/projects/${project.id}`)}
+                >
+                  <span className={styles.linkedItemName}>{project.name}</span>
+                  <Badge variant={project.type === 'frontend' ? 'info' : 'default'}>
+                    {project.type}
+                  </Badge>
+                </button>
+              ))}
+            </div>
+          )}
         </Card>
 
         <Card className={styles.dangerZone}>
@@ -194,6 +250,12 @@ export function DeviceDetail() {
         message="This will permanently delete the device. This action cannot be undone. Are you sure?"
         confirmLabel="Delete"
         danger
+      />
+
+      <DeviceForm
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        device={device}
       />
     </div>
   )

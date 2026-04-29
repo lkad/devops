@@ -1,0 +1,62 @@
+.modal {
+  max-width: 560px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.label {
+  font-size: var(--text-small);
+  font-weight: var(--font-medium);
+  color: var(--color-text-secondary);
+}
+
+.stagesGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.stageTag {
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-small);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-micro);
+  text-transform: capitalize;
+}
+
+.stageTag:hover {
+  border-color: var(--color-primary);
+  color: var(--color-text-primary);
+}
+
+.stageTagSelected {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+.stageTagSelected:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+.error {
+  font-size: var(--text-small);
+  color: var(--color-error);
+}

@@ -34,6 +34,38 @@ export interface K8sNamespace {
   labels?: Record<string, string>
 }
 
+export interface K8sHealth {
+  status: string
+  version?: string
+  components?: {
+    name: string
+    status: string
+  }[]
+}
+
+export interface K8sMetrics {
+  cpu: {
+    used: number
+    total: number
+    percentage: number
+  }
+  memory: {
+    used: number
+    total: number
+    percentage: number
+  }
+  pods: {
+    running: number
+    total: number
+  }
+}
+
+export interface CreateClusterRequest {
+  name: string
+  type: string
+  version?: string
+}
+
 export interface K8sApiResponse<T> {
   data: T
   pagination?: {
@@ -48,8 +80,20 @@ export const kubernetesApi = {
   listClusters: () =>
     apiClient.get<K8sApiResponse<K8sCluster[]>>('/api/k8s/clusters'),
 
+  createCluster: (data: CreateClusterRequest) =>
+    apiClient.post<K8sCluster>('/api/k8s/clusters', data),
+
+  deleteCluster: (name: string) =>
+    apiClient.delete(`/api/k8s/clusters/${name}`),
+
   getCluster: (name: string) =>
     apiClient.get<K8sApiResponse<K8sCluster>>(`/api/k8s/clusters/${name}`),
+
+  getClusterHealth: (name: string) =>
+    apiClient.get<K8sHealth>(`/api/k8s/clusters/${name}/health`),
+
+  getClusterMetrics: (name: string) =>
+    apiClient.get<K8sMetrics>(`/api/k8s/clusters/${name}/metrics`),
 
   getNodes: (clusterName: string) =>
     apiClient.get<K8sApiResponse<K8sNode[]>>(`/api/k8s/clusters/${clusterName}/nodes`),

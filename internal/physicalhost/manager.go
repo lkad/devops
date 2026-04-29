@@ -11,7 +11,7 @@ import (
 
 	"github.com/devops-toolkit/internal/apierror"
 	"github.com/devops-toolkit/internal/pagination"
-	"github.com/gorilla/mux"
+	"github.com/devops-toolkit/internal/ginadapter"
 	"golang.org/x/crypto/ssh"
 	"github.com/google/uuid"
 )
@@ -753,7 +753,7 @@ func (m *Manager) CreateHostHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) GetHostHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	host := m.GetHost(id)
 	if host == nil {
 		apierror.NotFound(w, "host not found")
@@ -764,7 +764,7 @@ func (m *Manager) GetHostHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) DeleteHostHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	if m.DeleteHost(id) {
 		w.WriteHeader(http.StatusNoContent)
 	} else {
@@ -852,7 +852,7 @@ func parseServiceList(output []byte) []*ServiceStatus {
 
 // ListServicesHTTP handles GET /api/physical-hosts/:id/services
 func (m *Manager) ListServicesHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 
 	// Check if host exists
 	host := m.GetHost(id)
@@ -929,7 +929,7 @@ func (m *Manager) pushConfigViaSSH(client *ssh.Client, path, content string) err
 
 // PushConfigHTTP handles POST /api/physical-hosts/:id/config
 func (m *Manager) PushConfigHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 
 	// Check if host exists
 	host := m.GetHost(id)
@@ -969,7 +969,7 @@ func (m *Manager) PushConfigHTTP(w http.ResponseWriter, r *http.Request) {
 // GetMetricsHTTP handles GET /api/physical-hosts/:id/metrics
 // Returns metrics with dataStatus indicating freshness (fresh, stale, unavailable)
 func (m *Manager) GetMetricsHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 
 	// Check if host exists
 	host := m.GetHost(id)
@@ -997,7 +997,7 @@ func (m *Manager) GetMetricsHTTP(w http.ResponseWriter, r *http.Request) {
 // RefreshMetricsHTTP handles POST /api/physical-hosts/:id/metrics/refresh
 // Forces a fresh metrics collection via SSH
 func (m *Manager) RefreshMetricsHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 
 	// Check if host exists
 	host := m.GetHost(id)
@@ -1027,7 +1027,7 @@ func (m *Manager) RefreshMetricsHTTP(w http.ResponseWriter, r *http.Request) {
 // HealthCheckHTTP handles GET /api/physical-hosts/:id/health
 // Performs SSH health check without querying DB
 func (m *Manager) HealthCheckHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 
 	// Check if host exists
 	host := m.GetHost(id)

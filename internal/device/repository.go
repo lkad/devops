@@ -185,10 +185,8 @@ func (r *Repository) toGORMDevice(d *Device) *GORMDevice {
 		RegisteredAt:   d.RegisteredAt,
 		LastSeen:       d.LastSeen,
 		LastConfigSync: d.LastConfigSync,
-		Model: gorm.Model{
-			CreatedAt: d.CreatedAt,
-			UpdatedAt: d.UpdatedAt,
-		},
+		CreatedAt:      d.CreatedAt,
+		UpdatedAt:      d.UpdatedAt,
 	}
 }
 

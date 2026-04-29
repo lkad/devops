@@ -27,9 +27,9 @@ export function PipelineRun() {
   const [isConnected, setIsConnected] = useState(false)
 
   const { data: run, isLoading } = useQuery({
-    queryKey: ['pipeline-run', runId],
-    queryFn: () => pipelinesApi.getRun(runId!),
-    enabled: !!runId,
+    queryKey: ['pipeline-run', pipelineId, runId],
+    queryFn: () => pipelinesApi.getRun(pipelineId!, runId!),
+    enabled: !!pipelineId && !!runId,
     refetchInterval: (query) => {
       const run = query.state.data as PipelineRunType | undefined
       return run?.status === 'running' || run?.status === 'pending' ? 2000 : false
@@ -63,7 +63,7 @@ export function PipelineRun() {
   }, [logs])
 
   const cancelMutation = useMutation({
-    mutationFn: () => pipelinesApi.cancelRun(runId!),
+    mutationFn: () => pipelinesApi.cancelRun(pipelineId!, runId!),
     onSuccess: () => {
       navigate(`/pipelines/${pipelineId}`)
     },

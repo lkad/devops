@@ -3,13 +3,10 @@ import { apiClient } from '../client'
 export type AlertChannelType = 'slack' | 'webhook' | 'email' | 'log'
 
 export interface AlertChannel {
-  id: string
   name: string
   type: AlertChannelType
-  config: Record<string, unknown>
+  config: Record<string, string>
   enabled: boolean
-  createdAt: string
-  updatedAt: string
 }
 
 export interface AlertHistory {
@@ -23,42 +20,42 @@ export interface AlertHistory {
   error?: string
 }
 
-export interface CreateChannelRequest {
-  name: string
-  type: AlertChannelType
-  config: Record<string, unknown>
-  enabled?: boolean
-}
-
 export interface ChannelListResponse {
   channels: AlertChannel[]
-  total: number
 }
 
 export interface AlertHistoryResponse {
   history: AlertHistory[]
-  total: number
+  pagination?: {
+    total: number
+    limit: number
+    offset: number
+    has_more: boolean
+  }
 }
 
 export const alertsApi = {
   listChannels: () =>
-    apiClient.get<ChannelListResponse>('/api/v1/alerts/channels'),
+    apiClient.get<ChannelListResponse>('/api/alerts/channels'),
 
-  createChannel: (data: CreateChannelRequest) =>
-    apiClient.post<AlertChannel>('/api/v1/alerts/channels', data),
+  createChannel: (data: Omit<AlertChannel, 'id' | 'createdAt'>) =>
+    apiClient.post<AlertChannel>('/api/alerts/channels', data),
 
-  deleteChannel: (id: string) =>
-    apiClient.delete<void>(`/api/v1/alerts/channels/${id}`),
+  updateChannel: (name: string, data: Partial<AlertChannel>) =>
+    apiClient.put<AlertChannel>(`/api/alerts/channels/${name}`, data),
 
-  trigger: (channelId: string, message: string) =>
-    apiClient.post<void>('/api/v1/alerts/trigger', { channelId, message }),
+  deleteChannel: (name: string) =>
+    apiClient.delete(`/api/alerts/channels/${name}`),
 
-  history: (params?: { channelId?: string; limit?: number }) => {
-    const stringParams: Record<string, string> = {}
-    if (params) {
-      if (params.channelId) stringParams.channelId = params.channelId
-      if (params.limit !== undefined) stringParams.limit = String(params.limit)
-    }
-    return apiClient.get<AlertHistoryResponse>('/api/v1/alerts/history', { params: stringParams })
+  testChannel: (name: string) =>
+    apiClient.post(`/api/alerts/channels/${name}/test`, {}),
+
+  getHistory: (params?: { limit?: number; offset?: number }) => {
+    const searchParams: Record<string, string> = {}
+    if (params?.limit) searchParams.limit = params.limit.toString()
+    if (params?.offset) searchParams.offset = params.offset.toString()
+    return apiClient.get<AlertHistoryResponse>('/api/alerts/history', {
+      params: Object.keys(searchParams).length > 0 ? searchParams : undefined,
+    })
   },
 }

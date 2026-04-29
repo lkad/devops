@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { ArrowLeft, Play, Check, X, Loader } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, Play, Check, X, Loader, Pencil, Trash2, FolderOpen } from 'lucide-react'
 import { pipelinesApi } from '@/api/endpoints/pipelines'
 import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
 import { useToast } from '@/components/ui/Toast'
+import { PipelineForm } from './PipelineForm'
+import type { Pipeline } from '@/api/endpoints/pipelines'
 import styles from './PipelineDetail.module.css'
 
 const formatDate = (date?: string): string => {
@@ -24,8 +27,11 @@ export function PipelineDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { addToast } = useToast()
+  const queryClient = useQueryClient()
 
   const [stages, setStages] = useState<string[]>([])
+  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false)
 
   const { data: pipeline, isLoading } = useQuery({
     queryKey: ['pipeline', id],
@@ -50,11 +56,26 @@ export function PipelineDetail() {
     },
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: () => pipelinesApi.delete(id!),
+    onSuccess: () => {
+      addToast({ type: 'success', message: 'Pipeline deleted' })
+      navigate('/pipelines')
+    },
+    onError: () => {
+      addToast({ type: 'error', message: 'Failed to delete pipeline' })
+    },
+  })
+
   useEffect(() => {
     if (pipeline?.stages) {
       setStages(pipeline.stages)
     }
   }, [pipeline])
+
+  const handleFormSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ['pipeline', id] })
+  }
 
   if (isLoading) {
     return <div className={styles.container}>Loading...</div>
@@ -64,6 +85,7 @@ export function PipelineDetail() {
     return <div className={styles.container}>Pipeline not found</div>
   }
 
+  const typedPipeline = pipeline as Pipeline
   const runs: PipelineRun[] = runsData?.runs ?? []
 
   const getStageStatus = (runs: PipelineRun[]) => {
@@ -94,18 +116,39 @@ export function PipelineDetail() {
         <button className={styles.backButton} onClick={() => navigate('/pipelines')}>
           <ArrowLeft size={20} />
         </button>
-        <h1 className={styles.title}>{pipeline.name}</h1>
+        <h1 className={styles.title}>{typedPipeline.name}</h1>
         <div className={styles.actions}>
+          <Button variant="ghost" size="sm" onClick={() => setIsFormOpen(true)}>
+            <Pencil size={16} />
+            Edit
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setIsDeleteConfirmOpen(true)}>
+            <Trash2 size={16} />
+            Delete
+          </Button>
           <Button
             variant="primary"
             onClick={() => executeMutation.mutate()}
-            disabled={pipeline.status === 'running'}
           >
             <Play size={16} />
             Execute
           </Button>
         </div>
       </div>
+
+      {/* Project Link Section */}
+      <Card className={styles.projectCard}>
+        <div className={styles.projectContent}>
+          <FolderOpen size={18} className={styles.projectIcon} />
+          <span className={styles.projectLabel}>Project:</span>
+          <button
+            className={styles.projectLink}
+            onClick={() => navigate('/projects/proj-1')}
+          >
+            Web Frontend
+          </button>
+        </div>
+      </Card>
 
       <div className={styles.stagesSection}>
         <h2 className={styles.sectionTitle}>Stages</h2>
@@ -165,6 +208,32 @@ export function PipelineDetail() {
           </table>
         )}
       </div>
+
+      <PipelineForm
+        isOpen={isFormOpen}
+        onClose={() => setIsFormOpen(false)}
+        onSuccess={handleFormSuccess}
+        pipeline={typedPipeline}
+      />
+
+      {isDeleteConfirmOpen && (
+        <div className={styles.confirmOverlay} onClick={() => setIsDeleteConfirmOpen(false)}>
+          <div className={styles.confirmDialog} onClick={(e) => e.stopPropagation()}>
+            <h3 className={styles.confirmTitle}>Delete Pipeline</h3>
+            <p className={styles.confirmMessage}>
+              Are you sure you want to delete "{typedPipeline.name}"? This action cannot be undone.
+            </p>
+            <div className={styles.confirmActions}>
+              <Button variant="ghost" onClick={() => setIsDeleteConfirmOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={() => deleteMutation.mutate()} loading={deleteMutation.isPending}>
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

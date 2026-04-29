@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/devops-toolkit/internal/apierror"
-	"github.com/gorilla/mux"
+	"github.com/devops-toolkit/internal/ginadapter"
 	"gorm.io/gorm"
 )
 
@@ -129,7 +129,7 @@ func (m *Manager) CreateProjectTypeHTTP(w http.ResponseWriter, r *http.Request) 
 }
 
 func (m *Manager) UpdateProjectTypeHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	existing, err := m.repo.GetProjectType(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -166,7 +166,7 @@ func (m *Manager) UpdateProjectTypeHTTP(w http.ResponseWriter, r *http.Request) 
 }
 
 func (m *Manager) DeleteProjectTypeHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	if id == "frontend" || id == "backend" {
 		apierror.ValidationError(w, "cannot delete default project types")
 		return
@@ -224,7 +224,7 @@ func (m *Manager) CreateBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 func (m *Manager) GetBusinessLineHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	bl, err := m.repo.GetBusinessLineWithSystems(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -239,7 +239,7 @@ func (m *Manager) GetBusinessLineHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) UpdateBusinessLineHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	bl, err := m.repo.GetBusinessLine(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -285,7 +285,7 @@ func (m *Manager) UpdateBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 func (m *Manager) DeleteBusinessLineHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	bl, err := m.repo.GetBusinessLine(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -312,7 +312,7 @@ func (m *Manager) DeleteBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 
 // System handlers
 func (m *Manager) ListSystemsHTTP(w http.ResponseWriter, r *http.Request) {
-	blID := mux.Vars(r)["id"]
+	blID := ginfadapter.Vars(r)["id"]
 	if blID != "" {
 		systems, err := m.repo.ListSystemsByBusinessLine(blID)
 		if err != nil {
@@ -335,7 +335,7 @@ func (m *Manager) ListSystemsHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) CreateSystemHTTP(w http.ResponseWriter, r *http.Request) {
-	blID := mux.Vars(r)["id"]
+	blID := ginfadapter.Vars(r)["id"]
 	if blID == "" {
 		apierror.ValidationError(w, "business line ID is required")
 		return
@@ -381,7 +381,7 @@ func (m *Manager) CreateSystemHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) GetSystemHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	sys, err := m.repo.GetSystemWithProjects(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -396,7 +396,7 @@ func (m *Manager) GetSystemHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) UpdateSystemHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	sys, err := m.repo.GetSystem(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -442,7 +442,7 @@ func (m *Manager) UpdateSystemHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) DeleteSystemHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	sys, err := m.repo.GetSystem(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -469,7 +469,7 @@ func (m *Manager) DeleteSystemHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Project handlers
 func (m *Manager) ListProjectsHTTP(w http.ResponseWriter, r *http.Request) {
-	sysID := mux.Vars(r)["id"]
+	sysID := ginfadapter.Vars(r)["id"]
 	if sysID != "" {
 		projects, err := m.repo.ListProjectsBySystem(sysID)
 		if err != nil {
@@ -492,7 +492,7 @@ func (m *Manager) ListProjectsHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) CreateProjectHTTP(w http.ResponseWriter, r *http.Request) {
-	sysID := mux.Vars(r)["id"]
+	sysID := ginfadapter.Vars(r)["id"]
 	if sysID == "" {
 		apierror.ValidationError(w, "system ID is required")
 		return
@@ -543,7 +543,7 @@ func (m *Manager) CreateProjectHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) GetProjectHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	proj, err := m.repo.GetProjectWithResources(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -558,7 +558,7 @@ func (m *Manager) GetProjectHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) UpdateProjectHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	proj, err := m.repo.GetProject(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -610,7 +610,7 @@ func (m *Manager) UpdateProjectHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) DeleteProjectHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	proj, err := m.repo.GetProject(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -637,7 +637,7 @@ func (m *Manager) DeleteProjectHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Resource linking handlers
 func (m *Manager) ListProjectResourcesHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	resources, err := m.repo.ListProjectResources(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -648,7 +648,7 @@ func (m *Manager) ListProjectResourcesHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 func (m *Manager) LinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	var input struct {
 		ResourceType ResourceType `json:"resource_type"`
 		ResourceID   string       `json:"resource_id"`
@@ -698,8 +698,8 @@ func (m *Manager) LinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) UnlinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
-	resourceID := mux.Vars(r)["resource_id"]
+	id := ginfadapter.Vars(r)["id"]
+	resourceID := ginfadapter.Vars(r)["resource_id"]
 	pr, err := m.repo.GetProjectResource(id, resourceID)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -735,7 +735,7 @@ func (m *Manager) UnlinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Permission handlers
 func (m *Manager) ListProjectPermissionsHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	perms, err := m.repo.ListPermissionsByProject(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -746,7 +746,7 @@ func (m *Manager) ListProjectPermissionsHTTP(w http.ResponseWriter, r *http.Requ
 }
 
 func (m *Manager) GrantPermissionHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	var input struct {
 		Level          string   `json:"level"`
 		Role           Role     `json:"role"`
@@ -808,7 +808,7 @@ func (m *Manager) GrantPermissionHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) RevokePermissionHTTP(w http.ResponseWriter, r *http.Request) {
-	permID := mux.Vars(r)["perm_id"]
+	permID := ginfadapter.Vars(r)["perm_id"]
 
 	// Get permission details before deletion for audit log
 	perms, err := m.repo.ListPermissionsBySubject("")

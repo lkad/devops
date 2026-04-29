@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { DataTable } from '@/components/ui/DataTable'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { DeviceForm } from './DeviceForm'
 import styles from './DeviceList.module.css'
 
 const statusVariant = (status: string): 'success' | 'warning' | 'error' | 'info' | 'default' => {
@@ -44,13 +45,14 @@ export function DeviceList() {
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
+  const [showCreateModal, setShowCreateModal] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['devices'],
     queryFn: () => devicesApi.list(),
   })
 
-  const devices: DeviceRow[] = data?.devices ?? []
+  const devices: DeviceRow[] = data?.data ?? []
 
   const deviceTypes = useMemo(() => {
     const types = new Set(devices.map(d => d.type))
@@ -115,7 +117,7 @@ export function DeviceList() {
     <div className={styles.container}>
       <div className={styles.header}>
         <h1 className={styles.title}>Devices</h1>
-        <Button variant="primary" onClick={() => navigate('/devices/new')}>
+        <Button variant="primary" onClick={() => setShowCreateModal(true)}>
           <Plus size={18} />
           Add Device
         </Button>
@@ -152,7 +154,7 @@ export function DeviceList() {
           description={searchQuery || typeFilter ? "Try adjusting your filters" : "Get started by adding your first device"}
           action={{
             label: "Add Device",
-            onClick: () => navigate('/devices/new')
+            onClick: () => setShowCreateModal(true)
           }}
         />
       ) : (
@@ -165,6 +167,11 @@ export function DeviceList() {
           />
         </div>
       )}
+
+      <DeviceForm
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+      />
     </div>
   )
 }

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // DeviceType constants
@@ -212,26 +211,29 @@ type InterfaceStats struct {
 
 // DeviceStateTransition records state changes
 type DeviceStateTransition struct {
-	gorm.Model
+	ID          uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	DeviceID    uuid.UUID `gorm:"type:uuid;not null" json:"device_id"`
 	FromState   string    `gorm:"type:text" json:"from_state"`
 	ToState     string    `gorm:"type:text;not null" json:"to_state"`
 	TriggeredBy string    `gorm:"type:text" json:"triggered_by"`
 	Reason      string    `gorm:"type:text" json:"reason,omitempty"`
+	CreatedAt   time.Time `gorm:"type:timestamptz" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"type:timestamptz" json:"updated_at"`
 }
 
 // DeviceGroup for grouping devices
 type DeviceGroup struct {
-	gorm.Model
-	Name     string     `gorm:"type:varchar(255);not null" json:"name"`
-	ParentID *uuid.UUID `gorm:"type:uuid" json:"parent_id,omitempty"`
-	Type     string     `gorm:"type:varchar(50)" json:"type"`
-	Criteria JSONMap    `gorm:"type:jsonb" json:"criteria"`
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	Name      string    `gorm:"type:varchar(255);not null" json:"name"`
+	ParentID  *uuid.UUID `gorm:"type:uuid" json:"parent_id,omitempty"`
+	Type      string    `gorm:"type:varchar(50)" json:"type"`
+	Criteria  JSONMap   `gorm:"type:jsonb" json:"criteria"`
+	CreatedAt time.Time `gorm:"type:timestamptz" json:"created_at"`
+	UpdatedAt time.Time `gorm:"type:timestamptz" json:"updated_at"`
 }
 
 // GORMDevice is the GORM model for Device
 type GORMDevice struct {
-	gorm.Model
 	ID             string     `gorm:"type:text;primaryKey" json:"id"`
 	Type           DeviceType `gorm:"type:text;not null" json:"type"`
 	Name           string     `gorm:"type:varchar(255);not null" json:"name"`
@@ -246,6 +248,8 @@ type GORMDevice struct {
 	RegisteredAt   *time.Time `gorm:"type:timestamp" json:"registered_at,omitempty"`
 	LastSeen       *time.Time `gorm:"type:timestamp" json:"last_seen,omitempty"`
 	LastConfigSync *time.Time `gorm:"type:timestamp" json:"last_config_sync,omitempty"`
+	CreatedAt      time.Time  `gorm:"type:timestamptz" json:"created_at"`
+	UpdatedAt      time.Time  `gorm:"type:timestamptz" json:"updated_at"`
 }
 
 func (GORMDevice) TableName() string {

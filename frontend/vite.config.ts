@@ -21,5 +21,8 @@ export default defineConfig({
         ws: true,
       },
     },
+    fs: {
+      strict: false,
+    },
   },
 });

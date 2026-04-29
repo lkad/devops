@@ -11,7 +11,7 @@ import (
 	"github.com/devops-toolkit/internal/apierror"
 	"github.com/devops-toolkit/internal/pagination"
 	"github.com/google/uuid"
-	"github.com/gorilla/mux"
+	"github.com/devops-toolkit/internal/ginadapter"
 	"gorm.io/gorm"
 )
 
@@ -352,7 +352,7 @@ func (m *Manager) CreateDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) GetDeviceHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	device, err := m.GetDevice(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -367,7 +367,7 @@ func (m *Manager) GetDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) UpdateDeviceHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	var updates map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		apierror.ValidationError(w, err.Error())
@@ -384,7 +384,7 @@ func (m *Manager) UpdateDeviceHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) DeleteDeviceHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	if err := m.DeleteDevice(id); err != nil {
 		apierror.InternalErrorFromErr(w, err)
 		return
@@ -411,7 +411,7 @@ func (m *Manager) SearchDevicesHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) TransitionStateHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	var body struct {
 		State       string `json:"state"`
 		TriggeredBy string `json:"triggered_by"`
@@ -447,7 +447,7 @@ func (m *Manager) DiscoverVMsHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) GetVMMetricsHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	ctx := context.Background()
 
 	metrics, err := m.GetVMMetrics(ctx, id)
@@ -460,7 +460,7 @@ func (m *Manager) GetVMMetricsHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) VMPowerHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	var body struct {
 		Action string `json:"action"`
 	}
@@ -481,7 +481,7 @@ func (m *Manager) VMPowerHTTP(w http.ResponseWriter, r *http.Request) {
 // Network device handlers
 
 func (m *Manager) GetNetworkInterfacesHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	ctx := context.Background()
 
 	interfaces, err := m.GetNetworkDeviceInterfaces(ctx, id)
@@ -494,7 +494,7 @@ func (m *Manager) GetNetworkInterfacesHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 func (m *Manager) GetNetworkMetricsHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	ctx := context.Background()
 
 	metrics, err := m.GetNetworkDeviceMetrics(ctx, id)
@@ -507,7 +507,7 @@ func (m *Manager) GetNetworkMetricsHTTP(w http.ResponseWriter, r *http.Request) 
 }
 
 func (m *Manager) BackupConfigHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	ctx := context.Background()
 
 	result, err := m.BackupNetworkDeviceConfig(ctx, id)
@@ -522,7 +522,7 @@ func (m *Manager) BackupConfigHTTP(w http.ResponseWriter, r *http.Request) {
 // Physical host handlers
 
 func (m *Manager) GetHostMetricsHTTP(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := ginfadapter.Vars(r)["id"]
 	ctx := context.Background()
 
 	metrics, err := m.GetHostMetrics(ctx, id)

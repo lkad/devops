@@ -2,15 +2,19 @@ import { apiClient } from '../client'
 
 export interface PhysicalHost {
   id: string
-  name: string
-  status: 'online' | 'monitoring_issue' | 'offline'
-  cpu: number
-  memory: number
-  disk: number
-  services: number
-  lastSeen: string
-  ipAddress?: string
-  dataCenter?: string
+  hostname: string
+  ip: string
+  port: number
+  state: 'online' | 'monitoring_issue' | 'offline'
+  monitoringStatus: 'up' | 'down'
+  lastHeartbeat?: string
+  metrics?: {
+    cpu: { usage: number; cores: number }
+    memory: { total: number; used: number; usagePercent: number }
+    disk: { disks: Array<{ device: string; total: number; used: number }> }
+    uptime: { value: number; formatted: string }
+  }
+  registeredAt: string
 }
 
 export interface PhysicalHostListResponse {
@@ -18,19 +22,42 @@ export interface PhysicalHostListResponse {
   total: number
 }
 
+export interface CreatePhysicalHostRequest {
+  hostname: string
+  ip: string
+  port: number
+}
+
+export interface HostMetrics {
+  cpu: { usage: number; cores: number }
+  memory: { total: number; used: number; usagePercent: number }
+  disk: { disks: Array<{ device: string; total: number; used: number }> }
+  uptime: { value: number; formatted: string }
+}
+
+export interface HostConfig {
+  content?: string
+}
+
 export const physicalHostsApi = {
-  list: () =>
-    apiClient.get<PhysicalHostListResponse>('/api/v1/physical-hosts'),
+  listHosts: () =>
+    apiClient.get<PhysicalHostListResponse>('/api/physical-hosts'),
 
-  get: (id: string) =>
-    apiClient.get<PhysicalHost>(`/api/v1/physical-hosts/${id}`),
+  getHost: (id: string) =>
+    apiClient.get<PhysicalHost>(`/api/physical-hosts/${id}`),
 
-  create: (data: Partial<PhysicalHost>) =>
-    apiClient.post<PhysicalHost>('/api/v1/physical-hosts', data),
+  createHost: (data: CreatePhysicalHostRequest) =>
+    apiClient.post<PhysicalHost>('/api/physical-hosts', data),
 
-  update: (id: string, data: Partial<PhysicalHost>) =>
-    apiClient.put<PhysicalHost>(`/api/v1/physical-hosts/${id}`, data),
+  deleteHost: (id: string) =>
+    apiClient.delete<void>(`/api/physical-hosts/${id}`),
 
-  delete: (id: string) =>
-    apiClient.delete<void>(`/api/v1/physical-hosts/${id}`),
+  getMetrics: (id: string) =>
+    apiClient.get<HostMetrics>(`/api/physical-hosts/${id}/metrics`),
+
+  getConfig: (id: string) =>
+    apiClient.get<HostConfig>(`/api/physical-hosts/${id}/config`),
+
+  pushConfig: (id: string, content: string) =>
+    apiClient.post<void>(`/api/physical-hosts/${id}/config`, { content }),
 }

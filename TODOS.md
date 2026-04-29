@@ -127,6 +127,73 @@
 
 ---
 
+## 前端实现状态
+
+### 路由与页面
+
+| 路由 | 组件 | 状态 | 说明 |
+|------|------|------|------|
+| `/devices` | DeviceList | ✅ | 设备列表，含搜索/筛选 |
+| `/devices/:id` | DeviceDetail | ✅ | 设备详情，状态转换，编辑/删除 |
+| `/physical-hosts` | HostList | ✅ | 主机列表，状态徽章 |
+| `/physical-hosts/:id` | HostDetail | ✅ | 主机详情，指标显示，K8s Pods |
+| `/physical-hosts/:id/services` | HostServices | ✅ | 服务状态列表 |
+| `/physical-hosts/:id/config` | HostConfig | ✅ | 配置推送表单 |
+| `/pipelines` | PipelineList | ✅ | 流水线列表，创建按钮 |
+| `/pipelines/:id` | PipelineDetail | ✅ | 流水线详情，编辑/删除 |
+| `/pipelines/:id/run` | PipelineRun | ✅ | 流水线运行，日志显示 |
+| `/logs` | LogViewer | ✅ | 日志查询，实时流 |
+| `/logs/alerts` | LogAlerts | ✅ | 告警规则管理 |
+| `/alerts` | AlertChannels | ✅ | 告警通道管理，CRUD表单 |
+| `/alerts/history` | AlertHistory | ✅ | 告警历史 |
+| `/k8s` | ClusterList | ✅ | 集群列表，创建集群 |
+| `/k8s/:cluster` | ClusterDetail | ✅ | 集群详情，标签页，刷新 |
+| `/k8s/:cluster/nodes` | ClusterNodes | ✅ | 节点列表 |
+| `/k8s/:cluster/pods` | ClusterPods | ✅ | Pod列表，命名空间筛选 |
+| `/k8s/:cluster/namespaces` | ClusterNamespaces | ✅ | 命名空间列表 |
+| `/projects` | ProjectList | ✅ | 项目列表，层级树，CRUD |
+| `/projects/:id` | ProjectDetail | ✅ | 项目详情，资源/权限标签页 |
+| `/projects/:id/resources` | ProjectResources | ✅ | 资源链接管理 |
+| `/projects/:id/permissions` | ProjectPermissions | ✅ | 权限管理 |
+
+### 新增前端文件
+
+| 文件 | 说明 |
+|------|------|
+| `frontend/src/api/endpoints/devices.ts` | 设备API客户端 |
+| `frontend/src/api/endpoints/pipelines.ts` | 流水线API客户端 |
+| `frontend/src/api/endpoints/projects.ts` | 项目管理API客户端 |
+| `frontend/src/api/endpoints/physicalHosts.ts` | 物理主机API客户端 |
+| `frontend/src/api/endpoints/alerts.ts` | 告警通道API客户端 |
+| `frontend/src/pages/devices/DeviceForm.tsx` | 设备创建/编辑表单 |
+| `frontend/src/pages/pipelines/PipelineForm.tsx` | 流水线创建/编辑表单 |
+| `frontend/src/pages/projects/BusinessLineForm.tsx` | 业务线表单 |
+| `frontend/src/pages/projects/SystemForm.tsx` | 系统表单 |
+| `frontend/src/pages/projects/ProjectForm.tsx` | 项目表单 |
+| `frontend/src/pages/physical-hosts/HostForm.tsx` | 主机表单 |
+| `frontend/src/pages/physical-hosts/ConfigPushForm.tsx` | 配置推送表单 |
+| `frontend/src/pages/alerts/AlertChannelForm.tsx` | 告警通道表单 |
+| `frontend/src/pages/kubernetes/ClusterPods.tsx` | Pod列表页 |
+
+### 跨页面导航
+
+| 来源 | 链接 | 目标 |
+|------|------|------|
+| DeviceDetail | Linked Projects | ProjectDetail |
+| ProjectDetail | 资源名称 | 对应详情页 (Device/Host/Pipeline) |
+| HostDetail | K8s Pods tab | Pod列表 |
+| ClusterPods | Node名称 | ClusterNodes |
+| PipelineDetail | Project | ProjectDetail |
+
+### 修复的问题
+
+1. **API路径修正**: `/api/v1/` → `/api/` (匹配后端路由)
+2. **DeviceList**: `data?.devices` → `data?.data`
+3. **ClusterDetail Refresh**: 添加 queryClient.invalidateQueries()
+4. **LogAlerts import**: 修复错误的默认导出导入
+
+---
+
 ## 测试脚本
 
 | 脚本 | 说明 |

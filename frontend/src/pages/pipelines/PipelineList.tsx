@@ -1,48 +1,33 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Play } from 'lucide-react'
 import { pipelinesApi } from '@/api/endpoints/pipelines'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
 import { DataTable } from '@/components/ui/DataTable'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useToast } from '@/components/ui/Toast'
+import { PipelineForm } from './PipelineForm'
+import type { Pipeline } from '@/api/endpoints/pipelines'
 import styles from './PipelineList.module.css'
-
-const statusVariant = (status: string): 'success' | 'warning' | 'error' | 'info' | 'default' => {
-  switch (status.toLowerCase()) {
-    case 'running':
-      return 'info'
-    case 'success':
-      return 'success'
-    case 'failed':
-      return 'error'
-    case 'pending':
-      return 'warning'
-    default:
-      return 'default'
-  }
-}
-
-const formatLastRun = (lastRun: string | null): string => {
-  if (!lastRun) return 'Never'
-  const date = new Date(lastRun)
-  return date.toLocaleString()
-}
 
 interface PipelineRow {
   id: string
   name: string
-  status: string
-  lastRun: string | null
   stages: string[]
   createdAt: string
+}
+
+const formatDate = (date?: string): string => {
+  if (!date) return 'N/A'
+  return new Date(date).toLocaleString()
 }
 
 export function PipelineList() {
   const navigate = useNavigate()
   const { addToast } = useToast()
+  const queryClient = useQueryClient()
+  const [isFormOpen, setIsFormOpen] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['pipelines'],
@@ -60,7 +45,11 @@ export function PipelineList() {
     },
   })
 
-  const pipelines: PipelineRow[] = data?.pipelines ?? []
+  const handleFormSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ['pipelines'] })
+  }
+
+  const pipelines: Pipeline[] = data?.pipelines ?? []
 
   const columns = useMemo(() => [
     {
@@ -69,23 +58,14 @@ export function PipelineList() {
       accessor: (row: PipelineRow) => row.name,
     },
     {
-      id: 'status',
-      header: 'Status',
-      accessor: (row: PipelineRow) => (
-        <Badge variant={statusVariant(row.status)}>
-          {row.status}
-        </Badge>
-      ),
-    },
-    {
-      id: 'lastRun',
-      header: 'Last Run',
-      accessor: (row: PipelineRow) => formatLastRun(row.lastRun),
-    },
-    {
       id: 'stages',
       header: 'Stages',
       accessor: (row: PipelineRow) => row.stages.join(' → ') || 'None',
+    },
+    {
+      id: 'createdAt',
+      header: 'Created',
+      accessor: (row: PipelineRow) => formatDate(row.createdAt),
     },
     {
       id: 'actions',
@@ -99,7 +79,6 @@ export function PipelineList() {
               e.stopPropagation()
               executeMutation.mutate(row.id)
             }}
-            disabled={row.status === 'running'}
           >
             <Play size={14} />
             Run
@@ -117,7 +96,7 @@ export function PipelineList() {
     <div className={styles.container}>
       <div className={styles.header}>
         <h1 className={styles.title}>Pipelines</h1>
-        <Button variant="primary" onClick={() => navigate('/pipelines/new')}>
+        <Button variant="primary" onClick={() => setIsFormOpen(true)}>
           <Plus size={18} />
           Create Pipeline
         </Button>
@@ -131,7 +110,7 @@ export function PipelineList() {
           description="Get started by creating your first pipeline"
           action={{
             label: "Create Pipeline",
-            onClick: () => navigate('/pipelines/new')
+            onClick: () => setIsFormOpen(true)
           }}
         />
       ) : (
@@ -144,6 +123,12 @@ export function PipelineList() {
           />
         </div>
       )}
+
+      <PipelineForm
+        isOpen={isFormOpen}
+        onClose={() => setIsFormOpen(false)}
+        onSuccess={handleFormSuccess}
+      />
     </div>
   )
 }

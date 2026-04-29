@@ -58,13 +58,13 @@ export function Dashboard() {
     queryFn: () => pipelinesApi.list(),
   })
 
-  const devices = devicesData?.devices ?? []
+  const devices = devicesData?.data ?? []
   const pipelines = pipelinesData?.pipelines ?? []
 
   const activeDevices = devices.filter(d => d.status.toLowerCase() === 'active').length
   const totalDevices = devices.length
 
-  const activePipelines = pipelines.filter(p => p.status === 'running').length
+  const activePipelines = pipelines.length > 0 ? pipelines.filter(p => p.name).length : 0
   const totalPipelines = pipelines.length
 
   const recentDevices = [...devices]

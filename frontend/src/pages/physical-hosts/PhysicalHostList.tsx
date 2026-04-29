@@ -38,10 +38,20 @@ export function PhysicalHostList() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['physical-hosts'],
-    queryFn: () => physicalHostsApi.list(),
+    queryFn: () => physicalHostsApi.listHosts(),
   })
 
-  const hosts: HostRow[] = data?.hosts ?? []
+  const hosts: HostRow[] = (data?.hosts ?? []).map(host => ({
+    id: host.id,
+    name: host.hostname,
+    status: host.state,
+    cpu: host.metrics?.cpu.usage ?? 0,
+    memory: host.metrics?.memory.usagePercent ?? 0,
+    disk: host.metrics?.disk.disks[0] ? Math.round((host.metrics.disk.disks[0].used / host.metrics.disk.disks[0].total) * 100) : 0,
+    services: 0,
+    lastSeen: host.lastHeartbeat ?? host.registeredAt,
+    ipAddress: host.ip,
+  }))
 
   const filteredHosts = useMemo(() => {
     if (!searchQuery) return hosts

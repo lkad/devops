@@ -106,13 +106,41 @@
   border-radius: var(--radius-sm);
 }
 
-.loading {
-  padding: var(--space-8);
-  text-align: center;
-  color: var(--color-text-secondary);
+.treeItemRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.emptyState {
+.treeItemRow:hover .actions {
+  opacity: 1;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-1);
+  opacity: 0;
+  transition: opacity var(--transition-short);
+}
+
+.actionButton {
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.actionButton:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+.loading {
   padding: var(--space-8);
   text-align: center;
   color: var(--color-text-secondary);
