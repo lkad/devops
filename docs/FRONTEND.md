@@ -42,11 +42,14 @@
 ### 2.1 路由结构
 
 ```
-/                           → Dashboard (首页)
+/                           → Dashboard (首页，需登录)
+/login                      → 登录页面
 /devices                    → 设备列表
 /devices/:id                → 设备详情
-/physical-hosts             → 物理主机
+/physical-hosts             → 物理主机列表
 /physical-hosts/:id         → 主机详情
+/physical-hosts/:id/services → 主机服务列表
+/physical-hosts/:id/config  → 配置推送
 /pipelines                  → 流水线列表
 /pipelines/:id              → 流水线详情
 /pipelines/:id/run          → 流水线运行
@@ -55,12 +58,16 @@
 /alerts                     → 告警通道
 /alerts/history             → 告警历史
 /k8s                        → K8s 集群列表
-/k8s/:cluster               → 集群详情
+/k8s/:cluster               → 集群详情（含 tabs）
 /k8s/:cluster/nodes         → 节点列表
+/k8s/:cluster/namespaces    → 命名空间列表
 /k8s/:cluster/pods          → Pod 列表
-/projects                   → 项目管理 (BL → System → Project)
+/k8s/:cluster/pods/:pod/logs → Pod 日志
+/k8s/:cluster/pods/:pod/exec → Pod exec
+/projects                   → 项目列表（BL → System → Project）
 /projects/:id               → 项目详情
 /projects/:id/resources     → 项目资源
+/projects/:id/permissions   → 项目权限
 /reports/finops             → FinOps 报表
 /audit-logs                 → 审计日志
 /settings                   → 设置
@@ -304,21 +311,44 @@
 |------|------|------|
 | 设备 | `/api/devices` | GET, POST |
 | 设备 | `/api/devices/:id` | GET, PUT, DELETE |
+| 设备 | `/api/devices/search` | GET |
 | 物理主机 | `/api/physical-hosts` | GET, POST |
 | 物理主机 | `/api/physical-hosts/:id` | GET, DELETE |
+| 物理主机 | `/api/physical-hosts/:id/services` | GET |
+| 物理主机 | `/api/physical-hosts/:id/config` | POST |
 | 流水线 | `/api/pipelines` | GET, POST |
 | 流水线 | `/api/pipelines/:id` | GET, DELETE |
 | 流水线 | `/api/pipelines/:id/execute` | POST |
 | 日志 | `/api/logs` | GET, POST |
+| 日志 | `/api/logs/stats` | GET |
+| 日志 | `/api/logs/alerts` | GET, POST |
+| 日志 | `/api/logs/filters` | GET, POST |
 | 告警 | `/api/alerts/channels` | GET, POST |
 | 告警 | `/api/alerts/history` | GET |
-| K8s | `/api/k8s/clusters` | GET |
+| K8s | `/api/k8s/clusters` | GET, POST |
+| K8s | `/api/k8s/clusters/:name` | DELETE |
+| K8s | `/api/k8s/clusters/:name/health` | GET |
 | K8s | `/api/k8s/clusters/:name/nodes` | GET |
+| K8s | `/api/k8s/clusters/:name/namespaces` | GET |
 | K8s | `/api/k8s/clusters/:name/pods` | GET |
+| K8s | `/api/k8s/clusters/:name/pods/:pod/logs` | GET |
+| K8s | `/api/k8s/clusters/:name/metrics` | GET |
+| 认证 | `/api/auth/login` | POST |
+| 认证 | `/api/auth/logout` | POST |
+| 认证 | `/api/auth/me` | GET |
 | 项目 | `/api/org/business-lines` | GET, POST |
+| 项目 | `/api/org/business-lines/:id` | GET, PUT, DELETE |
+| 项目 | `/api/org/business-lines/:id/systems` | GET, POST |
+| 项目 | `/api/org/systems/:id` | GET, PUT, DELETE |
+| 项目 | `/api/org/systems/:id/projects` | GET, POST |
+| 项目 | `/api/org/projects/:id` | GET, PUT, DELETE |
 | 项目 | `/api/org/projects/:id/resources` | GET, POST, DELETE |
-| FinOps | `/api/org/reports/finops` | GET |
+| 项目 | `/api/org/projects/:id/permissions` | GET, POST |
+| 项目 | `/api/org/permissions/:perm_id` | DELETE |
+| FinOps | `/api/org/reports/finops?period=` | GET |
 | 审计 | `/api/org/audit-logs` | GET |
+| 发现 | `/api/discovery/scan` | POST |
+| 发现 | `/api/discovery/status` | GET |
 
 ### 5.3 WebSocket
 
@@ -356,9 +386,44 @@
 - 详情页: 按需加载，缓存结果
 - 实时数据: WebSocket 订阅，按 channel 区分
 
+### 6.3 错误处理
+
+| 场景 | 处理方式 |
+|------|---------|
+| API 4xx 错误 | Toast 显示错误信息（3秒后自动消失） |
+| API 5xx 错误 | Toast 显示"服务器错误，请稍后重试" |
+| 网络断开 | 顶部 Banner 显示"网络已断开"，自动重试 |
+| 请求超时 | 30秒超时，显示"请求超时" |
+| WebSocket 断开 | 自动重连，最多重试 5 次 |
+
+### 6.4 离线支持
+
+- 静态资源（HTML/JS/CSS）可缓存
+- 关键数据（设备列表）可使用 localStorage 缓存
+- 离线时显示缓存数据，Banner 提示"离线模式"
+
 ---
 
-## 7. 目录结构
+## 7. 响应式设计
+
+### 7.1 断点
+
+| 断点 | 宽度 | 布局变化 |
+|------|------|---------|
+| Desktop | ≥ 1024px | 完整布局（SideNav + Main） |
+| Tablet | 768px - 1023px | SideNav 收起为图标模式 |
+| Mobile | < 768px | SideNav 隐藏，汉堡菜单触发 |
+
+### 7.2 响应式行为
+
+- SideNav 在 Tablet 宽度下收起为 64px 图标模式
+- SideNav 在 Mobile 宽度下隐藏，由汉堡菜单触发
+- DataTable 在窄屏下支持水平滚动
+- 卡片在窄屏下变为单列布局
+
+---
+
+## 8. 目录结构
 
 ```
 frontend/
@@ -410,7 +475,7 @@ frontend/
 
 ---
 
-## 8. 测试需求
+## 9. 测试需求
 
 ### 8.1 单元测试
 
@@ -439,7 +504,7 @@ frontend/
 
 ---
 
-## 9. 性能要求
+## 10. 性能要求
 
 | 指标 | 目标 |
 |------|------|
@@ -450,7 +515,7 @@ frontend/
 
 ---
 
-## 10. 待办事项
+## 11. 待办事项
 
 - [ ] 确定前端技术栈版本
 - [ ] 创建项目骨架
