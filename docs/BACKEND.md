@@ -82,7 +82,7 @@ internal/
 │   └── hub.go
 ├── config/                 # 配置加载
 │   └── config.go
-└── ginfadapter/           # Gin 适配器
+└── ginadapter/           # Gin 适配器
 
 pkg/
 └── database/
@@ -267,9 +267,14 @@ func RecoveryMiddleware() gin.HandlerFunc {
 ### 5.4 CORS 中间件
 
 ```go
-func CORSMiddleware() gin.HandlerFunc {
+func CORSMiddleware(cfg *CORSConfig) gin.HandlerFunc {
     return func(c *gin.Context) {
-        c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+        origin := c.Request.Header.Get("Origin")
+        // 检查 origin 是否在允许列表中
+        if isOriginAllowed(origin, cfg.AllowedOrigins) {
+            c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+            c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+        }
         c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
         if c.Request.Method == "OPTIONS" {
@@ -279,6 +284,24 @@ func CORSMiddleware() gin.HandlerFunc {
         c.Next()
     }
 }
+
+func isOriginAllowed(origin string, allowed []string) bool {
+    for _, o := range allowed {
+        if o == "*" || o == origin {
+            return true
+        }
+    }
+    return false
+}
+```
+
+**配置:**
+```yaml
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
+    - "https://devops.internal.com"
+  # 生产环境不使用 *，严格限制来源
 ```
 
 ---
@@ -302,6 +325,8 @@ database:
   max_connections: 25
   ssl_mode: "disable"
   conn_max_lifetime: 300
+  # 也支持 DATABASE_URL 环境变量（优先于上述配置）
+  # DATABASE_URL="postgres://devops:password@localhost:5432/devops_toolkit?sslmode=disable"
 
 auth:
   jwt_secret: "your-secret-key"
@@ -321,6 +346,20 @@ logs:
   retention_days: 30
 
 environment: "development"  # mock, containerlab, production
+
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
+    - "https://devops.internal.com"
+
+tracing:
+  enabled: false
+  endpoint: "http://jaeger:14268/api/traces"
+
+rate_limit:
+  auth_login: 10/minute
+  api_general: 100/minute
+  metrics: 60/minute
 ```
 
 ### 6.2 配置加载
@@ -526,6 +565,76 @@ GET /health
 Response: {"status": "healthy"}
 ```
 
+### 11.4 Graceful Shutdown
+
+服务器在收到 SIGINT/SIGTERM 信号时执行优雅关闭：
+
+```go
+// 创建带超时 context
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+// 停止接收新请求
+srv.Shutdown(ctx)
+
+// 关闭数据库连接
+db.Close()
+```
+
+**关闭流程:**
+1. 停止接收新请求
+2. 等待现有请求完成（最多 5 秒）
+3. 关闭 WebSocket 连接
+4. 关闭数据库连接池
+5. 退出
+
+### 11.5 Rate Limiting
+
+限流中间件保护 API 免受滥用：
+
+```go
+func RateLimitMiddleware(requests int, window time.Duration) gin.HandlerFunc {
+    limiter := rate.NewLimiter(rate.Limit(float64(requests)/window.Seconds()), requests)
+    return func(c *gin.Context) {
+        if !limiter.Allow() {
+            c.JSON(429, gin.H{"error": "too_many_requests"})
+            c.Abort()
+            return
+        }
+        c.Next()
+    }
+}
+```
+
+**限流规则:**
+
+| 端点 | 限制 |
+|------|------|
+| `/api/auth/login` | 10 次/分钟 |
+| `/api/*` (其他) | 100 次/分钟 |
+| `/metrics` | 60 次/分钟 |
+
+### 11.6 链路追踪
+
+OpenTelemetry 集成用于分布式追踪：
+
+```go
+// 初始化 Tracer
+func initTracer(endpoint string) (*otlp.Exporter, error) {
+    exporter, err := otlp.NewExporter(
+        otlp.WithEndpoint(endpoint),
+        otlp.WithInsecure(),
+    )
+    return exporter, err
+}
+```
+
+**追踪内容:**
+- HTTP 请求/响应
+- 数据库查询
+- 外部 API 调用
+- WebSocket 消息
+
 ---
 
 ## 12. API 端点汇总
@@ -599,10 +708,13 @@ Response: {"status": "healthy"}
 | `/api/k8s/clusters/:name` | DELETE | 删除集群 |
 | `/api/k8s/clusters/:name/health` | GET | 健康检查 |
 | `/api/k8s/clusters/:name/nodes` | GET | 节点列表 |
-| `/api/k8s/clusters/:name/namespaces` | GET | 命名空间 |
+| `/api/k8s/clusters/:name/namespaces` | GET | 命名空间列表 |
 | `/api/k8s/clusters/:name/pods` | GET | Pod 列表 |
 | `/api/k8s/clusters/:name/pods/:pod/logs` | GET | Pod 日志 |
+| `/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/logs` | GET | 带命名空间的 Pod 日志 |
+| `/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/exec` | POST | Pod exec |
 | `/api/k8s/clusters/:name/metrics` | GET | 集群指标 |
+| `/api/k8s/maintenance` | POST | 维护操作 |
 
 ### 12.8 项目
 
@@ -626,6 +738,7 @@ Response: {"status": "healthy"}
 |------|------|------|
 | `/api/discovery/scan` | POST | 触发扫描 |
 | `/api/discovery/status` | GET | 扫描状态 |
+| `/api/discovery/register` | POST | 注册设备 |
 
 ### 12.10 其他
 
@@ -653,8 +766,11 @@ Response: {"status": "healthy"}
 - JWT Token 24小时过期
 - LDAP 认证失败重试3次
 - 敏感操作记录审计日志
-- 配置密码加密存储
-- CORS 限制来源
+- 配置密码加密存储（不暴露明文密码）
+- CORS 严格限制来源（不使用 *）
+- Rate Limiting 防止滥用
+- Graceful Shutdown 防止请求中断
+- 请求超时限制（30秒）
 
 ---
 
