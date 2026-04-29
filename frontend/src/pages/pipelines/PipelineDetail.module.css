@@ -1,0 +1,215 @@
+.container {
+  padding: var(--space-6);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.backButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-short);
+}
+
+.backButton:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+.title {
+  font-size: var(--text-h1);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  flex: 1;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.stagesSection {
+  margin-bottom: var(--space-6);
+}
+
+.sectionTitle {
+  font-size: var(--text-h3);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-4);
+}
+
+.stagesContainer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: var(--space-4) 0;
+}
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  min-width: 120px;
+  transition: all var(--transition-short);
+}
+
+.stageCompleted {
+  border-color: var(--color-success);
+  background: var(--color-success-muted);
+}
+
+.stageRunning {
+  border-color: var(--color-primary);
+  background: var(--color-primary-muted);
+}
+
+.stageFailed {
+  border-color: var(--color-error);
+  background: var(--color-error-muted);
+}
+
+.stageIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stageIconCompleted {
+  background: var(--color-success);
+  color: white;
+}
+
+.stageIconRunning {
+  background: var(--color-primary);
+  color: white;
+}
+
+.stageIconFailed {
+  background: var(--color-error);
+  color: white;
+}
+
+.stageIconPending {
+  background: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.stageName {
+  font-size: var(--text-body);
+  font-weight: var(--font-medium);
+  color: var(--color-text-primary);
+}
+
+.connector {
+  width: 40px;
+  height: 2px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+.connectorCompleted {
+  background: var(--color-success);
+}
+
+.runsSection {
+  margin-top: var(--space-6);
+}
+
+.runsTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.runsTableHeader {
+  background: var(--color-surface-elevated);
+}
+
+.runsTableHeaderCell {
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  font-size: var(--text-small);
+  font-weight: var(--font-medium);
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.runsTableRow {
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.runsTableRow:last-child {
+  border-bottom: none;
+}
+
+.runsTableCell {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+}
+
+.runStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.statusPending {
+  background: var(--color-warning);
+}
+
+.statusRunning {
+  background: var(--color-primary);
+  animation: pulse 1s infinite;
+}
+
+.statusSuccess {
+  background: var(--color-success);
+}
+
+.statusFailed {
+  background: var(--color-error);
+}
+
+.statusCancelled {
+  background: var(--color-text-muted);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.emptyRuns {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--color-text-secondary);
+}

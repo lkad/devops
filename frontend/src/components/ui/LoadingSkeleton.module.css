@@ -1,0 +1,51 @@
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 0%,
+    var(--color-surface-elevated) 50%,
+    var(--color-surface) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.text {
+  height: 16px;
+  width: 100%;
+}
+
+.title {
+  height: 24px;
+  width: 60%;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.button {
+  height: 44px;
+  width: 100px;
+}
+
+.card {
+  height: 120px;
+  width: 100%;
+}
+
+.row {
+  height: 48px;
+  width: 100%;
+}

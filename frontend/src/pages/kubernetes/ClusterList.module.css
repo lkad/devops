@@ -1,0 +1,179 @@
+.container {
+  padding: var(--space-6);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-6);
+}
+
+.title {
+  font-size: var(--text-h1);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.filters {
+  display: flex;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.searchInput {
+  flex: 1;
+  max-width: 300px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--text-body);
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.filterSelect {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--text-body);
+  min-width: 150px;
+}
+
+.filterSelect:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.clustersGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--space-4);
+}
+
+.clusterCard {
+  padding: var(--space-5);
+  cursor: pointer;
+  transition: all var(--transition-short);
+}
+
+.clusterCard:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.clusterHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.clusterName {
+  font-size: var(--text-h3);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.clusterVersion {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.environmentBadge {
+  display: inline-flex;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-small);
+  font-weight: var(--font-medium);
+}
+
+.envDev {
+  background: var(--color-env-dev-bg);
+  color: var(--color-env-dev-border);
+}
+
+.envTest {
+  background: var(--color-env-test-bg);
+  color: var(--color-env-test-border);
+}
+
+.envUat {
+  background: var(--color-env-uat-bg);
+  color: var(--color-env-uat-border);
+}
+
+.envProd {
+  background: var(--color-env-prod-bg);
+  color: var(--color-env-prod-border);
+}
+
+.healthIndicator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-small);
+}
+
+.healthDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.healthHealthy {
+  background: var(--color-success);
+}
+
+.healthDegraded {
+  background: var(--color-warning);
+}
+
+.healthUnhealthy {
+  background: var(--color-error);
+}
+
+.clusterStats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.stat {
+  text-align: center;
+}
+
+.statValue {
+  font-size: var(--text-h3);
+  font-weight: var(--font-bold);
+  color: var(--color-text-primary);
+}
+
+.statLabel {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.loading {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.emptyState {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-secondary);
+}

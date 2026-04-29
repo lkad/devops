@@ -1,0 +1,64 @@
+/* Responsive utilities */
+
+/* Breakpoints (matching variables.css) */
+/* Mobile: < 768px */
+/* Tablet: 768px - 1023px */
+/* Desktop: >= 1024px */
+
+/* Tablet breakpoint */
+@media (max-width: 1023px) {
+  :root {
+    --sidenav-width: var(--sidenav-collapsed-width);
+  }
+}
+
+/* Mobile breakpoint */
+@media (max-width: 767px) {
+  :root {
+    --sidenav-width: 0;
+  }
+
+  .hide-on-mobile {
+    display: none !important;
+  }
+
+  .show-on-mobile {
+    display: block !important;
+  }
+
+  /* Stack grid items on mobile */
+  .grid-responsive {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Full-width on mobile */
+  .full-width-mobile {
+    width: 100%;
+  }
+}
+
+/* Large desktop */
+@media (min-width: 1400px) {
+  :root {
+    --content-max-width: 1600px;
+  }
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

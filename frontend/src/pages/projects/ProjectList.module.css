@@ -1,0 +1,119 @@
+.container {
+  padding: var(--space-6);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-6);
+}
+
+.title {
+  font-size: var(--text-h1);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.treeContainer {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+.treeLevel {
+  padding-left: var(--space-4);
+}
+
+.treeItem {
+  padding: var(--space-2) 0;
+}
+
+.businessLine {
+  font-size: var(--text-body);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-short);
+}
+
+.businessLine:hover {
+  background: var(--color-surface-elevated);
+}
+
+.expandIcon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-short);
+}
+
+.expandIconExpanded {
+  transform: rotate(90deg);
+}
+
+.system {
+  font-size: var(--text-body);
+  font-weight: var(--font-medium);
+  color: var(--color-text-secondary);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-short);
+}
+
+.system:hover {
+  background: var(--color-surface-elevated);
+}
+
+.project {
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+  padding: var(--space-2) var(--space-8);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-short);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.project:hover {
+  background: var(--color-surface-elevated);
+}
+
+.projectName {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.projectType {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface-elevated);
+  border-radius: var(--radius-sm);
+}
+
+.loading {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.emptyState {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-secondary);
+}

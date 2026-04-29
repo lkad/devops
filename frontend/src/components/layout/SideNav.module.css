@@ -1,0 +1,202 @@
+.sidenav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--sidenav-width);
+  height: 100vh;
+  background: var(--color-bg);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  transition: width var(--transition-medium);
+  z-index: var(--z-dropdown);
+  overflow: hidden;
+}
+
+.sidenavCollapsed {
+  width: var(--sidenav-collapsed-width);
+}
+
+.header {
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  overflow: hidden;
+}
+
+.logoIcon {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-bg);
+  font-weight: var(--font-bold);
+  font-size: var(--text-small);
+}
+
+.logoText {
+  font-size: var(--text-body);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity var(--transition-short);
+}
+
+.sidenavCollapsed .logoText {
+  opacity: 0;
+}
+
+.toggleButton {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-micro);
+}
+
+.toggleButton:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+.toggleButton svg {
+  width: 18px;
+  height: 18px;
+  transition: transform var(--transition-short);
+}
+
+.sidenavCollapsed .toggleButton svg {
+  transform: rotate(180deg);
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-4) 0;
+}
+
+.section {
+  margin-bottom: var(--space-4);
+}
+
+.sectionTitle {
+  font-size: var(--text-caption);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 var(--space-4);
+  margin-bottom: var(--space-2);
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity var(--transition-short);
+}
+
+.sidenavCollapsed .sectionTitle {
+  opacity: 0;
+}
+
+.navList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-size: var(--text-small);
+  font-weight: var(--font-medium);
+  transition: all var(--transition-micro);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.navLink:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-elevated);
+}
+
+.navLinkActive {
+  color: var(--color-primary);
+  background: var(--color-primary-muted);
+}
+
+.navLinkActive:hover {
+  color: var(--color-primary);
+  background: var(--color-primary-muted);
+}
+
+.navIcon {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.navIcon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.navText {
+  opacity: 1;
+  transition: opacity var(--transition-short);
+}
+
+.sidenavCollapsed .navText {
+  opacity: 0;
+}
+
+@media (max-width: 767px) {
+  .sidenav {
+    transform: translateX(-100%);
+  }
+
+  .sidenavCollapsed {
+    transform: translateX(-100%);
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .sidenav {
+    width: var(--sidenav-collapsed-width);
+  }
+
+  .logoText,
+  .sectionTitle,
+  .navText {
+    opacity: 0;
+  }
+}

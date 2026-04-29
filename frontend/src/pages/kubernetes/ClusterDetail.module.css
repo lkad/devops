@@ -1,0 +1,194 @@
+.container {
+  padding: var(--space-6);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.backButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-short);
+}
+
+.backButton:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+.title {
+  font-size: var(--text-h1);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  flex: 1;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tab {
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  transition: all var(--transition-short);
+  position: relative;
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+}
+
+.tabActive {
+  color: var(--color-primary);
+}
+
+.tabActive::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--color-primary);
+}
+
+.tableContainer {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.loading {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.nodeRow, .podRow {
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.nodeRow:last-child, .podRow:last-child {
+  border-bottom: none;
+}
+
+.nodeCell, .podCell {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+}
+
+.monoCell {
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+}
+
+.statusBadge {
+  display: inline-flex;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-small);
+  font-weight: var(--font-medium);
+}
+
+.statusReady {
+  background: var(--color-success-muted);
+  color: var(--color-success);
+}
+
+.statusNotReady {
+  background: var(--color-error-muted);
+  color: var(--color-error);
+}
+
+.statusRunning {
+  background: var(--color-success-muted);
+  color: var(--color-success);
+}
+
+.statusPending {
+  background: var(--color-warning-muted);
+  color: var(--color-warning);
+}
+
+.statusFailed {
+  background: var(--color-error-muted);
+  color: var(--color-error);
+}
+
+.metricBar {
+  width: 100%;
+  max-width: 100px;
+  height: 6px;
+  background: var(--color-surface-elevated);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.metricFill {
+  height: 100%;
+  border-radius: 3px;
+}
+
+.metricFillLow {
+  background: var(--color-success);
+}
+
+.metricFillMedium {
+  background: var(--color-warning);
+}
+
+.metricFillHigh {
+  background: var(--color-error);
+}
+
+.overviewGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+@media (max-width: 768px) {
+  .overviewGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.overviewCard {
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.overviewValue {
+  font-size: var(--text-h2);
+  font-weight: var(--font-bold);
+  color: var(--color-text-primary);
+}
+
+.overviewLabel {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}

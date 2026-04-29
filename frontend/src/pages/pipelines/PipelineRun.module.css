@@ -1,0 +1,216 @@
+.container {
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+  flex-shrink: 0;
+}
+
+.backButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-short);
+}
+
+.backButton:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+.title {
+  font-size: var(--text-h2);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  flex: 1;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.progressSection {
+  margin-bottom: var(--space-6);
+  flex-shrink: 0;
+}
+
+.stagesContainer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-elevated);
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+
+.stageIcon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stageIconCompleted {
+  background: var(--color-success);
+  color: white;
+}
+
+.stageIconRunning {
+  background: var(--color-primary);
+  color: white;
+}
+
+.stageIconPending {
+  background: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.stageName {
+  font-size: var(--text-small);
+  color: var(--color-text-primary);
+}
+
+.logsSection {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.logsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+  flex-shrink: 0;
+}
+
+.logsTitle {
+  font-size: var(--text-h3);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.clearButton {
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--text-small);
+  cursor: pointer;
+  transition: all var(--transition-short);
+}
+
+.clearButton:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+.logsContainer {
+  flex: 1;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+  line-height: 1.6;
+}
+
+.logLine {
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.logLine:last-child {
+  border-bottom: none;
+}
+
+.logTimestamp {
+  color: var(--color-text-muted);
+  margin-right: var(--space-3);
+}
+
+.logLevel {
+  margin-right: var(--space-3);
+  font-weight: var(--font-medium);
+}
+
+.logLevelDebug {
+  color: var(--color-text-muted);
+}
+
+.logLevelInfo {
+  color: var(--color-primary);
+}
+
+.logLevelWarn {
+  color: var(--color-warning);
+}
+
+.logLevelError {
+  color: var(--color-error);
+}
+
+.logMessage {
+  color: var(--color-text-primary);
+}
+
+.emptyLogs {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.liveIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-success);
+  font-size: var(--text-small);
+}
+
+.liveDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-success);
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

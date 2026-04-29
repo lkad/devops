@@ -1,0 +1,158 @@
+.container {
+  padding: var(--space-6);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.backButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-short);
+}
+
+.backButton:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+.title {
+  font-size: var(--text-h1);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  flex: 1;
+}
+
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+@media (max-width: 768px) {
+  .metricsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.metricCard {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.metricLabel {
+  font-size: var(--text-small);
+  color: var(--color-text-secondary);
+}
+
+.metricValue {
+  font-size: var(--text-h2);
+  font-weight: var(--font-bold);
+  color: var(--color-text-primary);
+}
+
+.metricBar {
+  width: 100%;
+  height: 8px;
+  background: var(--color-surface-elevated);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.metricFill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width var(--transition-medium);
+}
+
+.metricFillCpu {
+  background: var(--color-primary);
+}
+
+.metricFillMemory {
+  background: var(--color-success);
+}
+
+.metricFillDisk {
+  background: var(--color-warning);
+}
+
+.servicesSection {
+  margin-top: var(--space-6);
+}
+
+.sectionTitle {
+  font-size: var(--text-h3);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-4);
+}
+
+.serviceList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.serviceItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.serviceName {
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+  font-weight: var(--font-medium);
+}
+
+.serviceStatus {
+  font-size: var(--text-small);
+  color: var(--color-text-secondary);
+}
+
+.configSection {
+  margin-top: var(--space-6);
+}
+
+.configForm {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-end;
+}
+
+.configSelect {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--text-body);
+}
+
+.configSelect:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
