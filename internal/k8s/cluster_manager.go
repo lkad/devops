@@ -390,6 +390,11 @@ func (m *ClusterManager) GetPods(clusterName, namespace string) ([]Pod, error) {
 		return nil, err
 	}
 
+	// Empty namespace means all namespaces (like kubectl get pods -A)
+	if namespace == "" {
+		namespace = metav1.NamespaceAll
+	}
+
 	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
@@ -871,9 +876,7 @@ func (m *ClusterManager) GetNamespacesHTTP(w http.ResponseWriter, r *http.Reques
 func (m *ClusterManager) GetPodsHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := ginfadapter.Vars(r)["name"]
 	namespace := r.URL.Query().Get("namespace")
-	if namespace == "" {
-		namespace = "default"
-	}
+	// Empty namespace means all namespaces (not just "default")
 	limit, offset := parsePagination(r)
 	pods, err := m.GetPods(cluster, namespace)
 	if err != nil {
