@@ -6,15 +6,6 @@ import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import styles from './ClusterList.module.css'
 
-const mockClusters: K8sCluster[] = [
-  { id: '1', name: 'dev-cluster-01', type: 'dev', status: 'online', version: '1.28.0', environment: 'dev', nodes: 3, pods: 45, namespaces: 8 },
-  { id: '2', name: 'test-cluster-01', type: 'test', status: 'online', version: '1.28.0', environment: 'test', nodes: 5, pods: 120, namespaces: 15 },
-  { id: '3', name: 'uat-cluster-01', type: 'uat', status: 'pending', version: '1.27.0', environment: 'uat', nodes: 5, pods: 98, namespaces: 12 },
-  { id: '4', name: 'prod-cluster-01', type: 'prod', status: 'online', version: '1.28.0', environment: 'prod', nodes: 7, pods: 234, namespaces: 25 },
-  { id: '5', name: 'prod-cluster-02', type: 'prod', status: 'offline', version: '1.28.0', environment: 'prod', nodes: 7, pods: 198, namespaces: 22 },
-  { id: '6', name: 'dev-cluster-02', type: 'dev', status: 'active', version: '1.29.0', environment: 'dev', nodes: 2, pods: 28, namespaces: 5 },
-]
-
 const envBadgeClass = (env: string): string => {
   switch (env.toLowerCase()) {
     case 'dev': return styles.envDev
@@ -29,6 +20,7 @@ const healthClass = (status: string): string => {
   switch (status.toLowerCase()) {
     case 'healthy':
     case 'online':
+    case 'running':
       return styles.healthHealthy
     case 'degraded':
     case 'pending':
@@ -49,12 +41,8 @@ export function ClusterList() {
   const { data, isLoading } = useQuery({
     queryKey: ['kubernetes', 'clusters'],
     queryFn: async () => {
-      try {
-        const response = await kubernetesApi.listClusters()
-        return response.clusters
-      } catch {
-        return mockClusters
-      }
+      const response = await kubernetesApi.listClusters()
+      return response.data ?? []
     },
   })
 
@@ -63,13 +51,13 @@ export function ClusterList() {
   const filteredClusters = useMemo(() => {
     return clusters.filter(cluster => {
       const matchesSearch = cluster.name.toLowerCase().includes(searchQuery.toLowerCase())
-      const matchesEnv = !envFilter || cluster.environment.toLowerCase() === envFilter.toLowerCase()
+      const matchesEnv = !envFilter || (cluster.environment?.toLowerCase() === envFilter.toLowerCase())
       return matchesSearch && matchesEnv
     })
   }, [clusters, searchQuery, envFilter])
 
   const handleClusterClick = (cluster: K8sCluster) => {
-    navigate(`/kubernetes/${cluster.id}`)
+    navigate(`/k8s/${cluster.name}`)
   }
 
   return (
@@ -110,17 +98,17 @@ export function ClusterList() {
         <div className={styles.clustersGrid}>
           {filteredClusters.map(cluster => (
             <Card
-              key={cluster.id}
+              key={cluster.name}
               className={styles.clusterCard}
               onClick={() => handleClusterClick(cluster)}
             >
               <div className={styles.clusterHeader}>
                 <div>
                   <h3 className={styles.clusterName}>{cluster.name}</h3>
-                  <span className={styles.clusterVersion}>v{cluster.version}</span>
+                  <span className={styles.clusterVersion}>v{cluster.version || '1.0'}</span>
                 </div>
-                <span className={`${styles.environmentBadge} ${envBadgeClass(cluster.environment)}`}>
-                  {cluster.environment.toUpperCase()}
+                <span className={`${styles.environmentBadge} ${envBadgeClass(cluster.environment || 'dev')}`}>
+                  {(cluster.environment || 'dev').toUpperCase()}
                 </span>
               </div>
 
@@ -131,15 +119,15 @@ export function ClusterList() {
 
               <div className={styles.clusterStats}>
                 <div className={styles.stat}>
-                  <div className={styles.statValue}>{cluster.nodes}</div>
+                  <div className={styles.statValue}>{cluster.nodes ?? '-'}</div>
                   <div className={styles.statLabel}>Nodes</div>
                 </div>
                 <div className={styles.stat}>
-                  <div className={styles.statValue}>{cluster.pods}</div>
+                  <div className={styles.statValue}>{cluster.pods ?? '-'}</div>
                   <div className={styles.statLabel}>Pods</div>
                 </div>
                 <div className={styles.stat}>
-                  <div className={styles.statValue}>{cluster.namespaces}</div>
+                  <div className={styles.statValue}>{cluster.namespaces ?? '-'}</div>
                   <div className={styles.statLabel}>Namespaces</div>
                 </div>
               </div>

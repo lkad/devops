@@ -3,6 +3,7 @@ import { lazy, Suspense } from 'react'
 import { useAuthStore } from './stores/authStore'
 import { AppShell } from './components/layout/AppShell'
 import { Login } from './pages/Login'
+import { ToastProvider } from './components/ui/Toast'
 
 // Lazy load all page components
 const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })))
@@ -16,7 +17,7 @@ const PipelineList = lazy(() => import('./pages/pipelines/PipelineList').then(m 
 const PipelineDetail = lazy(() => import('./pages/pipelines/PipelineDetail').then(m => ({ default: m.PipelineDetail })))
 const PipelineRun = lazy(() => import('./pages/pipelines/PipelineRun').then(m => ({ default: m.PipelineRun })))
 const LogViewer = lazy(() => import('./pages/logs/LogViewer').then(m => ({ default: m.LogViewer })))
-const LogAlerts = lazy(() => import('./pages/logs/LogAlerts').then(m => ({ default: m.LogAlerts })))
+const LogAlerts = lazy(() => import('./pages/logs/LogAlerts').then(m => ({ default: m.default })))
 const AlertChannels = lazy(() => import('./pages/alerts/AlertChannels').then(m => ({ default: m.AlertChannels })))
 const AlertHistory = lazy(() => import('./pages/alerts/AlertHistory').then(m => ({ default: m.AlertHistory })))
 const ClusterList = lazy(() => import('./pages/kubernetes/ClusterList').then(m => ({ default: m.ClusterList })))
@@ -65,8 +66,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <Suspense fallback={<LoadingSpinner />}>
-      <Routes>
+    <ToastProvider>
+      <Suspense fallback={<LoadingSpinner />}>
+        <Routes>
         <Route path="/login" element={<Login />} />
         <Route
           path="/"
@@ -107,5 +109,6 @@ export default function App() {
         </Route>
       </Routes>
     </Suspense>
+    </ToastProvider>
   )
 }

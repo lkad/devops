@@ -224,3 +224,23 @@ go build ./...
 | `config/devices/devices.json` | 设备注册表 |
 | `config/devices/groups.json` | 设备组 (自动创建) |
 | `config/logs.json` | 日志存储配置 |
+
+---
+
+## DX Critical Fixes (from plan-devex-review)
+
+### Issue 1: Add LICENSE file
+**What:** No LICENSE file exists in the repository. Open source projects without a license are not actually open source.
+**Why:** Developers cannot legally use or modify the code without a license.
+**Fix:** Add `MIT License` or `Apache 2.0` to the project root.
+
+### Issue 2: Fix mux.Vars(r) bug in k8s cluster detail APIs
+**What:** `GetNodesHTTP`, `GetPodsHTTP`, `GetNamespacesHTTP` use `mux.Vars(r)["cluster"]` which returns empty string under Gin router.
+**Why:** Developers clicking on a cluster to see nodes get `INTERNAL_ERROR: stat /home/vagrant/.kube/config-: no such file or directory` - completely confusing error.
+**Evidence:** `curl /api/k8s/clusters/dev-cluster-1/health` → `{"error":{"code":"INTERNAL_ERROR","message":"stat /home/vagrant/.kube/config-: no such file or directory"}}`
+**Fix:** Use `ginadapter.Vars(r)` which exists in the codebase but isn't being used by these handlers.
+
+### Issue 3: Add device type validation
+**What:** Device type accepts any string including invalid values like `"type":"invalid"`.
+**Why:** No data integrity - the system stores garbage device types.
+**Fix:** Add enum validation for device types in the device creation/update API.

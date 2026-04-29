@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/devops-toolkit/internal/apierror"
+	"github.com/devops-toolkit/internal/ginadapter"
 	"github.com/devops-toolkit/internal/pagination"
-	"github.com/gorilla/mux"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -814,7 +814,7 @@ func (m *ClusterManager) CreateClusterHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 func (m *ClusterManager) DeleteClusterHTTP(w http.ResponseWriter, r *http.Request) {
-	name := mux.Vars(r)["name"]
+	name := ginfadapter.Vars(r)["name"]
 	if err := m.DeleteCluster(name); err != nil {
 		apierror.InternalErrorFromErr(w, err)
 		return
@@ -823,7 +823,7 @@ func (m *ClusterManager) DeleteClusterHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 func (m *ClusterManager) HealthCheckHTTP(w http.ResponseWriter, r *http.Request) {
-	name := mux.Vars(r)["name"]
+	name := ginfadapter.Vars(r)["name"]
 	status, err := m.HealthCheck(name)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -835,7 +835,7 @@ func (m *ClusterManager) HealthCheckHTTP(w http.ResponseWriter, r *http.Request)
 
 // Maintenance HTTP handlers
 func (m *ClusterManager) GetNodesHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster := mux.Vars(r)["cluster"]
+	cluster := ginfadapter.Vars(r)["name"]
 	limit, offset := parsePagination(r)
 	nodes, err := m.GetNodes(cluster)
 	if err != nil {
@@ -858,7 +858,7 @@ func (m *ClusterManager) GetNodesHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *ClusterManager) GetNamespacesHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster := mux.Vars(r)["cluster"]
+	cluster := ginfadapter.Vars(r)["name"]
 	namespaces, err := m.GetNamespaces(cluster)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -869,7 +869,7 @@ func (m *ClusterManager) GetNamespacesHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 func (m *ClusterManager) GetPodsHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster := mux.Vars(r)["cluster"]
+	cluster := ginfadapter.Vars(r)["name"]
 	namespace := r.URL.Query().Get("namespace")
 	if namespace == "" {
 		namespace = "default"
@@ -917,9 +917,9 @@ func (m *ClusterManager) MaintenanceOpHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 func (m *ClusterManager) GetPodLogsHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster := mux.Vars(r)["cluster"]
+	cluster := ginfadapter.Vars(r)["name"]
 	namespace := r.URL.Query().Get("namespace")
-	podName := mux.Vars(r)["pod"]
+	podName := ginfadapter.Vars(r)["pod"]
 	if namespace == "" || podName == "" {
 		apierror.ValidationError(w, "namespace and pod are required")
 		return
@@ -937,8 +937,8 @@ func (m *ClusterManager) GetPodLogsHTTP(w http.ResponseWriter, r *http.Request) 
 // GetPodLogsWithNamespaceHTTP handles GET /api/k8s/clusters/:id/namespaces/:ns/pods/:pod/logs
 // Supports ?previous=true for previous container logs and ?lines=N for tail count
 func (m *ClusterManager) GetPodLogsWithNamespaceHTTP(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	cluster := vars["cluster"]
+	vars := ginfadapter.Vars(r)
+	cluster := vars["name"]
 	namespace := vars["ns"]
 	podName := vars["pod"]
 
@@ -973,8 +973,8 @@ func (m *ClusterManager) PodExecHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vars := mux.Vars(r)
-	cluster := vars["cluster"]
+	vars := ginfadapter.Vars(r)
+	cluster := vars["name"]
 	namespace := vars["ns"]
 	podName := vars["pod"]
 
@@ -1011,7 +1011,7 @@ func (m *ClusterManager) PodExecHTTP(w http.ResponseWriter, r *http.Request) {
 
 // GetClusterMetricsHTTP handles GET /api/k8s/clusters/:id/metrics
 func (m *ClusterManager) GetClusterMetricsHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster := mux.Vars(r)["cluster"]
+	cluster := ginfadapter.Vars(r)["name"]
 
 	metrics, err := m.GetClusterMetrics(cluster)
 	if err != nil {
