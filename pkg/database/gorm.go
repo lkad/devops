@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/devops-toolkit/internal/device"
+	"github.com/devops-toolkit/internal/k8s"
 	"github.com/devops-toolkit/internal/project"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -114,5 +115,6 @@ func AutoMigrate() error {
 		&project.GORMResource{},
 		&project.GORMPermission{},
 		&project.AuditLog{},
+		&k8s.GORMCluster{},
 	)
 }

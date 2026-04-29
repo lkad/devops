@@ -19,8 +19,10 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
+	"gorm.io/gorm"
 )
 
 type ClusterManager struct {
@@ -29,6 +31,7 @@ type ClusterManager struct {
 	k3dPath       string
 	kindPath      string
 	kubectlPath   string
+	db           *gorm.DB
 }
 
 type Cluster struct {
@@ -116,13 +119,14 @@ type NodeMetrics struct {
 	MemCap    string `json:"memCap"`
 }
 
-func NewClusterManager() *ClusterManager {
+func NewClusterManager(db *gorm.DB) *ClusterManager {
 	return &ClusterManager{
 		provider:      "k3d",
 		kubeconfigDir: filepath.Join(os.Getenv("HOME"), ".kube"),
 		k3dPath:       "k3d",
 		kindPath:      "kind",
 		kubectlPath:   "kubectl",
+		db:            db,
 	}
 }
 
@@ -130,7 +134,106 @@ func (m *ClusterManager) getKubeconfig(clusterName string) string {
 	return filepath.Join(m.kubeconfigDir, fmt.Sprintf("config-%s", clusterName))
 }
 
+// getKubeconfigFromDB retrieves kubeconfig content from database
+func (m *ClusterManager) getKubeconfigFromDB(clusterName string) (string, error) {
+	if m.db == nil {
+		return "", fmt.Errorf("database not initialized")
+	}
+	var cluster GORMCluster
+	if err := m.db.Where("name = ?", clusterName).First(&cluster).Error; err != nil {
+		return "", fmt.Errorf("cluster not found: %w", err)
+	}
+	return cluster.Kubeconfig, nil
+}
+
+// getClusterByName retrieves a cluster from database by name
+func (m *ClusterManager) getClusterByName(clusterName string) (*GORMCluster, error) {
+	if m.db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	var cluster GORMCluster
+	if err := m.db.Where("name = ?", clusterName).First(&cluster).Error; err != nil {
+		return nil, err
+	}
+	return &cluster, nil
+}
+
+// buildClientFromKubeconfig builds a kubernetes client from kubeconfig content (string)
+func (m *ClusterManager) buildClientFromKubeconfig(kubeconfigContent string) (*kubernetes.Clientset, error) {
+	// Write kubeconfig to a temp file since clientcmd.Load requires a file path
+	tmpFile, err := os.CreateTemp("", "kubeconfig-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp kubeconfig file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	if _, err := tmpFile.WriteString(kubeconfigContent); err != nil {
+		return nil, fmt.Errorf("failed to write kubeconfig content: %w", err)
+	}
+	tmpFile.Close()
+
+	cfg, err := clientcmd.BuildConfigFromFlags("", tmpFile.Name())
+	if err != nil {
+		return nil, err
+	}
+	return kubernetes.NewForConfig(cfg)
+}
+
+// buildClient builds a kubernetes client for the given cluster
+// If DB is available, reads kubeconfig from DB; otherwise falls back to file system
+func (m *ClusterManager) buildClient(clusterName string) (*kubernetes.Clientset, error) {
+	cfg, err := m.buildConfig(clusterName)
+	if err != nil {
+		return nil, err
+	}
+	return kubernetes.NewForConfig(cfg)
+}
+
+// buildConfig builds a rest config for the given cluster
+// If DB is available, reads kubeconfig from DB; otherwise falls back to file system
+func (m *ClusterManager) buildConfig(clusterName string) (*rest.Config, error) {
+	if m.db != nil {
+		kubeconfig, err := m.getKubeconfigFromDB(clusterName)
+		if err == nil && kubeconfig != "" {
+			// Write kubeconfig to a temp file since clientcmd.Load requires a file path
+			tmpFile, err := os.CreateTemp("", "kubeconfig-*")
+			if err != nil {
+				return nil, fmt.Errorf("failed to create temp kubeconfig file: %w", err)
+			}
+			defer os.Remove(tmpFile.Name())
+			defer tmpFile.Close()
+
+			if _, err := tmpFile.WriteString(kubeconfig); err != nil {
+				return nil, fmt.Errorf("failed to write kubeconfig content: %w", err)
+			}
+			tmpFile.Close()
+			return clientcmd.BuildConfigFromFlags("", tmpFile.Name())
+		}
+	}
+	// Fallback to file system
+	kubeconfigPath := m.getKubeconfig(clusterName)
+	return clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+}
+
 func (m *ClusterManager) ListClusters() ([]*Cluster, error) {
+	// If DB is available, read from database
+	if m.db != nil {
+		var dbClusters []GORMCluster
+		if err := m.db.Find(&dbClusters).Error; err != nil {
+			return nil, fmt.Errorf("failed to list clusters from DB: %w", err)
+		}
+		var clusters []*Cluster
+		for _, c := range dbClusters {
+			clusters = append(clusters, &Cluster{
+				Name:   c.Name,
+				Type:   string(c.Type),
+				Status: string(c.Status),
+			})
+		}
+		return clusters, nil
+	}
+	// Fallback to k3d CLI if DB not available
 	cmd := exec.Command(m.k3dPath, "cluster", "list")
 	output, err := cmd.Output()
 	if err != nil {
@@ -209,16 +312,50 @@ func (m *ClusterManager) DeleteCluster(name string) error {
 	return cmd.Run()
 }
 
+// RegisterCluster adds a new cluster to the database
+func (m *ClusterManager) RegisterCluster(name string, clusterType ClusterType, env ClusterEnv, kubeconfig string) (*GORMCluster, error) {
+	if m.db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	cluster := &GORMCluster{
+		Name:       name,
+		Type:       clusterType,
+		Env:        env,
+		Kubeconfig: kubeconfig,
+		Status:     ClusterStatusUnknown,
+	}
+	if err := m.db.Create(cluster).Error; err != nil {
+		return nil, fmt.Errorf("failed to register cluster: %w", err)
+	}
+	return cluster, nil
+}
+
+// UnregisterCluster removes a cluster from the database
+func (m *ClusterManager) UnregisterCluster(name string) error {
+	if m.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if err := m.db.Where("name = ?", name).Delete(&GORMCluster{}).Error; err != nil {
+		return fmt.Errorf("failed to unregister cluster: %w", err)
+	}
+	return nil
+}
+
+// UpdateClusterStatus updates the status of a cluster in the database
+func (m *ClusterManager) UpdateClusterStatus(name string, status ClusterStatus) error {
+	if m.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if err := m.db.Model(&GORMCluster{}).Where("name = ?", name).Update("status", status).Error; err != nil {
+		return fmt.Errorf("failed to update cluster status: %w", err)
+	}
+	return nil
+}
+
 func (m *ClusterManager) HealthCheck(name string) (map[string]interface{}, error) {
 	ctx := context.Background()
-	kubeconfigPath := m.getKubeconfig(name)
 
-	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-	if err != nil {
-		return nil, err
-	}
-
-	clientset, err := kubernetes.NewForConfig(cfg)
+	clientset, err := m.buildClient(name)
 	if err != nil {
 		return nil, err
 	}
@@ -257,14 +394,8 @@ func (m *ClusterManager) HealthCheck(name string) (map[string]interface{}, error
 
 func (m *ClusterManager) GetWorkloads(name, namespace string) ([]map[string]interface{}, error) {
 	ctx := context.Background()
-	kubeconfigPath := m.getKubeconfig(name)
 
-	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-	if err != nil {
-		return nil, err
-	}
-
-	clientset, err := kubernetes.NewForConfig(cfg)
+	clientset, err := m.buildClient(name)
 	if err != nil {
 		return nil, err
 	}
@@ -289,14 +420,8 @@ func (m *ClusterManager) GetWorkloads(name, namespace string) ([]map[string]inte
 // Node Management - 节点管理
 func (m *ClusterManager) GetNodes(clusterName string) ([]Node, error) {
 	ctx := context.Background()
-	kubeconfigPath := m.getKubeconfig(clusterName)
 
-	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-	if err != nil {
-		return nil, err
-	}
-
-	clientset, err := kubernetes.NewForConfig(cfg)
+	clientset, err := m.buildClient(clusterName)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +477,8 @@ func (m *ClusterManager) GetNodes(clusterName string) ([]Node, error) {
 
 // Cordon - 标记节点为不可调度
 func (m *ClusterManager) CordonNode(clusterName, nodeName string) error {
-	cmd := exec.Command(m.kubectlPath, "--kubeconfig", m.getKubeconfig(clusterName),
+	kubeconfigPath := m.getKubeconfig(clusterName)
+	cmd := exec.Command(m.kubectlPath, "--kubeconfig", kubeconfigPath,
 		"cordon", nodeName)
 	return cmd.Run()
 }
@@ -378,14 +504,8 @@ func (m *ClusterManager) DrainNode(clusterName, nodeName string, force bool) err
 // Pod Management - Pod管理
 func (m *ClusterManager) GetPods(clusterName, namespace string) ([]Pod, error) {
 	ctx := context.Background()
-	kubeconfigPath := m.getKubeconfig(clusterName)
 
-	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-	if err != nil {
-		return nil, err
-	}
-
-	clientset, err := kubernetes.NewForConfig(cfg)
+	clientset, err := m.buildClient(clusterName)
 	if err != nil {
 		return nil, err
 	}
@@ -441,9 +561,12 @@ func (m *ClusterManager) GetPods(clusterName, namespace string) ([]Pod, error) {
 
 // DeletePod - 删除 Pod
 func (m *ClusterManager) DeletePod(clusterName, namespace, podName string) error {
-	cmd := exec.Command(m.kubectlPath, "--kubeconfig", m.getKubeconfig(clusterName),
-		"delete", "pod", podName, "-n", namespace)
-	return cmd.Run()
+	ctx := context.Background()
+	clientset, err := m.buildClient(clusterName)
+	if err != nil {
+		return err
+	}
+	return clientset.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
 }
 
 // RestartPod - 重启 Pod (删除后自动重新创建)
@@ -456,32 +579,49 @@ func (m *ClusterManager) RestartPod(clusterName, namespace, podName string) erro
 
 // GetPodLogs - 获取 Pod 日志
 func (m *ClusterManager) GetPodLogs(clusterName, namespace, podName string, lines int) (string, error) {
-	args := []string{"--kubeconfig", m.getKubeconfig(clusterName),
-		"logs", podName, "-n", namespace}
-	if lines > 0 {
-		args = append(args, fmt.Sprintf("--tail=%d", lines))
-	}
-
-	cmd := exec.Command(m.kubectlPath, args...)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
+	clientset, err := m.buildClient(clusterName)
+	if err != nil {
 		return "", err
 	}
-	return out.String(), nil
+	ctx := context.Background()
+	// Get first container if not specified
+	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	container := ""
+	if len(pod.Spec.Containers) > 0 {
+		container = pod.Spec.Containers[0].Name
+	}
+
+	limit := int64(lines)
+	if limit <= 0 {
+		limit = 100
+	}
+
+	req := clientset.CoreV1().Pods(namespace).GetLogs(podName, &v1.PodLogOptions{
+		Container: container,
+		TailLines: &limit,
+	})
+	result, err := req.Stream(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer result.Close()
+
+	buf := new(bytes.Buffer)
+	_, err = buf.ReadFrom(result)
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 // GetPodLogsWithOptions retrieves pod logs using the Kubernetes client API with support for previous logs
 func (m *ClusterManager) GetPodLogsWithOptions(clusterName string, opts PodLogsOptions) (string, error) {
 	ctx := context.Background()
-	kubeconfigPath := m.getKubeconfig(clusterName)
 
-	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-	if err != nil {
-		return "", err
-	}
-
-	clientset, err := kubernetes.NewForConfig(cfg)
+	clientset, err := m.buildClient(clusterName)
 	if err != nil {
 		return "", err
 	}
@@ -514,14 +654,8 @@ func (m *ClusterManager) GetPodLogsWithOptions(clusterName string, opts PodLogsO
 // PodExec executes a command in a pod container using the Kubernetes exec API
 func (m *ClusterManager) PodExec(clusterName string, opts ExecOptions) (*ExecResult, error) {
 	ctx := context.Background()
-	kubeconfigPath := m.getKubeconfig(clusterName)
 
-	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-	if err != nil {
-		return nil, err
-	}
-
-	clientset, err := kubernetes.NewForConfig(cfg)
+	clientset, err := m.buildClient(clusterName)
 	if err != nil {
 		return nil, err
 	}
@@ -556,6 +690,11 @@ func (m *ClusterManager) PodExec(clusterName string, opts ExecOptions) (*ExecRes
 	req.Param("stdout", "true")
 	req.Param("stderr", "true")
 	req.Param("tty", "false")
+
+	cfg, err := clientcmd.BuildConfigFromFlags("", "")
+	if err != nil {
+		return nil, err
+	}
 
 	executor, err := remotecommand.NewSPDYExecutor(cfg, "POST", req.URL())
 	if err != nil {
@@ -820,11 +959,99 @@ func (m *ClusterManager) CreateClusterHTTP(w http.ResponseWriter, r *http.Reques
 
 func (m *ClusterManager) DeleteClusterHTTP(w http.ResponseWriter, r *http.Request) {
 	name := ginfadapter.Vars(r)["name"]
-	if err := m.DeleteCluster(name); err != nil {
+	if err := m.UnregisterCluster(name); err != nil {
 		apierror.InternalErrorFromErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// RegisterClusterHTTP handles POST /api/k8s/clusters
+func (m *ClusterManager) RegisterClusterHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		apierror.MethodNotAllowed(w)
+		return
+	}
+	var input struct {
+		Name       string `json:"name" binding:"required"`
+		Type       string `json:"type" binding:"required"`
+		Env        string `json:"environment"`
+		Kubeconfig string `json:"kubeconfig" binding:"required"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		apierror.ValidationError(w, err.Error())
+		return
+	}
+
+	env := ClusterEnvDev
+	if input.Env != "" {
+		env = ClusterEnv(input.Env)
+	}
+
+	cluster, err := m.RegisterCluster(input.Name, ClusterType(input.Type), env, input.Kubeconfig)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(cluster)
+}
+
+// GetClusterHTTP handles GET /api/k8s/clusters/:name
+func (m *ClusterManager) GetClusterHTTP(w http.ResponseWriter, r *http.Request) {
+	name := ginfadapter.Vars(r)["name"]
+	cluster, err := m.getClusterByName(name)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(cluster)
+}
+
+// UpdateClusterHTTP handles PUT /api/k8s/clusters/:name
+func (m *ClusterManager) UpdateClusterHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "PUT" {
+		apierror.MethodNotAllowed(w)
+		return
+	}
+	name := ginfadapter.Vars(r)["name"]
+	var input struct {
+		Type   string `json:"type,omitempty"`
+		Env    string `json:"environment,omitempty"`
+		Status string `json:"status,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		apierror.ValidationError(w, err.Error())
+		return
+	}
+
+	updates := map[string]interface{}{}
+	if input.Type != "" {
+		updates["type"] = input.Type
+	}
+	if input.Env != "" {
+		updates["env"] = input.Env
+	}
+	if input.Status != "" {
+		updates["status"] = input.Status
+	}
+
+	if len(updates) > 0 {
+		if err := m.db.Model(&GORMCluster{}).Where("name = ?", name).Updates(updates).Error; err != nil {
+			apierror.InternalErrorFromErr(w, err)
+			return
+		}
+	}
+
+	cluster, err := m.getClusterByName(name)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(cluster)
 }
 
 func (m *ClusterManager) HealthCheckHTTP(w http.ResponseWriter, r *http.Request) {

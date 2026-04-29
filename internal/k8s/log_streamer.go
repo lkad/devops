@@ -14,8 +14,6 @@ import (
 	"github.com/devops-toolkit/internal/logs"
 	"github.com/devops-toolkit/internal/websocket"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // ContainerLogSubscription represents an active log streaming subscription
@@ -300,14 +298,8 @@ func InferLogLevel(message string) string {
 // GetPodContainers returns all container names for a pod
 func (m *ClusterManager) GetPodContainers(clusterName, namespace, podName string) ([]string, error) {
 	ctx := context.Background()
-	kubeconfig := m.getKubeconfig(clusterName)
 
-	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-
-	clientset, err := kubernetes.NewForConfig(cfg)
+	clientset, err := m.buildClient(clusterName)
 	if err != nil {
 		return nil, err
 	}
@@ -325,10 +317,22 @@ func (m *ClusterManager) GetPodContainers(clusterName, namespace, podName string
 	return containers, nil
 }
 
+// globalClusterManager is a package-level ClusterManager for log streaming
+// This is set once during initialization with access to the DB
+var globalClusterManager *ClusterManager
+
+// SetGlobalClusterManager sets the global ClusterManager for log streaming
+func SetGlobalClusterManager(m *ClusterManager) {
+	globalClusterManager = m
+}
+
 // SubscribeToAllContainers subscribes to logs from all containers in a pod
 func SubscribeToAllContainers(hub *websocket.Hub, logMgr *logs.Manager, clusterID, clusterName, namespace, pod string, since time.Time) ([]*ContainerLogSubscription, error) {
-	m := NewClusterManager()
-	containers, err := m.GetPodContainers(clusterID, namespace, pod)
+	m := globalClusterManager
+	if m == nil {
+		return nil, fmt.Errorf("cluster manager not initialized")
+	}
+	containers, err := m.GetPodContainers(clusterName, namespace, pod)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod containers: %w", err)
 	}

@@ -87,7 +87,8 @@ func main() {
 	metricsMgr := metrics.NewCollector()
 	alertsMgr := alerts.NewManager(metricsMgr)
 	pipelineMgr := pipeline.NewManager()
-	k8sMgr := k8s.NewClusterManager()
+	k8sMgr := k8s.NewClusterManager(db)
+	k8s.SetGlobalClusterManager(k8sMgr)
 	discoveryMgr := discovery.NewManager()
 	physicalhostMgr := physicalhost.NewManager()
 
@@ -177,7 +178,9 @@ func main() {
 
 	// K8s routes
 	api.GET("/api/k8s/clusters", ginfadapter.GinToHTTPHandler(k8sMgr.ListClustersHTTP))
-	api.POST("/api/k8s/clusters", ginfadapter.GinToHTTPHandler(k8sMgr.CreateClusterHTTP))
+	api.POST("/api/k8s/clusters", ginfadapter.GinToHTTPHandler(k8sMgr.RegisterClusterHTTP))
+	api.GET("/api/k8s/clusters/:name", ginfadapter.GinToHTTPHandler(k8sMgr.GetClusterHTTP, "name"))
+	api.PUT("/api/k8s/clusters/:name", ginfadapter.GinToHTTPHandler(k8sMgr.UpdateClusterHTTP, "name"))
 	api.DELETE("/api/k8s/clusters/:name", ginfadapter.GinToHTTPHandler(k8sMgr.DeleteClusterHTTP, "name"))
 	api.GET("/api/k8s/clusters/:name/health", ginfadapter.GinToHTTPHandler(k8sMgr.HealthCheckHTTP, "name"))
 	api.GET("/api/k8s/clusters/:name/nodes", ginfadapter.GinToHTTPHandler(k8sMgr.GetNodesHTTP, "name"))
