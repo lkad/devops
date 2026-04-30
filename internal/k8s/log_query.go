@@ -3,8 +3,10 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -117,19 +119,19 @@ func (m *ClusterManager) getPodLogsFromK8s(ctx context.Context, cluster, namespa
 	}
 	defer logsStream.Close()
 
-	var lines []string
-	buf := make([]byte, 4096)
-	for {
-		n, err := logsStream.Read(buf)
-		if n > 0 {
-			lines = append(lines, string(buf[:n]))
-		}
-		if err != nil {
-			break
+	data, err := io.ReadAll(logsStream)
+	if err != nil {
+		return nil, fmt.Errorf("read log stream: %w", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	// Filter empty lines
+	var result []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			result = append(result, line)
 		}
 	}
-
-	return lines, nil
+	return result, nil
 }
 
 // int64Ptr is a helper to get int64 pointer
