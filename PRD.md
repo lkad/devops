@@ -1207,6 +1207,68 @@ type K8sCluster struct {
 | `/api/k8s/maintenance` | POST | 维护操作 |
 | `/api/physical-hosts/:id/k8s-pods` | GET | 物理主机上的 K8s Pod（跨集群） |
 
+### 10.6.1 K8s Pod Log Viewer
+
+K8s pod logs support two modes: real-time streaming and historical query.
+
+#### Real-time Logs
+
+- Uses K8s API log streaming (HTTP chunked transfer)
+- Auto-refresh every 5 seconds
+- Configurable line count (50, 100, 200, 500, 1000)
+- Falls back to simple polling if streaming not supported
+
+#### Historical Logs
+
+- Queries historical log storage backend based on project configuration
+- Supported backends: Loki, Elasticsearch, K8s Native (default)
+- Configurable time range (start/end timestamps)
+- Configurable result limit (max lines)
+- Backend auto-detection based on `LOG_STORAGE_BACKEND` environment variable
+
+#### Log Storage Backend Configuration
+
+| Backend | Env Variable | Default URL | Description |
+|---------|-------------|-------------|-------------|
+| Loki | `LOG_STORAGE_BACKEND=loki` | http://localhost:3100 | Grafana Loki for k8s logs |
+| Elasticsearch | `LOG_STORAGE_BACKEND=elasticsearch` | http://localhost:9200 | ES with k8s index pattern |
+| K8s Native | (empty) | - | Direct K8s API (default) |
+
+#### Frontend UI
+
+- Tab-based switching between "Real-time" and "Historical" modes
+- Real-time tab: Play icon, auto-refresh indicator, line count selector
+- Historical tab: Clock icon, time range pickers (from/to), limit selector, backend indicator
+- Common controls: Refresh button, Download button (exports as .txt)
+- Backend indicator shows which storage backend is being queried
+
+#### API Extension
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/logs` | GET | Real-time logs (existing) |
+| `/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/logs/historical` | GET | Historical logs via Loki/ES |
+
+#### Historical Logs API Parameters
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| start | ISO8601 | 1 hour ago | Start of time range |
+| end | ISO8601 | now | End of time range |
+| limit | int | 100 | Max lines to return (max 1000) |
+
+#### Historical Logs Response
+
+```json
+{
+  "data": {
+    "logs": ["line1", "line2", "..."],
+    "backend": "loki",
+    "count": 100
+  }
+}
+```
+
 ### 10.7 测试矩阵
 
 | 测试场景 | 输入 | 预期结果 | 验证 |
@@ -1217,6 +1279,12 @@ type K8sCluster struct {
 | 获取节点 | 存在的集群名 | 返回节点列表 | 节点数量、资源状态 |
 | 获取 Pod | 集群名 + 命名空间 | 返回 Pod 列表 | Pod 数量、状态正确 |
 | 获取 Pod 日志 | 集群名 + 命名空间 + Pod 名 | 返回日志内容 | 日志内容非空 |
+| 获取 Pod 历史日志 | loki 后端 + 有效时间范围 | 返回日志列表 | 日志内容匹配 |
+| 获取 Pod 历史日志 | elasticsearch 后端 + 有效时间范围 | 返回日志列表 | 日志内容匹配 |
+| 获取 Pod 历史日志 | k8s-native 后端 | 返回日志列表 | 直接从 K8s API 获取 |
+| 实时日志自动刷新 | Pod 运行中 | 每5秒更新日志 | 新日志出现 |
+| 模式切换 | 从实时切换到历史 | UI 正确切换 | 历史时间范围控件显示 |
+| 日志下载 | 任意模式 | 下载日志文件 | 文件内容正确 |
 | Pod exec | 有效命令 | 命令执行成功 | 输出返回 |
 | 部署应用 | deployment 配置 | 部署成功 | replicas ready |
 | 扩缩容 | deployment + replicas | 扩缩成功 | replicas 数量匹配 |
