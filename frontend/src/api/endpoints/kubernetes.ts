@@ -81,6 +81,12 @@ export interface K8sApiResponse<T> {
   }
 }
 
+export interface K8sPodLogsResponse {
+  logs: string[]
+  backend: string
+  count: number
+}
+
 export const kubernetesApi = {
   listClusters: () =>
     apiClient.get<K8sApiResponse<K8sCluster[]>>('/api/k8s/clusters'),
@@ -107,7 +113,7 @@ export const kubernetesApi = {
     apiClient.get<K8sApiResponse<K8sPod[]>>(`/api/k8s/clusters/${clusterName}/pods`, { params }),
 
   getPodLogsHistorical: (clusterName: string, namespace: string, podName: string, params?: { start?: string; end?: string; limit?: number }) =>
-    apiClient.get<{ data: { logs: string[]; backend: string; count: number }; pagination?: never }>(
+    apiClient.get<K8sApiResponse<K8sPodLogsResponse>>(
       `/api/k8s/clusters/${clusterName}/namespaces/${namespace}/pods/${podName}/logs/historical`,
       { params }
     ),
