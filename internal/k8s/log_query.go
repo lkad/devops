@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gorilla/mux"
 	"k8s.io/api/core/v1"
 )
 
@@ -21,20 +22,31 @@ type HistoricalLogsResponse struct {
 }
 
 // GetHistoricalLogsHTTP handles GET /api/k8s/clusters/:name/namespaces/:ns/pods/:pod/logs/historical
-func (m *ClusterManager) GetHistoricalLogsHTTP(c *gin.Context) {
-	cluster := c.Param("name")
-	namespace := c.Param("ns")
-	pod := c.Param("pod")
+func (m *ClusterManager) GetHistoricalLogsHTTP(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	cluster := vars["name"]
+	namespace := vars["ns"]
+	pod := vars["pod"]
 
 	if cluster == "" || namespace == "" || pod == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing required params"})
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "missing required params"})
 		return
 	}
 
 	// Parse query params
-	startStr := c.DefaultQuery("start", time.Now().Add(-1*time.Hour).Format(time.RFC3339))
-	endStr := c.DefaultQuery("end", time.Now().Format(time.RFC3339))
-	limitStr := c.DefaultQuery("limit", "100")
+	startStr := r.URL.Query().Get("start")
+	if startStr == "" {
+		startStr = time.Now().Add(-1*time.Hour).Format(time.RFC3339)
+	}
+	endStr := r.URL.Query().Get("end")
+	if endStr == "" {
+		endStr = time.Now().Format(time.RFC3339)
+	}
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr == "" {
+		limitStr = "100"
+	}
 
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit <= 0 {
@@ -54,16 +66,18 @@ func (m *ClusterManager) GetHistoricalLogsHTTP(c *gin.Context) {
 		end = time.Now()
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	logs, backend, err := m.GetHistoricalLogs(ctx, cluster, namespace, pod, start, end, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, HistoricalLogsResponse{
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(HistoricalLogsResponse{
 		Logs:    logs,
 		Backend: backend,
 		Count:   len(logs),
@@ -110,7 +124,7 @@ func (m *ClusterManager) getPodLogsFromK8s(ctx context.Context, cluster, namespa
 	}
 
 	req := clientset.CoreV1().Pods(namespace).GetLogs(pod, &v1.PodLogOptions{
-		TailLines: int64Ptr(limit),
+		TailLines: int64Ptr(int64(limit)),
 	})
 
 	logsStream, err := req.Stream(ctx)
