@@ -15,16 +15,15 @@ const (
 
 // ProjectLogConfig holds project-specific log storage configuration
 type ProjectLogConfig struct {
-	Cluster   string
-	ProjectID string
-	Backend   LogStorageBackend
-	LokiURL   string
-	ESURL     string
-	Index     string
+	Cluster string
+	Backend LogStorageBackend
+	LokiURL string
+	ESURL   string
+	Index   string
 }
 
 // GetProjectLogBackend returns the log storage backend for a given cluster
-func GetProjectLogBackend(clusterName string) (*ProjectLogConfig, error) {
+func GetProjectLogBackend(clusterName string) *ProjectLogConfig {
 	backend := GetLogBackendFromEnv()
 	return &ProjectLogConfig{
 		Cluster: clusterName,
@@ -32,7 +31,7 @@ func GetProjectLogBackend(clusterName string) (*ProjectLogConfig, error) {
 		LokiURL: GetEnvOrDefault("LOKI_URL", "http://localhost:3100"),
 		ESURL:   GetEnvOrDefault("ELASTICSEARCH_URL", "http://localhost:9200"),
 		Index:   GetEnvOrDefault("ELASTICSEARCH_INDEX", "k8s-logs-*"),
-	}, nil
+	}
 }
 
 // GetLogBackendFromEnv returns configured log backend from environment
