@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -25,12 +26,7 @@ type ESSearchResponse struct {
 		} `json:"total"`
 		Hits []struct {
 			Source struct {
-				Timestamp string `json:"@timestamp"`
-				Message   string `json:"message"`
-				Stream    string `json:"stream"`
-				Pod       string `json:"kubernetes.pod_name"`
-				Namespace string `json:"kubernetes.namespace_name"`
-				Cluster   string `json:"kubernetes.cluster_name"`
+				Message string `json:"message"`
 			} `json:"_source"`
 		} `json:"hits"`
 	} `json:"hits"`
@@ -93,7 +89,8 @@ func (c *ESClient) QueryPodLogs(ctx context.Context, pod, namespace, cluster str
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("es returned status %d", resp.StatusCode)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("es returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var result ESSearchResponse
