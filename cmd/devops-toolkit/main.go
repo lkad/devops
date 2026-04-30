@@ -195,6 +195,7 @@ func main() {
 	api.GET("/api/k8s/clusters/:name/pods", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodsHTTP, "name"))
 	api.GET("/api/k8s/clusters/:name/pods/:pod/logs", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodLogsHTTP, "name", "pod"))
 	api.GET("/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/logs", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodLogsWithNamespaceHTTP, "name", "ns", "pod"))
+	api.GET("/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/logs/historical", ginfadapter.GinToHTTPHandler(k8sMgr.GetHistoricalLogsHTTP, "name", "ns", "pod"))
 	api.POST("/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/exec", ginfadapter.GinToHTTPHandler(k8sMgr.PodExecHTTP, "name", "ns", "pod"))
 	api.GET("/api/k8s/clusters/:name/metrics", ginfadapter.GinToHTTPHandler(k8sMgr.GetClusterMetricsHTTP, "name"))
 	api.POST("/api/k8s/maintenance", ginfadapter.GinToHTTPHandler(k8sMgr.MaintenanceOpHTTP))
