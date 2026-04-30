@@ -301,7 +301,26 @@ export function ClusterDetail() {
                       {pod.namespace}
                     </button>
                   </td>
-                  <td className={`${styles.podCell} ${styles.monoCell}`}>{pod.node}</td>
+                  <td className={styles.podCell}>
+                    <button
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: 'var(--color-primary)',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                        fontSize: 'var(--text-body)',
+                      }}
+                      onClick={() => {
+                        setNodeFilter(pod.node)
+                        setActiveTab('nodes')
+                      }}
+                      title={`View node ${pod.node}`}
+                    >
+                      {pod.node}
+                    </button>
+                  </td>
                   <td className={styles.podCell}>{pod.age}</td>
                   <td className={styles.podCell}>
                     <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
