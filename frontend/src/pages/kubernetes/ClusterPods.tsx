@@ -23,20 +23,25 @@ export function ClusterPods() {
 
   const pods: K8sPod[] = podsResponse?.data ?? []
 
+  // Get node name - backend returns node_name but frontend uses node
+  const getNodeName = (pod: K8sPod) => pod.node || pod.node_name || '-'
+
   // Get unique nodes and namespaces for filter dropdowns
-  const uniqueNodes = [...new Set(pods.map(p => p.node))].sort()
+  const uniqueNodes = [...new Set(pods.map(p => getNodeName(p)))].sort()
   const uniqueNamespaces = [...new Set(pods.map(p => p.namespace))].sort()
 
   // Filter pods based on selected filters
   const filteredPods = pods.filter(pod => {
-    if (nodeFilter && pod.node !== nodeFilter) return false
+    if (nodeFilter && getNodeName(pod) !== nodeFilter) return false
     if (namespaceFilter && pod.namespace !== namespaceFilter) return false
     return true
   })
 
-  const handleNodeClick = (nodeName: string) => {
-    // Navigate to nodes tab with this node highlighted
-    navigate(`/k8s/${clusterName}/nodes?highlight=${encodeURIComponent(nodeName)}`)
+  const handleViewNodeClick = (pod: K8sPod) => {
+    const nodeName = getNodeName(pod)
+    if (nodeName && nodeName !== '-') {
+      navigate(`/k8s/${clusterName}/nodes?highlight=${encodeURIComponent(nodeName)}`)
+    }
   }
 
   const clearFilters = () => {
@@ -155,10 +160,10 @@ export function ClusterPods() {
                     <td className={styles.podCell}>
                       <button
                         className={styles.nodeLink}
-                        onClick={() => handleNodeClick(pod.node)}
-                        title={`View node ${pod.node}`}
+                        onClick={() => handleViewNodeClick(pod)}
+                        title={`View node ${getNodeName(pod)}`}
                       >
-                        {pod.node}
+                        {getNodeName(pod)}
                       </button>
                     </td>
                     <td className={styles.podCell}>{pod.age}</td>

@@ -27,6 +27,7 @@ export interface K8sPod {
   namespace: string
   status: string
   node: string
+  node_name?: string  // backend returns node_name
   age: string
 }
 
