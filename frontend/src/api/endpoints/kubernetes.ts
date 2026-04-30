@@ -106,6 +106,12 @@ export const kubernetesApi = {
   getPods: (clusterName: string, params?: { namespace?: string }) =>
     apiClient.get<K8sApiResponse<K8sPod[]>>(`/api/k8s/clusters/${clusterName}/pods`, { params }),
 
+  getPodLogsHistorical: (clusterName: string, namespace: string, podName: string, params?: { start?: string; end?: string; limit?: number }) =>
+    apiClient.get<{ data: { logs: string[]; backend: string; count: number }; pagination?: never }>(
+      `/api/k8s/clusters/${clusterName}/namespaces/${namespace}/pods/${podName}/logs/historical`,
+      { params }
+    ),
+
   getNamespaces: (clusterName: string) =>
     apiClient.get<K8sApiResponse<K8sNamespace[]>>(`/api/k8s/clusters/${clusterName}/namespaces`),
 }
