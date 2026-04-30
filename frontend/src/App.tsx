@@ -97,7 +97,7 @@ export default function App() {
           <Route path="k8s/:cluster/nodes" element={<ClusterNodes />} />
           <Route path="k8s/:cluster/namespaces" element={<ClusterNamespaces />} />
           <Route path="k8s/:cluster/pods" element={<ClusterPods />} />
-          <Route path="k8s/:cluster/pods/:pod/logs" element={<PodLogs />} />
+          <Route path="k8s/:cluster/namespaces/:namespace/pods/:pod/logs" element={<PodLogs />} />
           <Route path="k8s/:cluster/pods/:pod/exec" element={<PodExec />} />
           <Route path="projects" element={<ProjectList />} />
           <Route path="projects/:id" element={<ProjectDetail />} />

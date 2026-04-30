@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { ArrowLeft, RefreshCw, Plus, Minus, X } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Plus, Minus, X, FileText } from 'lucide-react'
 import { kubernetesApi, type K8sCluster, type K8sNode, type K8sPod, type K8sNamespace } from '@/api/endpoints/kubernetes'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -305,6 +305,14 @@ export function ClusterDetail() {
                   <td className={styles.podCell}>{pod.age}</td>
                   <td className={styles.podCell}>
                     <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => navigate(`/k8s/${clusterName}/namespaces/${pod.namespace}/pods/${pod.name}/logs`)}
+                        title="View logs"
+                      >
+                        <FileText size={14} />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"

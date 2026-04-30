@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Filter, X } from 'lucide-react'
+import { ArrowLeft, Filter, X, FileText } from 'lucide-react'
 import { kubernetesApi, type K8sPod } from '@/api/endpoints/kubernetes'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -139,6 +139,7 @@ export function ClusterPods() {
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '14px', fontWeight: 500, color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border)' }}>Namespace</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '14px', fontWeight: 500, color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border)' }}>Node</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '14px', fontWeight: 500, color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border)' }}>Age</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '14px', fontWeight: 500, color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border)' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -161,6 +162,16 @@ export function ClusterPods() {
                       </button>
                     </td>
                     <td className={styles.podCell}>{pod.age}</td>
+                    <td className={styles.podCell}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => navigate(`/k8s/${clusterName}/namespaces/${pod.namespace}/pods/${pod.name}/logs`)}
+                        title="View logs"
+                      >
+                        <FileText size={14} />
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
