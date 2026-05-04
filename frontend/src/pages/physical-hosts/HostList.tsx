@@ -15,11 +15,12 @@ interface Column {
 }
 
 const defaultColumns: Column[] = [
-  { key: 'host', label: 'Host', width: 280, minWidth: 180 },
+  { key: 'host', label: 'Host', width: 240, minWidth: 160 },
+  { key: 'ip', label: 'IP Address', width: 140, minWidth: 100 },
   { key: 'status', label: 'Status', width: 100, minWidth: 80 },
   { key: 'location', label: 'Location', width: 160, minWidth: 100 },
-  { key: 'environment', label: 'Environment', width: 120, minWidth: 100 },
-  { key: 'registered', label: 'Registered', width: 160, minWidth: 120 },
+  { key: 'environment', label: 'Environment', width: 110, minWidth: 100 },
+  { key: 'registered', label: 'Registered', width: 150, minWidth: 120 },
 ]
 
 const stateVariant = (status: string): 'success' | 'warning' | 'error' | 'info' | 'default' => {
@@ -113,21 +114,27 @@ export function HostList() {
             </div>
           </td>
         )
-      case 'status':
+      case 'ip':
         return (
           <td key={key} className={styles.td} style={{ width: columns[1].width }}>
+            <span className="text-sm font-mono text-text-secondary">{host.labels?.ip || host.labels?.['ip'] || 'N/A'}</span>
+          </td>
+        )
+      case 'status':
+        return (
+          <td key={key} className={styles.td} style={{ width: columns[2].width }}>
             <Badge variant={stateVariant(host.status)}>{host.status}</Badge>
           </td>
         )
       case 'location':
         return (
-          <td key={key} className={styles.td} style={{ width: columns[2].width }}>
+          <td key={key} className={styles.td} style={{ width: columns[3].width }}>
             <span className="text-sm text-text-secondary">{host.labels?.location || 'N/A'}</span>
           </td>
         )
       case 'environment':
         return (
-          <td key={key} className={styles.td} style={{ width: columns[3].width }}>
+          <td key={key} className={styles.td} style={{ width: columns[4].width }}>
             <span
               className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
               style={{
@@ -145,7 +152,7 @@ export function HostList() {
         )
       case 'registered':
         return (
-          <td key={key} className={styles.td} style={{ width: columns[4].width }}>
+          <td key={key} className={styles.td} style={{ width: columns[5].width }}>
             <span className="text-sm text-text-muted">{formatTime(host.registeredAt)}</span>
           </td>
         )
