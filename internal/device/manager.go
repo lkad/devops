@@ -168,8 +168,13 @@ func (m *Manager) UpdateDevice(id string, updates map[string]interface{}) (*Devi
 	if name, ok := updates["name"].(string); ok {
 		device.Name = name
 	}
-	if labels, ok := updates["labels"].(map[string]string); ok {
-		device.Labels = labels
+	if labels, ok := updates["labels"].(map[string]interface{}); ok {
+		device.Labels = make(map[string]string)
+		for k, v := range labels {
+			if str, ok := v.(string); ok {
+				device.Labels[k] = str
+			}
+		}
 	}
 	if bu, ok := updates["business_unit"].(string); ok {
 		device.BusinessUnit = bu

@@ -11,10 +11,12 @@ echo "DevOps URL: $DEVOPS_URL"
 echo ""
 
 # Discover physical host containers
+# Note: Loki sends logs with device label format "physical-host-001" (with leading zeros)
+# so we use the same format here for consistency
 declare -A CONTAINERS=(
-    ["clab-devops-physical-hosts-host01"]="physical-host-01"
-    ["clab-devops-physical-hosts-host02"]="physical-host-02"
-    ["clab-devops-physical-hosts-host03"]="physical-host-03"
+    ["clab-devops-physical-hosts-host01"]="physical-host-001"
+    ["clab-devops-physical-hosts-host02"]="physical-host-002"
+    ["clab-devops-physical-hosts-host03"]="physical-host-003"
 )
 
 # Check if log generator is running in container, if not deploy it
