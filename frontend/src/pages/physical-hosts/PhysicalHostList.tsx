@@ -41,7 +41,7 @@ export function PhysicalHostList() {
     queryFn: () => physicalHostsApi.listHosts(),
   })
 
-  const hosts: HostRow[] = (data?.hosts ?? []).map(host => ({
+  const hosts: HostRow[] = (data?.data ?? []).map(host => ({
     id: host.id,
     name: host.hostname,
     status: host.state,

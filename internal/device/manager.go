@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/devops-toolkit/internal/apierror"
+	"github.com/devops-toolkit/internal/logs"
 	"github.com/devops-toolkit/internal/pagination"
 	"github.com/google/uuid"
 	"github.com/devops-toolkit/internal/ginadapter"
@@ -18,9 +19,12 @@ import (
 // Manager handles device operations
 type Manager struct {
 	repo        *Repository
-	hypervisor HypervisorClient
-	metrics    MetricsCollector
-	network    NetworkDeviceClient
+	hypervisor  HypervisorClient
+	metrics     MetricsCollector
+	network     NetworkDeviceClient
+	logsMgr interface {
+		AddLog(level, message, source string, meta map[string]interface{}) (*logs.Entry, error)
+	}
 }
 
 // Environment represents the deployment environment
@@ -84,6 +88,18 @@ func NewManagerWithClients(db *gorm.DB, h HypervisorClient, m MetricsCollector, 
 		hypervisor: h,
 		metrics:    m,
 		network:    n,
+	}
+}
+
+// SetLogsManager sets the logs manager for device event logging
+func (m *Manager) SetLogsManager(l interface{ AddLog(level, message, source string, meta map[string]interface{}) (*logs.Entry, error) }) {
+	m.logsMgr = l
+}
+
+// logDeviceEvent logs a device event to the logs system
+func (m *Manager) logDeviceEvent(level, message, source string, meta map[string]interface{}) {
+	if m.logsMgr != nil {
+		m.logsMgr.AddLog(level, message, source, meta)
 	}
 }
 
@@ -206,6 +222,18 @@ func (m *Manager) TransitionState(id string, newState State, triggeredBy string,
 	// Log state transition
 	m.repo.RecordStateTransition(id, oldState, newState, triggeredBy, reason)
 
+	// Log to logs system
+	m.logDeviceEvent("info", fmt.Sprintf("Device %s transitioned from %s to %s", device.Name, oldState, newState), "device",
+		map[string]interface{}{
+			"device_id":    id,
+			"device_name":  device.Name,
+			"device_type":  device.Type,
+			"old_state":    oldState,
+			"new_state":    newState,
+			"triggered_by": triggeredBy,
+			"reason":       reason,
+		})
+
 	return device, nil
 }
 
@@ -325,7 +353,18 @@ func (m *Manager) VMPowerControl(ctx context.Context, vmID string, action string
 
 func (m *Manager) ListDevicesHTTP(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePagination(r)
-	devices, total, err := m.ListDevicesPaginated(limit, offset)
+	deviceType := r.URL.Query().Get("type")
+
+	var devices []*Device
+	var total int
+	var err error
+
+	if deviceType != "" {
+		devices, total, err = m.ListDevicesByType(deviceType, limit, offset)
+	} else {
+		devices, total, err = m.ListDevicesPaginated(limit, offset)
+	}
+
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
 		return

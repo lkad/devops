@@ -18,8 +18,13 @@ export interface PhysicalHost {
 }
 
 export interface PhysicalHostListResponse {
-  hosts: PhysicalHost[]
-  total: number
+  data: PhysicalHost[]
+  pagination?: {
+    total: number
+    limit: number
+    offset: number
+    has_more: boolean
+  }
 }
 
 export interface CreatePhysicalHostRequest {

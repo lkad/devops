@@ -60,6 +60,10 @@ type AuthConfig struct {
 	JWT_SECRET  string      `yaml:"jwt_secret"`
 	TokenExpiry time.Duration `yaml:"token_expiry"`
 	LDAP        LDAPConfig   `yaml:"ldap"`
+	DevBypass   bool         `yaml:"dev_bypass"`
+	DevUsername string       `yaml:"dev_username"`
+	DevPassword string       `yaml:"dev_password"`
+	DevRoles    []string     `yaml:"dev_roles"`
 }
 
 type LDAPConfig struct {

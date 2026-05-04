@@ -192,6 +192,15 @@
   font-size: var(--text-small);
 }
 
+.datePicker {
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--text-small);
+}
+
 .autoRefresh {
   font-size: var(--text-small);
   color: var(--color-text-muted);

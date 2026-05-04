@@ -251,6 +251,7 @@ The project hierarchy can be viewed in real-time via WebSocket subscriptions:
 | 2026-04-24 | Permission inheritance: BL → System → Project | Simplify permission management, inherit from parent level |
 | 2026-04-25 | 前端API路径使用相对地址 | 支持反向代理部署，路径可能是根路径或子路径 |
 | 2026-04-25 | K8s集群Type字段替代Provider字段 | k3d/kind仅用于测试环境，生产环境使用标准k8s集群 |
+| 2026-05-01 | K8s历史日志时间范围限制30天 | Loki查询最大支持约721小时(30天)，超出返回400错误；前端DatePicker自动限制选择范围 |
 
 ## 开发准则
 
@@ -326,17 +327,81 @@ location /devops/ {
 - 生产环境按标准K8s集群处理，所有操作相同
 - Cluster数据结构的`Type`字段替代原有的`Provider`字段
 
-### 3. 测试规范
+### 3. K8s历史日志时间范围限制
+
+**限制原因：**
+- Grafana Loki 查询时间范围最大支持约 721 小时（30天）
+- 超过此范围 Loki 返回 400 错误：`query time range exceeds the limit`
+
+**前端限制：**
+- DatePicker 组件自动限制日期选择范围不超过 30 天
+- 调整开始日期时，自动缩短结束日期确保不超过 30 天
+- 调整结束日期时，自动延长开始日期确保不超过 30 天
+
+**后端限制：**
+- `internal/k8s/log_query.go` 验证时间范围
+- 超出限制返回 400 错误：`time range exceeds maximum of 30 days (requested X hours)`
+
+**环境变量配置：**
+```bash
+LOG_STORAGE_BACKEND=loki   # 使用Loki存储 (可选: elasticsearch, 空=默认k8s原生)
+LOKI_URL=http://localhost:3100  # Loki服务器地址
+ELASTICSEARCH_URL=http://localhost:9200  # ES服务器地址
+ELASTICSEARCH_INDEX=k8s-logs-*  # ES索引名
+```
+
+### 5. 日志查询功能
+
+**通用日志存储后端配置：**
+
+| Backend | 说明 | 配置项 |
+|---------|------|--------|
+| `local` | 本地内存存储（默认） | 无需额外配置 |
+| `elasticsearch` | ES存储 | `ELASTICSEARCH_URL` |
+| `loki` | Loki存储 | `LOKI_URL` |
+
+**API端点：**
+- `GET /api/logs` — 查询日志（支持分页、level、source、search过滤）
+- `GET /api/logs/stats` — 日志统计
+- `POST /api/logs` — 创建日志
+- `POST /api/logs/generate` — 生成示例日志（开发测试用）
+
+**查询参数：**
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `level` | 日志级别 | `error`, `warn`, `info`, `debug` |
+| `source` | 来源 | `api`, `web`, `worker`, `database` |
+| `search` | 搜索消息内容 | `error` |
+| `limit` | 返回数量（默认50，最大100） | `100` |
+| `offset` | 偏移量 | `0` |
+
+**前端组件：**
+- `frontend/src/pages/logs/LogViewer.tsx` — 日志查看器页面
+
+**测试环境：**
+```bash
+# 启动Loki（如未运行）
+docker run -d --name devops-loki -p 3100:3100 grafana/loki:2.8.0
+
+# 使用local后端测试（默认）
+curl -X POST http://localhost:3000/api/logs/generate -d '{"count": 10}'
+
+# 切换到Loki后端
+export LOG_STORAGE_BACKEND=loki
+export LOKI_URL=http://localhost:3100
+```
+
+### 6. 测试规范
 
 测试分为两类：
 
-#### 3.1 开发测试 (DEV Tests)
+#### 4.1 开发测试 (DEV Tests)
 - 文件命名：`*_test.go`
 - 目的：本地快速开发验证
 - **允许使用 httptest mock**
 - 适用于：单元测试、handler逻辑测试
 
-#### 3.2 QA测试 (QA Tests)
+#### 4.2 QA测试 (QA Tests)
 - 文件命名：`*_integration_test.go`
 - 目的：真实环境验证，CI/CD使用
 - **禁止使用 mock，必须真实HTTP请求**

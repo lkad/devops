@@ -82,6 +82,8 @@ export function ClusterDetail() {
   const pods: K8sPod[] = podsResponse?.data ?? []
   const namespaces: K8sNamespace[] = namespacesResponse?.data ?? []
 
+  const getNodeName = (pod: K8sPod) => pod.node || pod.node_name || '-'
+
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
       case 'Ready':
@@ -183,7 +185,7 @@ export function ClusterDetail() {
             </thead>
             <tbody>
               {nodes.map((node) => {
-                const podCount = pods.filter(p => p.node === node.name).length
+                const podCount = pods.filter(p => getNodeName(p) === node.name).length
                 return (
                   <tr key={node.name} className={styles.nodeRow}>
                     <td className={`${styles.nodeCell} ${styles.monoCell}`}>{node.name}</td>
@@ -275,7 +277,7 @@ export function ClusterDetail() {
             </thead>
             <tbody>
               {pods
-                .filter(pod => !nodeFilter || pod.node === nodeFilter)
+                .filter(pod => !nodeFilter || getNodeName(pod) === nodeFilter)
                 .map((pod) => (
                 <tr key={pod.name} className={styles.podRow}>
                   <td className={`${styles.podCell} ${styles.monoCell}`}>{pod.name}</td>
@@ -313,12 +315,12 @@ export function ClusterDetail() {
                         fontSize: 'var(--text-body)',
                       }}
                       onClick={() => {
-                        setNodeFilter(pod.node)
+                        setNodeFilter(getNodeName(pod))
                         setActiveTab('nodes')
                       }}
-                      title={`View node ${pod.node}`}
+                      title={`View node ${getNodeName(pod)}`}
                     >
-                      {pod.node}
+                      {getNodeName(pod)}
                     </button>
                   </td>
                   <td className={styles.podCell}>{pod.age}</td>

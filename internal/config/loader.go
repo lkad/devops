@@ -80,6 +80,8 @@ type LogsConfig struct {
 	Backend       string `yaml:"backend"`
 	RetentionDays int    `yaml:"retention_days"`
 	Path          string `yaml:"path"`
+	ESURL         string `yaml:"es_url"`
+	LokiURL       string `yaml:"loki_url"`
 }
 
 type K8sConfig struct {
@@ -173,6 +175,12 @@ func Load(path string) (*Config, error) {
 	}
 	if backend := os.Getenv("LOG_STORAGE_BACKEND"); backend != "" {
 		cfg.Logs.Backend = backend
+	}
+	if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
+		cfg.Logs.ESURL = esURL
+	}
+	if lokiURL := os.Getenv("LOKI_URL"); lokiURL != "" {
+		cfg.Logs.LokiURL = lokiURL
 	}
 	// Dev auth bypass
 	if bypass := os.Getenv("DEVOPS_AUTH_BYPASS"); bypass == "true" {

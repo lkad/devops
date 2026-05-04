@@ -57,11 +57,11 @@ export function ClusterList() {
     queryKey: ['kubernetes', 'clusters'],
     queryFn: async () => {
       const response = await kubernetesApi.listClusters()
-      return response.data ?? []
+      return Array.isArray(response.data) ? response.data : []
     },
   })
 
-  const clusters = data ?? []
+  const clusters = Array.isArray(data) ? data : []
 
   const createMutation = useMutation({
     mutationFn: (data: CreateClusterRequest) => kubernetesApi.createCluster(data),

@@ -1,8 +1,10 @@
 import { useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
 import { ArrowLeft, RefreshCw, Download, Play, History } from 'lucide-react'
-import { kubernetesApi, K8sApiResponse, K8sPodLogsResponse } from '@/api/endpoints/kubernetes'
+import { kubernetesApi, K8sPodLogsResponse } from '@/api/endpoints/kubernetes'
 import { Button } from '@/components/ui/Button'
 import styles from './PodLogs.module.css'
 
@@ -14,12 +16,39 @@ export function PodLogs() {
   const [mode, setMode] = useState<LogMode>('realtime')
   const [lineCount, setLineCount] = useState(100)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [historicalParams, setHistoricalParams] = useState({
-    start: '',
-    end: '',
-    limit: 100,
+  const [historicalStartDate, setHistoricalStartDate] = useState(() => {
+    const now = new Date()
+    return new Date(now.getTime() - 60 * 60 * 1000)
   })
+  const [historicalEndDate, setHistoricalEndDate] = useState(() => new Date())
   const logsEndRef = useRef<HTMLDivElement>(null)
+
+  // Handle start date change - only adjust internal state, don't query
+  const handleStartDateChange = (date: Date | null) => {
+    if (!date) return
+    const maxRange = 30 * 24 * 60 * 60 * 1000 // 30 days in ms
+    const newEndTime = date.getTime() + maxRange
+    if (historicalEndDate.getTime() > newEndTime) {
+      setHistoricalEndDate(new Date(newEndTime))
+    }
+    setHistoricalStartDate(date)
+  }
+
+  // Handle end date change - only adjust internal state, don't query
+  const handleEndDateChange = (date: Date | null) => {
+    if (!date) return
+    const maxRange = 30 * 24 * 60 * 60 * 1000 // 30 days in ms
+    const newStartTime = date.getTime() - maxRange
+    if (historicalStartDate.getTime() < newStartTime) {
+      setHistoricalStartDate(new Date(newStartTime))
+    }
+    setHistoricalEndDate(date)
+  }
+
+  // Manual search - only triggers one query
+  const handleSearch = () => {
+    setRefreshKey(k => k + 1)
+  }
 
   // Real-time logs query
   const { data: realtimeLogs, isLoading: realtimeLoading } = useQuery({
@@ -35,13 +64,13 @@ export function PodLogs() {
     refetchInterval: 5000,
   })
 
-  // Historical logs query
-  const { data: historicalResponse, isLoading: historicalLoading } = useQuery<K8sApiResponse<K8sPodLogsResponse>>({
-    queryKey: ['kubernetes', 'cluster', cluster, 'namespace', namespace, 'pod', 'logs', 'historical', historicalParams, refreshKey],
+  // Historical logs query - only triggers when refreshKey changes (user clicks Search or Refresh)
+  const { data: historicalResponse, isLoading: historicalLoading } = useQuery<K8sPodLogsResponse>({
+    queryKey: ['kubernetes', 'cluster', cluster, 'namespace', namespace, 'pod', 'logs', 'historical', historicalStartDate.getTime(), historicalEndDate.getTime(), refreshKey],
     queryFn: () => kubernetesApi.getPodLogsHistorical(cluster!, namespace!, pod!, {
-      start: historicalParams.start || undefined,
-      end: historicalParams.end || undefined,
-      limit: historicalParams.limit.toString(),
+      start: historicalStartDate.toISOString(),
+      end: historicalEndDate.toISOString(),
+      limit: '100',
     }),
     enabled: mode === 'historical' && !!cluster && !!namespace && !!pod,
   })
@@ -51,7 +80,7 @@ export function PodLogs() {
   }
 
   const handleDownload = () => {
-    const logs = mode === 'realtime' ? realtimeLogs : (historicalResponse?.data?.logs?.join('\n') || '')
+    const logs = mode === 'realtime' ? realtimeLogs : (historicalResponse?.logs?.join('\n') || '')
     if (!logs) return
     const blob = new Blob([logs], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -67,15 +96,6 @@ export function PodLogs() {
   }
 
   const switchToHistorical = () => {
-    if (!historicalParams.start) {
-      const now = new Date()
-      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
-      setHistoricalParams({
-        start: oneHourAgo.toISOString(),
-        end: now.toISOString(),
-        limit: 100,
-      })
-    }
     setMode('historical')
   }
 
@@ -83,9 +103,9 @@ export function PodLogs() {
     return <div className={styles.container}>Pod not found</div>
   }
 
-  const logs = mode === 'realtime' ? realtimeLogs : (historicalResponse?.data?.logs?.join('\n') || '')
+  const logs = mode === 'realtime' ? realtimeLogs : (historicalResponse?.logs?.join('\n') || '')
   const isLoading = mode === 'realtime' ? realtimeLoading : historicalLoading
-  const backend = historicalResponse?.data?.backend || 'k8s-native'
+  const backend = historicalResponse?.backend || 'k8s-native'
 
   return (
     <div className={styles.container}>
@@ -150,33 +170,37 @@ export function PodLogs() {
         <div className={styles.controls}>
           <div className={styles.timeRangeControl}>
             <label>From:</label>
-            <input
-              type="datetime-local"
-              value={historicalParams.start?.slice(0, 16) || ''}
-              onChange={(e) => setHistoricalParams(p => ({ ...p, start: new Date(e.target.value).toISOString() }))}
-              className={styles.dateInput}
+            <DatePicker
+              selected={historicalStartDate}
+              onChange={handleStartDateChange}
+              showTimeSelect
+              timeFormat="HH:mm"
+              timeIntervals={1}
+              dateFormat="yyyy-MM-dd HH:mm"
+              className={styles.datePicker}
+              maxDate={new Date()}
+              selectsStart
+              startDate={historicalStartDate}
+              endDate={historicalEndDate}
             />
             <label>To:</label>
-            <input
-              type="datetime-local"
-              value={historicalParams.end?.slice(0, 16) || ''}
-              onChange={(e) => setHistoricalParams(p => ({ ...p, end: new Date(e.target.value).toISOString() }))}
-              className={styles.dateInput}
+            <DatePicker
+              selected={historicalEndDate}
+              onChange={handleEndDateChange}
+              showTimeSelect
+              timeFormat="HH:mm"
+              timeIntervals={1}
+              dateFormat="yyyy-MM-dd HH:mm"
+              className={styles.datePicker}
+              maxDate={new Date()}
+              selectsEnd
+              startDate={historicalStartDate}
+              endDate={historicalEndDate}
+              minDate={historicalStartDate}
             />
-          </div>
-          <div className={styles.lineCountControl}>
-            <label>Limit:</label>
-            <select
-              value={historicalParams.limit}
-              onChange={(e) => setHistoricalParams(p => ({ ...p, limit: Number(e.target.value) }))}
-              className={styles.lineSelect}
-            >
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={200}>200</option>
-              <option value={500}>500</option>
-              <option value={1000}>1000</option>
-            </select>
+            <Button variant="primary" onClick={handleSearch} size="sm">
+              Search
+            </Button>
           </div>
           <span className={styles.backendTag}>Backend: {backend}</span>
         </div>

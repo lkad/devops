@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,7 @@ type StorageBackend interface {
 type QueryOptions struct {
 	Level    string
 	Source   string
+	Device   string
 	Search   string
 	Resource string
 	Tags     []string
@@ -343,6 +345,7 @@ func (m *Manager) QueryLogsHTTP(w http.ResponseWriter, r *http.Request) {
 	opts := QueryOptions{
 		Level:  r.URL.Query().Get("level"),
 		Source: r.URL.Query().Get("source"),
+		Device: r.URL.Query().Get("device"),
 		Search: r.URL.Query().Get("search"),
 		Limit:  limit,
 		Offset: offset,
@@ -878,19 +881,37 @@ func (b *LokiBackend) Write(entry *Entry) error {
 func (b *LokiBackend) Query(opts QueryOptions) ([]*Entry, error) {
 	// Build LogQL query
 	query := ""
-	if opts.Search != "" {
-		query = fmt.Sprintf(`{source="%s"} |= "%s"`, opts.Source, opts.Search)
+	if opts.Source != "" {
+		if opts.Device != "" {
+			// Query by source and device (device is a Loki label)
+			if opts.Search != "" {
+				query = fmt.Sprintf(`{source="%s", device="%s"} |= "%s"`, opts.Source, opts.Device, opts.Search)
+			} else if opts.Level != "" {
+				query = fmt.Sprintf(`{source="%s", device="%s", level="%s"}`, opts.Source, opts.Device, opts.Level)
+			} else {
+				query = fmt.Sprintf(`{source="%s", device="%s"}`, opts.Source, opts.Device)
+			}
+		} else if opts.Search != "" {
+			query = fmt.Sprintf(`{source="%s"} |= "%s"`, opts.Source, opts.Search)
+		} else if opts.Level != "" {
+			query = fmt.Sprintf(`{source="%s", level="%s"}`, opts.Source, opts.Level)
+		} else {
+			query = fmt.Sprintf(`{source="%s"}`, opts.Source)
+		}
+	} else if opts.Device != "" {
+		if opts.Level != "" {
+			query = fmt.Sprintf(`{device="%s", level="%s"}`, opts.Device, opts.Level)
+		} else {
+			query = fmt.Sprintf(`{device="%s"}`, opts.Device)
+		}
 	} else if opts.Level != "" {
-		query = fmt.Sprintf(`{source="%s"} |= "%s"`, opts.Source, opts.Level)
+		query = fmt.Sprintf(`{level="%s"}`, opts.Level)
 	} else {
-		query = `{source="` + opts.Source + `"}`
+		// Default: query all logs by matching on source label existing
+		query = `{source=~".+"}`
 	}
 
-	if query == "" {
-		query = "{}"
-	}
-
-	url := b.lokiURL("/loki/api/v1/query_range") + "?query=" + query +
+	url := b.lokiURL("/loki/api/v1/query_range") + "?query=" + url.QueryEscape(query) +
 		"&limit=" + strconv.Itoa(opts.Limit) +
 		"&start=" + fmt.Sprintf("%d", time.Now().Add(-24*time.Hour).UnixNano()) +
 		"&end=" + fmt.Sprintf("%d", time.Now().UnixNano())

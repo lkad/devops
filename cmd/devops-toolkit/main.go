@@ -81,9 +81,16 @@ func main() {
 	logMgr := logs.NewManager(logs.LogsConfig{
 		Backend:       cfg.Logs.Backend,
 		RetentionDays: cfg.Logs.RetentionDays,
+		Path:          cfg.Logs.Path,
+		ESURL:          cfg.Logs.ESURL,
+		LokiURL:        cfg.Logs.LokiURL,
 	}, func(entry *logs.Entry) {
 		wsHub.BroadcastLog(entry)
 	})
+
+	// Connect device manager to logs for event logging
+	deviceMgr.SetLogsManager(logMgr)
+
 	metricsMgr := metrics.NewCollector()
 	alertsMgr := alerts.NewManager(metricsMgr)
 	pipelineMgr := pipeline.NewManager()
@@ -150,6 +157,7 @@ func main() {
 		api.PUT("/api/devices/:id", ginfadapter.GinToHTTPHandler(deviceMgr.UpdateDeviceHTTP, "id"))
 		api.DELETE("/api/devices/:id", ginfadapter.GinToHTTPHandler(deviceMgr.DeleteDeviceHTTP, "id"))
 		api.GET("/api/devices/search", ginfadapter.GinToHTTPHandler(deviceMgr.SearchDevicesHTTP))
+		api.PUT("/api/devices/:id/state", ginfadapter.GinToHTTPHandler(deviceMgr.TransitionStateHTTP, "id"))
 	}
 
 	// Pipeline routes

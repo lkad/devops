@@ -36,7 +36,7 @@ export function LogViewer() {
     queryFn: () => logsApi.query({ limit: 100 }),
   })
 
-  const logs = data?.logs ?? []
+  const logs = data?.data ?? []
 
   const filteredLogs = useMemo(() => {
     return logs.filter(log => {

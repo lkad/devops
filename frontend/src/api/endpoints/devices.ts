@@ -29,8 +29,6 @@ export interface UpdateDeviceRequest {
   environment?: string
   labels?: Record<string, string>
   status?: string
-  dataCenter?: string
-  ipAddress?: string
 }
 
 export interface DeviceListResponse {
@@ -45,7 +43,7 @@ export interface DeviceListResponse {
 }
 
 export const devicesApi = {
-  list: (params?: { environment?: string; status?: string }) =>
+  list: (params?: { environment?: string; status?: string; type?: string }) =>
     apiClient.get<DeviceListResponse>('/api/devices', { params }),
 
   get: (id: string) =>

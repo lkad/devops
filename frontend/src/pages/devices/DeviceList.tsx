@@ -2,44 +2,37 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Search, Plus } from 'lucide-react'
-import { devicesApi } from '@/api/endpoints/devices'
+import { devicesApi, type Device } from '@/api/endpoints/devices'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
 import { DataTable } from '@/components/ui/DataTable'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { DeviceForm } from './DeviceForm'
 import styles from './DeviceList.module.css'
 
-const statusVariant = (status: string): 'success' | 'warning' | 'error' | 'info' | 'default' => {
-  switch (status.toLowerCase()) {
-    case 'active':
-      return 'success'
-    case 'maintenance':
-      return 'warning'
-    case 'suspended':
-      return 'warning'
-    case 'retired':
-      return 'error'
-    default:
-      return 'default'
-  }
-}
-
-const formatLastSeen = (lastSeen?: string): string => {
-  if (!lastSeen) return 'Never'
-  const date = new Date(lastSeen)
-  return date.toLocaleString()
-}
-
-interface DeviceRow {
+// API returns snake_case - map to Device interface which expects camelCase
+interface ApiDevice {
   id: string
   name: string
   type: string
   status: string
-  dataCenter?: string
-  ipAddress?: string
-  lastSeen?: string
+  environment: string
+  labels: Record<string, string>
+  registered_at?: string
+  created_at?: string
+  updated_at?: string
 }
+
+// Map API response to Device
+const mapApiDevice = (apiDevice: ApiDevice): Device => ({
+  id: apiDevice.id,
+  name: apiDevice.name,
+  type: apiDevice.type,
+  status: apiDevice.status,
+  environment: apiDevice.environment,
+  labels: apiDevice.labels,
+  registeredAt: apiDevice.registered_at,
+  lastSeen: apiDevice.created_at, // Use created_at as proxy for lastSeen
+})
 
 export function DeviceList() {
   const navigate = useNavigate()
@@ -52,7 +45,9 @@ export function DeviceList() {
     queryFn: () => devicesApi.list(),
   })
 
-  const devices: DeviceRow[] = data?.data ?? []
+  const devices: Device[] = useMemo(() => {
+    return (data?.data ?? []).map(mapApiDevice)
+  }, [data])
 
   const deviceTypes = useMemo(() => {
     const types = new Set(devices.map(d => d.type))
@@ -61,57 +56,23 @@ export function DeviceList() {
 
   const filteredDevices = useMemo(() => {
     return devices.filter(device => {
-      const matchesSearch = device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (device.ipAddress && device.ipAddress.toLowerCase().includes(searchQuery.toLowerCase()))
+      const matchesSearch = device.name.toLowerCase().includes(searchQuery.toLowerCase())
       const matchesType = !typeFilter || device.type === typeFilter
       return matchesSearch && matchesType
     })
   }, [devices, searchQuery, typeFilter])
 
-  const columns = useMemo(() => [
-    {
-      id: 'name',
-      header: 'Name',
-      accessor: (row: DeviceRow) => (
-        <span className={styles.monoCell}>{row.name}</span>
-      ),
-    },
-    {
-      id: 'type',
-      header: 'Type',
-      accessor: (row: DeviceRow) => row.type,
-    },
-    {
-      id: 'status',
-      header: 'Status',
-      accessor: (row: DeviceRow) => (
-        <Badge variant={statusVariant(row.status)}>
-          {row.status}
-        </Badge>
-      ),
-    },
-    {
-      id: 'dataCenter',
-      header: 'Data Center',
-      accessor: (row: DeviceRow) => row.dataCenter,
-    },
-    {
-      id: 'ipAddress',
-      header: 'IP Address',
-      accessor: (row: DeviceRow) => (
-        <span className={styles.monoCell}>{row.ipAddress}</span>
-      ),
-    },
-    {
-      id: 'lastSeen',
-      header: 'Last Seen',
-      accessor: (row: DeviceRow) => formatLastSeen(row.lastSeen),
-    },
-  ], [])
-
-  const handleRowClick = (row: DeviceRow) => {
+  const handleRowClick = (row: Device) => {
     navigate(`/devices/${row.id}`)
   }
+
+  const columns = useMemo(() => [
+    { id: 'name', header: 'Name', accessorKey: 'name' },
+    { id: 'type', header: 'Type', accessorKey: 'type' },
+    { id: 'status', header: 'Status', accessorKey: 'status' },
+    { id: 'registeredAt', header: 'Registered', accessorKey: 'registeredAt' },
+    { id: 'environment', header: 'Environment', accessorKey: 'environment' },
+  ], [])
 
   return (
     <div className={styles.container}>
@@ -128,7 +89,7 @@ export function DeviceList() {
           <Search size={18} className={styles.searchIcon} />
           <input
             type="text"
-            placeholder="Search by name or IP..."
+            placeholder="Search by name..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className={styles.searchInput}

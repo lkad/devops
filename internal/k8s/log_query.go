@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/mux"
+	"github.com/devops-toolkit/internal/ginadapter"
 	"k8s.io/api/core/v1"
 )
 
@@ -23,7 +23,7 @@ type HistoricalLogsResponse struct {
 
 // GetHistoricalLogsHTTP handles GET /api/k8s/clusters/:name/namespaces/:ns/pods/:pod/logs/historical
 func (m *ClusterManager) GetHistoricalLogsHTTP(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
+	vars := ginfadapter.Vars(r)
 	cluster := vars["name"]
 	namespace := vars["ns"]
 	pod := vars["pod"]
@@ -64,6 +64,14 @@ func (m *ClusterManager) GetHistoricalLogsHTTP(w http.ResponseWriter, r *http.Re
 	end, err := time.Parse(time.RFC3339, endStr)
 	if err != nil {
 		end = time.Now()
+	}
+
+	// Check time range limit (Loki limit is ~721 hours)
+	maxRange := 721 * time.Hour
+	if end.Sub(start) > maxRange {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("time range exceeds maximum of 30 days (requested %.0f hours)", end.Sub(start).Hours())})
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)

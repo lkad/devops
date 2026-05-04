@@ -13,6 +13,7 @@ export interface LogQuery {
   query?: string
   level?: string
   source?: string
+  device?: string
   startTime?: string
   endTime?: string
   limit?: number
@@ -31,9 +32,13 @@ export interface LogStats {
 }
 
 export interface LogQueryResponse {
-  logs: LogEntry[]
-  total: number
-  hasMore: boolean
+  data: LogEntry[]
+  pagination: {
+    total: number
+    limit: number
+    offset: number
+    has_more: boolean
+  }
 }
 
 export interface LogStatsResponse {
@@ -57,17 +62,18 @@ export const logsApi = {
       if (params.query) stringParams.query = params.query
       if (params.level) stringParams.level = params.level
       if (params.source) stringParams.source = params.source
+      if (params.device) stringParams.device = params.device
       if (params.startTime) stringParams.startTime = params.startTime
       if (params.endTime) stringParams.endTime = params.endTime
       if (params.limit !== undefined) stringParams.limit = String(params.limit)
       if (params.offset !== undefined) stringParams.offset = String(params.offset)
     }
-    return apiClient.get<LogQueryResponse>('/api/v1/logs', { params: stringParams })
+    return apiClient.get<LogQueryResponse>('/api/logs', { params: stringParams })
   },
 
   stats: () =>
-    apiClient.get<LogStatsResponse>('/api/v1/logs/stats'),
+    apiClient.get<LogStatsResponse>('/api/logs/stats'),
 
   generate: (data: GenerateLogsRequest) =>
-    apiClient.post<GenerateLogsResponse>('/api/v1/logs/generate', data),
+    apiClient.post<GenerateLogsResponse>('/api/logs/generate', data),
 }

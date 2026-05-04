@@ -1,17 +1,17 @@
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Server, Activity, Plus } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Server } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { HostForm } from './HostForm'
-import { physicalHostsApi, type CreatePhysicalHostRequest } from '@/api/endpoints/physicalHosts'
+import { devicesApi } from '@/api/endpoints/devices'
 
-const stateVariant = (state: string): 'success' | 'warning' | 'error' | 'info' | 'default' => {
-  switch (state.toLowerCase()) {
-    case 'online':
+const stateVariant = (status: string): 'success' | 'warning' | 'error' | 'info' | 'default' => {
+  switch (status.toLowerCase()) {
+    case 'active':
       return 'success'
-    case 'monitoring_issue':
+    case 'pending':
       return 'warning'
+    case 'inactive':
     case 'offline':
       return 'error'
     default:
@@ -19,42 +19,26 @@ const stateVariant = (state: string): 'success' | 'warning' | 'error' | 'info' |
   }
 }
 
-const formatLastHeartbeat = (lastHeartbeat?: string) => {
-  if (!lastHeartbeat) return 'Never'
-  const date = new Date(lastHeartbeat)
-  return date.toLocaleString()
+const formatTime = (timestamp?: string) => {
+  if (!timestamp) return 'Never'
+  return new Date(timestamp).toLocaleString()
 }
 
 export function HostList() {
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   const { data, isLoading } = useQuery({
     queryKey: ['physical-hosts'],
-    queryFn: physicalHostsApi.listHosts,
+    queryFn: () => devicesApi.list({ type: 'physical_host' }),
   })
 
-  const createMutation = useMutation({
-    mutationFn: (data: CreatePhysicalHostRequest) => physicalHostsApi.createHost(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['physical-hosts'] })
-      setIsFormOpen(false)
-    },
-  })
-
-  const hosts = data?.hosts ?? []
+  const hosts = data?.data ?? []
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-text">Physical Hosts</h1>
-        <button
-          onClick={() => setIsFormOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add Host
-        </button>
+        <span className="text-sm text-text-secondary">{hosts.length} hosts</span>
       </div>
 
       {isLoading ? (
@@ -64,42 +48,48 @@ export function HostList() {
           <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
             <Server className="w-12 h-12 mb-4 opacity-50" />
             <p>No physical hosts found</p>
-            <p className="text-sm mt-1">Click "Add Host" to register your first host</p>
+            <p className="text-sm mt-1">Register hosts via containerlab or API</p>
           </div>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {hosts.map(host => (
-            <Card key={host.id} className="flex flex-col gap-3">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-surface rounded-lg">
-                    <Server className="w-5 h-5 text-text-secondary" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-text">{host.hostname}</p>
-                    <p className="text-sm text-text-secondary">{host.ip}:{host.port}</p>
-                  </div>
-                </div>
-                <Badge variant={stateVariant(host.state)}>
-                  {host.state.replace('_', ' ')}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-text-secondary">
-                <Activity className="w-4 h-4" />
-                <span>Last heartbeat: {formatLastHeartbeat(host.lastHeartbeat)}</span>
-              </div>
-            </Card>
-          ))}
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="text-left py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wide">Host</th>
+                <th className="text-left py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wide">Status</th>
+                <th className="text-left py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wide">Type</th>
+                <th className="text-left py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wide">Location</th>
+                <th className="text-left py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wide">Registered</th>
+              </tr>
+            </thead>
+            <tbody>
+              {hosts.map(host => (
+                <tr
+                  key={host.id}
+                  className="border-b border-border/50 hover:bg-surface/50 cursor-pointer transition-colors"
+                  onClick={() => navigate(`/physical-hosts/${host.id}`)}
+                >
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-surface rounded-lg">
+                        <Server className="w-5 h-5 text-text-secondary" />
+                      </div>
+                      <span className="font-medium text-text">{host.name}</span>
+                    </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    <Badge variant={stateVariant(host.status)}>{host.status}</Badge>
+                  </td>
+                  <td className="py-3 px-4 text-sm text-text-secondary">{host.type}</td>
+                  <td className="py-3 px-4 text-sm text-text-secondary">{host.labels?.location || 'N/A'}</td>
+                  <td className="py-3 px-4 text-sm text-text-secondary">{formatTime(host.registeredAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
-
-      <HostForm
-        isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
-        onSubmit={createMutation.mutate}
-        isLoading={createMutation.isPending}
-      />
     </div>
   )
 }

@@ -45,13 +45,8 @@ func NewLokiClient(baseURL string) *LokiClient {
 
 // QueryLogs queries Loki for logs matching label selectors
 func (c *LokiClient) QueryLogs(ctx context.Context, query string, start, end time.Time, limit int) (*LokiLogResponse, error) {
-	params := url.Values{}
-	params.Set("query", query)
-	params.Set("start", fmt.Sprintf("%d", start.UnixNano()))
-	params.Set("end", fmt.Sprintf("%d", end.UnixNano()))
-	params.Set("limit", fmt.Sprintf("%d", limit))
-
-	u := fmt.Sprintf("%s/loki/api/v1/query_range?%s", c.BaseURL, params.Encode())
+	// Use raw query to avoid double-encoding of LogQL special chars
+	u := c.BaseURL + "/loki/api/v1/query_range?query=" + url.QueryEscape(query) + "&start=" + fmt.Sprintf("%d", start.UnixNano()) + "&end=" + fmt.Sprintf("%d", end.UnixNano()) + "&limit=" + fmt.Sprintf("%d", limit)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
@@ -78,22 +73,53 @@ func (c *LokiClient) QueryLogs(ctx context.Context, query string, start, end tim
 
 // QueryPodLogs queries logs for a specific pod using Loki
 func (c *LokiClient) QueryPodLogs(ctx context.Context, pod, namespace, cluster string, start, end time.Time, limit int) ([]string, error) {
-	// Loki label selector for k8s pod logs
-	query := fmt.Sprintf(`{pod="%s", namespace="%s", cluster="%s"}`, pod, namespace, cluster)
+	// Query by cluster and namespace first
+	// The pod label may not exist in Loki due to Promtail relabeling issues,
+	// so we filter by filename containing the pod name
+	query := fmt.Sprintf(`{cluster="%s", namespace="%s"}`, cluster, namespace)
 
-	result, err := c.QueryLogs(ctx, query, start, end, limit)
+	result, err := c.QueryLogs(ctx, query, start, end, limit*10)
 	if err != nil {
 		return nil, err
 	}
 
 	var logs []string
 	for _, stream := range result.Data.Result {
+		// Get filename from stream labels to filter by pod
+		filename := stream.Stream["filename"]
+		if filename == "" {
+			continue
+		}
+
+		// Filename format: /var/log/pods/{namespace}_{pod_name}_{uid}/log-tester/0.log
+		// The pod name in filename contains the deployment name (e.g., "log-tester-768899844-5zfjm")
+		// We check if the filename contains the pod name as a substring
+		if !containsString(filename, pod) {
+			continue
+		}
+
 		for _, value := range stream.Values {
 			if len(value) >= 2 {
 				logs = append(logs, value[1])
+				if len(logs) >= limit {
+					break
+				}
 			}
+		}
+		if len(logs) >= limit {
+			break
 		}
 	}
 
 	return logs, nil
+}
+
+// containsString checks if substr exists in s
+func containsString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
