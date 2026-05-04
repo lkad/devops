@@ -1,0 +1,133 @@
+.tableContainer {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.th {
+  position: relative;
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary, #94a3b8);
+  background: var(--color-surface-elevated, #1c2940);
+  border-bottom: 1px solid var(--color-border, #2a3a54);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.th:first-child {
+  border-right: 1px solid var(--color-border-subtle, #1e2d42);
+}
+
+.th:not(:first-child) {
+  border-right: 1px solid var(--color-border-subtle, #1e2d42);
+}
+
+/* Column divider line */
+.th::after {
+  content: '';
+  position: absolute;
+  top: 25%;
+  right: 0;
+  bottom: 25%;
+  width: 1px;
+  background: var(--color-border, #2a3a54);
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.th:hover::after {
+  opacity: 1;
+}
+
+/* Resize handle */
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.resizeHandle:hover {
+  background: linear-gradient(to right, transparent, var(--color-primary, #22d3ee), transparent);
+  opacity: 0.5;
+}
+
+.resizeHandle:active {
+  background: linear-gradient(to right, transparent, var(--color-primary, #22d3ee), transparent);
+  opacity: 0.8;
+}
+
+.tr {
+  border-bottom: 1px solid var(--color-border-subtle, #1e2d42);
+  transition: background-color 100ms ease;
+}
+
+.tr:last-child {
+  border-bottom: none;
+}
+
+.tr:hover {
+  background: var(--color-surface-elevated, #1c2940);
+}
+
+.td {
+  padding: 14px 16px;
+  vertical-align: middle;
+}
+
+.tdHost {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.iconWrapper {
+  padding: 8px;
+  background: var(--color-surface-elevated, #1c2940);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-secondary, #94a3b8);
+}
+
+.hostName {
+  font-weight: 500;
+  color: var(--color-text-primary, #f1f5f9);
+}
+
+.hostId {
+  margin-left: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #64748b);
+}
+
+/* Loading skeleton */
+.skeleton {
+  height: 64px;
+  background: var(--color-surface, #151d2e);
+  border-radius: 12px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
