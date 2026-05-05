@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { Server, AlertCircle, RefreshCw, Activity, ArrowLeft, Cpu, HardDrive, Network } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Server, AlertCircle, RefreshCw, Activity, ArrowLeft, Cpu, HardDrive, Network, CheckCircle, XCircle, Pause, Play, Wrench } from 'lucide-react'
 import { PageContainer } from '@/components/layout'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -14,11 +14,35 @@ const statusVariant = (status: string): 'success' | 'warning' | 'error' | 'info'
       return 'success'
     case 'pending':
       return 'warning'
+    case 'authenticated':
+    case 'registered':
+      return 'info'
     case 'inactive':
     case 'offline':
       return 'error'
+    case 'maintenance':
+      return 'warning'
     default:
       return 'default'
+  }
+}
+
+const statusIcon = (status: string) => {
+  switch (status.toLowerCase()) {
+    case 'active':
+      return <CheckCircle className="w-4 h-4 text-[var(--color-success)]" />
+    case 'pending':
+      return <Pause className="w-4 h-4 text-[var(--color-warning)]" />
+    case 'authenticated':
+    case 'registered':
+      return <Play className="w-4 h-4 text-[var(--color-info)]" />
+    case 'inactive':
+    case 'offline':
+      return <XCircle className="w-4 h-4 text-[var(--color-error)]" />
+    case 'maintenance':
+      return <Wrench className="w-4 h-4 text-[var(--color-warning)]" />
+    default:
+      return null
   }
 }
 
@@ -35,10 +59,32 @@ const formatTime = (timestamp?: string) => {
   return new Date(timestamp).toLocaleString()
 }
 
+// State machine for physical hosts
+const stateTransitions: Record<string, { nextState: string; label: string; icon: React.ReactNode; color: string }[]> = {
+  pending: [
+    { nextState: 'authenticated', label: 'Authenticate', icon: <CheckCircle className="w-4 h-4" />, color: 'var(--color-info)' },
+  ],
+  authenticated: [
+    { nextState: 'registered', label: 'Register', icon: <Play className="w-4 h-4" />, color: 'var(--color-info)' },
+  ],
+  registered: [
+    { nextState: 'active', label: 'Activate', icon: <CheckCircle className="w-4 h-4" />, color: 'var(--color-success)' },
+  ],
+  active: [
+    { nextState: 'maintenance', label: 'Maintenance', icon: <Wrench className="w-4 h-4" />, color: 'var(--color-warning)' },
+  ],
+  maintenance: [
+    { nextState: 'active', label: 'Resume', icon: <Play className="w-4 h-4" />, color: 'var(--color-success)' },
+  ],
+}
+
 export function HostDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [refreshKey, setRefreshKey] = useState(0)
+  const [transitioning, setTransitioning] = useState(false)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
   const { data: device, isLoading: deviceLoading } = useQuery({
     queryKey: ['devices', id],
@@ -57,6 +103,37 @@ export function HostDetail() {
   })
 
   const logs = logsData?.data ?? []
+
+  const transitionMutation = useMutation({
+    mutationFn: ({ state, triggeredBy, reason }: { state: string; triggeredBy: string; reason?: string }) =>
+      devicesApi.transitionState(id!, { state, triggered_by: triggeredBy, reason }),
+    onSuccess: (updatedDevice) => {
+      queryClient.invalidateQueries({ queryKey: ['devices', id] })
+      showToast(`State changed to ${updatedDevice.status}`, 'success')
+      setTransitioning(false)
+    },
+    onError: (error: Error) => {
+      showToast(error.message || 'Failed to transition state', 'error')
+      setTransitioning(false)
+    },
+  })
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 3000)
+  }
+
+  const handleStateTransition = (nextState: string) => {
+    if (!device) return
+    setTransitioning(true)
+    transitionMutation.mutate({
+      state: nextState,
+      triggeredBy: 'admin-ui',
+      reason: `State transition via UI: ${device.status} -> ${nextState}`,
+    })
+  }
+
+  const availableTransitions = device ? stateTransitions[device.status] || [] : []
 
   if (deviceLoading) {
     return (
@@ -121,6 +198,19 @@ export function HostDetail() {
         </div>
       }
     >
+      {/* Toast notification */}
+      {toast && (
+        <div
+          className="fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-fade-in"
+          style={{
+            background: toast.type === 'success' ? 'var(--color-success)' : 'var(--color-error)',
+            color: 'white',
+          }}
+        >
+          {toast.message}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left column - Main content (8 cols) */}
         <div className="lg:col-span-8 space-y-6">
@@ -136,8 +226,11 @@ export function HostDetail() {
                   <p className="text-sm text-text-secondary mt-0.5">{device.type}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={statusVariant(device.status)}>{device.status}</Badge>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--color-surface-elevated)' }}>
+                  {statusIcon(device.status)}
+                  <Badge variant={statusVariant(device.status)}>{device.status}</Badge>
+                </div>
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium" style={{ background: envStyle.bg, color: envStyle.color }}>
                   {device.environment}
                 </span>
@@ -155,9 +248,9 @@ export function HostDetail() {
               <div className="p-4 bg-surface rounded-lg">
                 <div className="flex items-center gap-2 text-text-muted mb-2">
                   <Cpu className="w-4 h-4" />
-                  <span className="text-xs uppercase tracking-wider">Device ID</span>
+                  <span className="text-xs uppercase tracking-wider">IP Address</span>
                 </div>
-                <p className="text-sm font-mono text-text">{device.id.slice(0, 16)}...</p>
+                <p className="text-sm font-mono text-text">{device.labels?.ip || 'N/A'}</p>
               </div>
               <div className="p-4 bg-surface rounded-lg">
                 <div className="flex items-center gap-2 text-text-muted mb-2">
@@ -212,7 +305,6 @@ export function HostDetail() {
                     <div
                       key={log.id || idx}
                       className="flex items-start gap-3 p-3 rounded-lg hover:bg-surface-elevated transition-colors"
-                      style={{ animationDelay: `${idx * 30}ms` }}
                     >
                       <div className="flex-shrink-0 mt-0.5">
                         <span
@@ -244,10 +336,52 @@ export function HostDetail() {
 
         {/* Right column - Sidebar (4 cols) */}
         <div className="lg:col-span-4 space-y-6">
+          {/* State Control */}
+          <Card>
+            <h3 className="text-sm font-semibold text-text mb-4">State Control</h3>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 bg-surface rounded-lg">
+                <span className="text-sm text-text-secondary">Current State</span>
+                <div className="flex items-center gap-2">
+                  {statusIcon(device.status)}
+                  <span className="text-sm font-medium text-text capitalize">{device.status}</span>
+                </div>
+              </div>
+
+              {availableTransitions.length > 0 && (
+                <div className="pt-2 border-t border-border-subtle">
+                  <p className="text-xs text-text-muted mb-2">Available Actions:</p>
+                  <div className="space-y-2">
+                    {availableTransitions.map((transition) => (
+                      <button
+                        key={transition.nextState}
+                        onClick={() => handleStateTransition(transition.nextState)}
+                        disabled={transitioning}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-all disabled:opacity-50"
+                        style={{
+                          background: transition.color,
+                          color: 'white',
+                        }}
+                      >
+                        {transition.icon}
+                        {transition.label}
+                        {transitioning && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {availableTransitions.length === 0 && (
+                <p className="text-xs text-text-muted text-center pt-2">No state transitions available</p>
+              )}
+            </div>
+          </Card>
+
           {/* Quick Stats */}
           <Card>
             <h3 className="text-sm font-semibold text-text mb-4">Quick Stats</h3>
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="flex items-center justify-between p-3 bg-surface rounded-lg">
                 <span className="text-sm text-text-secondary">Total Logs</span>
                 <span className="text-lg font-semibold text-[var(--color-primary)]">{logs.length}</span>

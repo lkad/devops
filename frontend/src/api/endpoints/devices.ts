@@ -31,6 +31,12 @@ export interface UpdateDeviceRequest {
   status?: string
 }
 
+export interface TransitionStateRequest {
+  state: string
+  triggered_by: string
+  reason?: string
+}
+
 export interface DeviceListResponse {
   data: Device[]
   total?: number
@@ -60,4 +66,7 @@ export const devicesApi = {
 
   search: (query: string) =>
     apiClient.get<DeviceListResponse>('/api/devices/search', { params: { q: query } }),
+
+  transitionState: (id: string, data: TransitionStateRequest) =>
+    apiClient.put<Device>(`/api/devices/${id}/state`, data),
 }
