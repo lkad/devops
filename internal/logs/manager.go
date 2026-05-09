@@ -546,6 +546,9 @@ func (b *LocalBackend) Query(opts QueryOptions) ([]*Entry, error) {
 		if opts.Source != "" && e.Source != opts.Source {
 			continue
 		}
+		if opts.Device != "" && e.Resource != opts.Device {
+			continue
+		}
 		if opts.Search != "" && !containsPattern(e.Message, opts.Search) {
 			continue
 		}

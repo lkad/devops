@@ -11,6 +11,8 @@ export interface Device {
   lastSeen?: string
   dataCenter?: string
   ipAddress?: string
+  config?: Record<string, unknown>
+  metadata?: Record<string, unknown>
 }
 
 export interface CreateDeviceRequest {
@@ -48,6 +50,32 @@ export interface DeviceListResponse {
   }
 }
 
+// K8s types
+export interface K8sNode {
+  name: string
+  ready: boolean
+  role: string
+  cpu: string
+  memory: string
+  age: string
+  taints?: string[]
+  labels?: Record<string, string>
+  condition: string
+}
+
+export interface K8sPod {
+  name: string
+  namespace: string
+  ready: string
+  status: string
+  restarts: number
+  cpu: string
+  memory: string
+  age: string
+  node_name: string
+  ip: string
+}
+
 export const devicesApi = {
   list: (params?: { environment?: string; status?: string; type?: string }) =>
     apiClient.get<DeviceListResponse>('/api/devices', { params }),
@@ -69,4 +97,16 @@ export const devicesApi = {
 
   transitionState: (id: string, data: TransitionStateRequest) =>
     apiClient.put<Device>(`/api/devices/${id}/state`, data),
+
+  // K8s cluster specific operations
+  getDeviceNodes: (id: string) =>
+    apiClient.get<K8sNode[]>(`/api/devices/${id}/nodes`),
+
+  getDevicePods: (id: string, namespace?: string) =>
+    apiClient.get<K8sPod[]>(`/api/devices/${id}/pods`, {
+      params: namespace ? { namespace } : undefined,
+    }),
+
+  getDeviceNamespaces: (id: string) =>
+    apiClient.get<string[]>(`/api/devices/${id}/namespaces`),
 }

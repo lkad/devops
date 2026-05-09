@@ -1,11 +1,13 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Search, Plus } from 'lucide-react'
+import { type ColumnDef } from '@tanstack/react-table'
+import { Search, Plus, Server, Box, HardDrive, Network, Cloud, Cpu } from 'lucide-react'
 import { devicesApi, type Device } from '@/api/endpoints/devices'
 import { Button } from '@/components/ui/Button'
 import { DataTable } from '@/components/ui/DataTable'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Badge } from '@/components/ui/Badge'
 import { DeviceForm } from './DeviceForm'
 import styles from './DeviceList.module.css'
 
@@ -31,8 +33,79 @@ const mapApiDevice = (apiDevice: ApiDevice): Device => ({
   environment: apiDevice.environment,
   labels: apiDevice.labels,
   registeredAt: apiDevice.registered_at,
-  lastSeen: apiDevice.created_at, // Use created_at as proxy for lastSeen
+  lastSeen: apiDevice.created_at,
 })
+
+// Device type icons
+const DeviceIcon = ({ type }: { type: string }) => {
+  switch (type) {
+    case 'k8s_cluster':
+      return <Box className="w-5 h-5 text-[var(--color-info)]" />
+    case 'physical_host':
+      return <Server className="w-5 h-5 text-[var(--color-primary)]" />
+    case 'vm':
+      return <Cpu className="w-5 h-5 text-[var(--color-warning)]" />
+    case 'container':
+      return <Box className="w-5 h-5 text-[var(--color-success)]" />
+    case 'network_device':
+      return <Network className="w-5 h-5 text-[var(--color-info)]" />
+    case 'cloud_instance':
+      return <Cloud className="w-5 h-5 text-[var(--color-primary)]" />
+    default:
+      return <HardDrive className="w-5 h-5 text-text-muted" />
+  }
+}
+
+// Device type display names
+const getDeviceTypeName = (type: string) => {
+  switch (type) {
+    case 'k8s_cluster': return 'K8s Cluster'
+    case 'physical_host': return 'Physical Host'
+    case 'vm': return 'Virtual Machine'
+    case 'container': return 'Container'
+    case 'network_device': return 'Network Device'
+    case 'load_balancer': return 'Load Balancer'
+    case 'cloud_instance': return 'Cloud Instance'
+    case 'iot_device': return 'IoT Device'
+    default: return type
+  }
+}
+
+// Status badge variant
+const statusVariant = (status: string): 'success' | 'warning' | 'error' | 'info' | 'default' => {
+  switch (status.toLowerCase()) {
+    case 'active':
+    case 'healthy':
+    case 'running':
+      return 'success'
+    case 'pending':
+    case 'unknown':
+      return 'warning'
+    case 'authenticated':
+    case 'registered':
+      return 'info'
+    case 'inactive':
+    case 'offline':
+    case 'failed':
+    case 'unhealthy':
+    case 'stopped':
+      return 'error'
+    case 'maintenance':
+      return 'warning'
+    default:
+      return 'default'
+  }
+}
+
+// Environment colors
+const getEnvStyle = (env: string) => {
+  const envColors: Record<string, { bg: string, color: string }> = {
+    prod: { bg: 'var(--color-error-muted)', color: 'var(--color-error)' },
+    test: { bg: 'var(--color-warning-muted)', color: 'var(--color-warning)' },
+    dev: { bg: 'var(--color-info-muted)', color: 'var(--color-info)' },
+  }
+  return envColors[env?.toLowerCase()] || { bg: 'var(--color-info-muted)', color: 'var(--color-info)' }
+}
 
 export function DeviceList() {
   const navigate = useNavigate()
@@ -41,8 +114,9 @@ export function DeviceList() {
   const [showCreateModal, setShowCreateModal] = useState(false)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['devices'],
-    queryFn: () => devicesApi.list(),
+    queryKey: ['devices', typeFilter],
+    queryFn: () => devicesApi.list(typeFilter ? { type: typeFilter } : undefined),
+    enabled: true,
   })
 
   const devices: Device[] = useMemo(() => {
@@ -66,12 +140,62 @@ export function DeviceList() {
     navigate(`/devices/${row.id}`)
   }
 
-  const columns = useMemo(() => [
-    { id: 'name', header: 'Name', accessorKey: 'name' },
-    { id: 'type', header: 'Type', accessorKey: 'type' },
-    { id: 'status', header: 'Status', accessorKey: 'status' },
-    { id: 'registeredAt', header: 'Registered', accessorKey: 'registeredAt' },
-    { id: 'environment', header: 'Environment', accessorKey: 'environment' },
+  const columns = useMemo((): ColumnDef<Device, unknown>[] => [
+    {
+      id: 'name',
+      header: 'Name',
+      cell: ({ row }) => (
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-surface-elevated rounded-lg">
+            <DeviceIcon type={row.original.type} />
+          </div>
+          <div>
+            <div className="font-medium text-text">{row.original.name}</div>
+            <div className="text-xs text-text-muted font-mono">{row.original.id.slice(0, 12)}...</div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: 'type',
+      header: 'Type',
+      cell: ({ row }) => (
+        <span className="text-sm text-text-secondary">
+          {getDeviceTypeName(row.original.type)}
+        </span>
+      ),
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      cell: ({ row }) => (
+        <Badge variant={statusVariant(row.original.status)}>{row.original.status}</Badge>
+      ),
+    },
+    {
+      id: 'environment',
+      header: 'Environment',
+      cell: ({ row }) => {
+        const envStyle = getEnvStyle(row.original.environment)
+        return (
+          <span
+            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+            style={{ background: envStyle.bg, color: envStyle.color }}
+          >
+            {row.original.environment}
+          </span>
+        )
+      },
+    },
+    {
+      id: 'registeredAt',
+      header: 'Registered',
+      cell: ({ row }) => (
+        <span className="text-sm text-text-muted">
+          {row.original.registeredAt ? new Date(row.original.registeredAt).toLocaleDateString() : 'Never'}
+        </span>
+      ),
+    },
   ], [])
 
   return (
@@ -102,7 +226,7 @@ export function DeviceList() {
         >
           <option value="">All Types</option>
           {deviceTypes.map(type => (
-            <option key={type} value={type}>{type}</option>
+            <option key={type} value={type}>{getDeviceTypeName(type)}</option>
           ))}
         </select>
       </div>

@@ -91,18 +91,23 @@ func main() {
 	// Connect device manager to logs for event logging
 	deviceMgr.SetLogsManager(logMgr)
 
-	metricsMgr := metrics.NewCollector()
-	alertsMgr := alerts.NewManager(metricsMgr)
-	pipelineMgr := pipeline.NewManager()
+	// Connect K8s cluster manager to device manager for unified K8s cluster operations
 	k8sMgr := k8s.NewClusterManager(db)
 	k8s.SetGlobalClusterManager(k8sMgr)
+	deviceMgr.SetClusterManager(k8sMgr)
 
 	// Import existing k3d clusters on startup (migrate from file-based to DB)
 	if db != nil {
 		if err := k8sMgr.ImportExistingK3dClusters(); err != nil {
 			log.Printf("Warning: Failed to import existing k3d clusters: %v", err)
 		}
+		// Note: K8s cluster migration to devices table is handled separately
+		// via deviceMgr.SetClusterManager(k8sMgr) above
 	}
+
+	metricsMgr := metrics.NewCollector()
+	alertsMgr := alerts.NewManager(metricsMgr)
+	pipelineMgr := pipeline.NewManager()
 	discoveryMgr := discovery.NewManager()
 	physicalhostMgr := physicalhost.NewManager()
 
@@ -158,6 +163,11 @@ func main() {
 		api.DELETE("/api/devices/:id", ginfadapter.GinToHTTPHandler(deviceMgr.DeleteDeviceHTTP, "id"))
 		api.GET("/api/devices/search", ginfadapter.GinToHTTPHandler(deviceMgr.SearchDevicesHTTP))
 		api.PUT("/api/devices/:id/state", ginfadapter.GinToHTTPHandler(deviceMgr.TransitionStateHTTP, "id"))
+
+		// K8s cluster sub-resources
+		api.GET("/api/devices/:id/nodes", ginfadapter.GinToHTTPHandler(deviceMgr.GetClusterNodesHTTP, "id"))
+		api.GET("/api/devices/:id/pods", ginfadapter.GinToHTTPHandler(deviceMgr.GetClusterPodsHTTP, "id"))
+		api.GET("/api/devices/:id/namespaces", ginfadapter.GinToHTTPHandler(deviceMgr.GetClusterNamespacesHTTP, "id"))
 	}
 
 	// Pipeline routes

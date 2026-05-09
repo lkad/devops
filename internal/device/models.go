@@ -20,6 +20,7 @@ const (
 	TypeLoadBalancer   DeviceType = "load_balancer"
 	TypeCloudInstance  DeviceType = "cloud_instance"
 	TypeIoTDevice      DeviceType = "iot_device"
+	TypeK8sCluster     DeviceType = "k8s_cluster"
 )
 
 // State constants for all device types
@@ -275,6 +276,28 @@ var validTransitions = map[State][]State{
 	// Network device transitions
 	StateDiscovered: {StateActive},
 	StateFailed:    {},
+
+	// K8s cluster transitions (native: unknown->pending, healthy->active, unhealthy->failed)
+	// pending: cluster discovered but not yet healthy
+	// active: cluster is healthy
+	// failed: cluster is unhealthy
+	// maintenance: cluster is under maintenance
+}
+
+// K8sClusterTransitions defines K8s cluster specific state transitions
+var K8sClusterTransitions = map[State][]State{
+	StatePending:     {StateActive, StateFailed}, // unknown -> healthy/unhealthy
+	StateActive:      {StateFailed, StateMaintenance}, // healthy -> unhealthy/maintenance
+	StateMaintenance: {StateActive}, // maintenance -> healthy
+	StateFailed:      {StateActive}, // unhealthy -> healthy (recovery)
+}
+
+// GetK8sClusterTransitions returns the K8s cluster specific transitions for a given state
+func GetK8sClusterTransitions(state State) []State {
+	if transitions, ok := K8sClusterTransitions[state]; ok {
+		return transitions
+	}
+	return []State{}
 }
 
 // CanTransitionTo checks if transition to new state is valid

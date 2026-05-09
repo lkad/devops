@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/devops-toolkit/internal/apierror"
+	"github.com/devops-toolkit/internal/k8s"
 	"github.com/devops-toolkit/internal/logs"
 	"github.com/devops-toolkit/internal/pagination"
 	"github.com/google/uuid"
@@ -18,10 +19,15 @@ import (
 
 // Manager handles device operations
 type Manager struct {
-	repo        *Repository
-	hypervisor  HypervisorClient
-	metrics     MetricsCollector
-	network     NetworkDeviceClient
+	repo           *Repository
+	hypervisor     HypervisorClient
+	metrics        MetricsCollector
+	network        NetworkDeviceClient
+	clusterManager interface {
+		GetNodes(clusterName string) ([]k8s.Node, error)
+		GetPods(clusterName, namespace string) ([]k8s.Pod, error)
+		GetNamespaces(clusterName string) ([]string, error)
+	}
 	logsMgr interface {
 		AddLog(level, message, source string, meta map[string]interface{}) (*logs.Entry, error)
 	}
@@ -94,6 +100,15 @@ func NewManagerWithClients(db *gorm.DB, h HypervisorClient, m MetricsCollector, 
 // SetLogsManager sets the logs manager for device event logging
 func (m *Manager) SetLogsManager(l interface{ AddLog(level, message, source string, meta map[string]interface{}) (*logs.Entry, error) }) {
 	m.logsMgr = l
+}
+
+// SetClusterManager sets the K8s cluster manager for K8s cluster operations
+func (m *Manager) SetClusterManager(c interface {
+	GetNodes(clusterName string) ([]k8s.Node, error)
+	GetPods(clusterName, namespace string) ([]k8s.Pod, error)
+	GetNamespaces(clusterName string) ([]string, error)
+}) {
+	m.clusterManager = c
 }
 
 // logDeviceEvent logs a device event to the logs system
@@ -208,8 +223,24 @@ func (m *Manager) TransitionState(id string, newState State, triggeredBy string,
 		return nil, err
 	}
 
-	if !device.Status.CanTransitionTo(newState) {
-		return nil, fmt.Errorf("invalid transition from %s to %s", device.Status, newState)
+	// Check if this is a K8s cluster and use K8s-specific transitions
+	if device.Type == string(TypeK8sCluster) {
+		allowedTransitions := GetK8sClusterTransitions(device.Status)
+		valid := false
+		for _, t := range allowedTransitions {
+			if t == newState {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return nil, fmt.Errorf("invalid transition from %s to %s for K8s cluster", device.Status, newState)
+		}
+	} else {
+		// Use generic state transitions
+		if !device.Status.CanTransitionTo(newState) {
+			return nil, fmt.Errorf("invalid transition from %s to %s", device.Status, newState)
+		}
 	}
 
 	oldState := device.Status
@@ -331,6 +362,53 @@ func (m *Manager) BackupNetworkDeviceConfig(ctx context.Context, deviceID string
 		return "", fmt.Errorf("network device client not configured")
 	}
 	return m.network.BackupConfig(ctx, deviceID)
+}
+
+// K8s cluster operations
+
+// GetClusterNodes retrieves nodes from a K8s cluster
+func (m *Manager) GetClusterNodes(clusterID string) ([]k8s.Node, error) {
+	if m.clusterManager == nil {
+		return nil, fmt.Errorf("cluster manager not configured")
+	}
+	device, err := m.GetDevice(clusterID)
+	if err != nil || device == nil {
+		return nil, fmt.Errorf("cluster not found")
+	}
+	if device.Type != string(TypeK8sCluster) {
+		return nil, fmt.Errorf("device %s is not a K8s cluster", clusterID)
+	}
+	return m.clusterManager.GetNodes(device.Name)
+}
+
+// GetClusterPods retrieves pods from a K8s cluster
+func (m *Manager) GetClusterPods(clusterID string, namespace string) ([]k8s.Pod, error) {
+	if m.clusterManager == nil {
+		return nil, fmt.Errorf("cluster manager not configured")
+	}
+	device, err := m.GetDevice(clusterID)
+	if err != nil || device == nil {
+		return nil, fmt.Errorf("cluster not found")
+	}
+	if device.Type != string(TypeK8sCluster) {
+		return nil, fmt.Errorf("device %s is not a K8s cluster", clusterID)
+	}
+	return m.clusterManager.GetPods(device.Name, namespace)
+}
+
+// GetClusterNamespaces retrieves namespaces from a K8s cluster
+func (m *Manager) GetClusterNamespaces(clusterID string) ([]string, error) {
+	if m.clusterManager == nil {
+		return nil, fmt.Errorf("cluster manager not configured")
+	}
+	device, err := m.GetDevice(clusterID)
+	if err != nil || device == nil {
+		return nil, fmt.Errorf("cluster not found")
+	}
+	if device.Type != string(TypeK8sCluster) {
+		return nil, fmt.Errorf("device %s is not a K8s cluster", clusterID)
+	}
+	return m.clusterManager.GetNamespaces(device.Name)
 }
 
 // VMPowerControl controls VM power state
@@ -576,6 +654,45 @@ func (m *Manager) GetHostMetricsHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(metrics)
+}
+
+// K8s cluster handlers
+
+func (m *Manager) GetClusterNodesHTTP(w http.ResponseWriter, r *http.Request) {
+	id := ginfadapter.Vars(r)["id"]
+
+	nodes, err := m.GetClusterNodes(id)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(nodes)
+}
+
+func (m *Manager) GetClusterPodsHTTP(w http.ResponseWriter, r *http.Request) {
+	id := ginfadapter.Vars(r)["id"]
+	namespace := r.URL.Query().Get("namespace")
+
+	pods, err := m.GetClusterPods(id, namespace)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(pods)
+}
+
+func (m *Manager) GetClusterNamespacesHTTP(w http.ResponseWriter, r *http.Request) {
+	id := ginfadapter.Vars(r)["id"]
+
+	namespaces, err := m.GetClusterNamespaces(id)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(namespaces)
 }
 
 func parsePagination(r *http.Request) (limit, offset int) {
