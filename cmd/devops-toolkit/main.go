@@ -226,6 +226,11 @@ func main() {
 	api.GET("/api/physical-hosts/:id/services", ginfadapter.GinToHTTPHandler(physicalhostMgr.ListServicesHTTP, "id"))
 	api.POST("/api/physical-hosts/:id/config", ginfadapter.GinToHTTPHandler(physicalhostMgr.PushConfigHTTP, "id"))
 
+	// Physical host linked projects (via project manager)
+	if projectMgr != nil {
+		api.GET("/api/physical-hosts/:id/projects", ginfadapter.GinToHTTPHandler(projectMgr.GetProjectsForPhysicalHostHTTP, "id"))
+	}
+
 	// Discovery routes
 	api.GET("/api/discovery/status", ginfadapter.GinToHTTPHandler(discoveryMgr.GetStatusHTTP))
 	api.POST("/api/discovery/scan", ginfadapter.GinToHTTPHandler(discoveryMgr.ScanHTTP))
@@ -268,6 +273,7 @@ func main() {
 		api.GET("/api/org/projects/:id/resources", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectResourcesHTTP, "id"))
 		api.POST("/api/org/projects/:id/resources", ginfadapter.GinToHTTPHandler(projectMgr.LinkResourceHTTP, "id"))
 		api.DELETE("/api/org/projects/:id/resources/:resource_id", ginfadapter.GinToHTTPHandler(projectMgr.UnlinkResourceHTTP, "id", "resource_id"))
+		api.PATCH("/api/org/projects/:id/resources/:type/:resource_id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateResourceWeightHTTP, "id", "type", "resource_id"))
 
 		// Permissions
 		api.GET("/api/org/projects/:id/permissions", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectPermissionsHTTP, "id"))

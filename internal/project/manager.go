@@ -643,8 +643,11 @@ func (m *Manager) ListProjectResourcesHTTP(w http.ResponseWriter, r *http.Reques
 		apierror.InternalErrorFromErr(w, err)
 		return
 	}
+	// Return in standard list format with data wrapper
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resources)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": resources,
+	})
 }
 
 func (m *Manager) LinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
@@ -652,6 +655,7 @@ func (m *Manager) LinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		ResourceType ResourceType `json:"resource_type"`
 		ResourceID   string       `json:"resource_id"`
+		Weight       float64      `json:"weight"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		apierror.ValidationError(w, err.Error())
@@ -665,6 +669,10 @@ func (m *Manager) LinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 		apierror.ValidationError(w, "resource_id is required")
 		return
 	}
+	// Default weight to 1.0 if not specified or invalid
+	if input.Weight <= 0 || input.Weight > 1 {
+		input.Weight = 1.0
+	}
 	proj, err := m.repo.GetProject(id)
 	if err != nil {
 		apierror.InternalErrorFromErr(w, err)
@@ -674,7 +682,7 @@ func (m *Manager) LinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 		apierror.NotFound(w, "project not found")
 		return
 	}
-	pr := NewProjectResource(id, input.ResourceType, input.ResourceID)
+	pr := NewProjectResourceWithWeight(id, input.ResourceType, input.ResourceID, input.Weight)
 	if err := m.repo.CreateProjectResource(pr); err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			apierror.Conflict(w, "resource already linked")
@@ -687,7 +695,7 @@ func (m *Manager) LinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 	// Audit log
 	if user := m.userProvider.GetUserFromRequest(r); user != nil {
 		auditLog := NewAuditLog(user.Username, ActionCreate, "resource_link", pr.ID, proj.Name)
-		auditLog.NewValue = fmt.Sprintf("%s: %s", input.ResourceType, input.ResourceID)
+		auditLog.NewValue = fmt.Sprintf("%s: %s (weight: %.2f)", input.ResourceType, input.ResourceID, input.Weight)
 		auditLog.IPAddress = getClientIP(r)
 		m.repo.CreateAuditLog(auditLog)
 	}
@@ -731,6 +739,116 @@ func (m *Manager) UnlinkResourceHTTP(w http.ResponseWriter, r *http.Request) {
 		m.repo.CreateAuditLog(auditLog)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// UpdateResourceWeightHTTP updates the weight of a project resource link
+func (m *Manager) UpdateResourceWeightHTTP(w http.ResponseWriter, r *http.Request) {
+	id := ginfadapter.Vars(r)["id"]
+	resourceType := ginfadapter.Vars(r)["type"]
+	resourceID := ginfadapter.Vars(r)["resource_id"]
+
+	var input struct {
+		Weight float64 `json:"weight"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		apierror.ValidationError(w, err.Error())
+		return
+	}
+
+	// Validate weight
+	if input.Weight < 0 || input.Weight > 1 {
+		apierror.ValidationError(w, "weight must be between 0.0 and 1.0")
+		return
+	}
+
+	proj, err := m.repo.GetProject(id)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	if proj == nil {
+		apierror.NotFound(w, "project not found")
+		return
+	}
+
+	pr, err := m.repo.GetProjectResource(id, resourceID)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	if pr == nil {
+		apierror.NotFound(w, "resource link not found")
+		return
+	}
+
+	oldWeight := pr.Weight
+	if err := m.repo.UpdateProjectResourceWeight(id, resourceID, input.Weight); err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+
+	// Audit log
+	if user := m.userProvider.GetUserFromRequest(r); user != nil {
+		auditLog := NewAuditLog(user.Username, ActionUpdate, "resource_weight", pr.ID, proj.Name)
+		auditLog.OldValue = fmt.Sprintf("%.2f", oldWeight)
+		auditLog.NewValue = fmt.Sprintf("%.2f", input.Weight)
+		auditLog.IPAddress = getClientIP(r)
+		m.repo.CreateAuditLog(auditLog)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":           pr.ID,
+		"project_id":   id,
+		"resource_type": resourceType,
+		"resource_id":  resourceID,
+		"weight":       input.Weight,
+	})
+}
+
+// GetProjectsForPhysicalHost returns all projects linked to a physical host
+func (m *Manager) GetProjectsForPhysicalHost(hostID string) ([]*Project, error) {
+	// Get all project resources linked to this physical host
+	prs, err := m.repo.GetProjectsByResourceID(ResourceTypePhysicalHost, hostID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(prs) == 0 {
+		return []*Project{}, nil
+	}
+
+	// Collect project IDs
+	projectIDs := make([]string, len(prs))
+	for i, pr := range prs {
+		projectIDs[i] = pr.ProjectID
+	}
+
+	// Get projects
+	var projects []*Project
+	for _, id := range projectIDs {
+		proj, err := m.repo.GetProject(id)
+		if err != nil {
+			continue
+		}
+		if proj != nil {
+			projects = append(projects, proj)
+		}
+	}
+
+	return projects, nil
+}
+
+// GetProjectsForPhysicalHostHTTP returns all projects linked to a physical host
+func (m *Manager) GetProjectsForPhysicalHostHTTP(w http.ResponseWriter, r *http.Request) {
+	id := ginfadapter.Vars(r)["id"]
+	projects, err := m.GetProjectsForPhysicalHost(id)
+	if err != nil {
+		apierror.InternalErrorFromErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(projects)
 }
 
 // Permission handlers

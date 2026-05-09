@@ -81,6 +81,7 @@ type ProjectResource struct {
 	ProjectID    string       `json:"project_id"`
 	ResourceType ResourceType `json:"resource_type"`
 	ResourceID   string       `json:"resource_id"`
+	Weight       float64     `json:"weight"`
 	CreatedAt    time.Time    `json:"created_at"`
 }
 
@@ -101,6 +102,9 @@ type Resource struct {
 	ID           string       `json:"id"`
 	ResourceType ResourceType `json:"resource_type"`
 	ResourceID   string       `json:"resource_id"`
+	Weight       float64      `json:"weight"`
+	Name         string       `json:"name,omitempty"`
+	Status       string       `json:"status,omitempty"`
 	CreatedAt    time.Time    `json:"created_at"`
 }
 
@@ -175,6 +179,19 @@ func NewProjectResource(projID string, resType ResourceType, resID string) *Proj
 		ProjectID:    projID,
 		ResourceType: resType,
 		ResourceID:   resID,
+		Weight:       1.0,
+		CreatedAt:    time.Now(),
+	}
+}
+
+// NewProjectResourceWithWeight creates a new project resource link with weight
+func NewProjectResourceWithWeight(projID string, resType ResourceType, resID string, weight float64) *ProjectResource {
+	return &ProjectResource{
+		ID:           uuid.New().String(),
+		ProjectID:    projID,
+		ResourceType: resType,
+		ResourceID:   resID,
+		Weight:       weight,
 		CreatedAt:    time.Now(),
 	}
 }
@@ -257,6 +274,7 @@ type GORMResource struct {
 	ProjectID    string       `gorm:"type:text;not null" json:"project_id"`
 	ResourceType ResourceType `gorm:"type:text;not null" json:"resource_type"`
 	ResourceID   string       `gorm:"type:text;not null" json:"resource_id"`
+	Weight       float64      `gorm:"type:float" json:"weight"`
 	CreatedAt    time.Time    `gorm:"type:timestamptz" json:"created_at"`
 	UpdatedAt    time.Time    `gorm:"type:timestamptz" json:"updated_at"`
 	Project      GORMProject  `gorm:"foreignKey:ProjectID" json:"-"`

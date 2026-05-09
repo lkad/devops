@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Pencil, Trash2, Plus, X } from 'lucide-react'
-import { projectsApi, type Project } from '@/api/endpoints/projects'
+import { projectsApi, type Project, type Resource } from '@/api/endpoints/projects'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -10,13 +10,6 @@ import { ProjectForm } from './ProjectForm'
 import styles from './ProjectDetail.module.css'
 
 type TabType = 'resources' | 'permissions'
-
-interface Resource {
-  id: string
-  type: 'device' | 'pipeline' | 'host'
-  name: string
-  weight: number
-}
 
 type ResourceType = 'device' | 'pipeline' | 'host'
 
@@ -65,7 +58,7 @@ export function ProjectDetail() {
 
   const { data: resourcesData } = useQuery({
     queryKey: ['project', id, 'resources'],
-    queryFn: () => projectsApi.getProject(id!),
+    queryFn: () => projectsApi.getProjectResources(id!),
     enabled: activeTab === 'resources' && !!id,
   })
 
@@ -95,11 +88,7 @@ export function ProjectDetail() {
     createdAt: new Date().toISOString(),
   }
 
-  const resources: Resource[] = resourcesData ? [
-    { id: '1', type: 'device', name: 'dev-server-01', weight: 30 },
-    { id: '2', type: 'pipeline', name: 'build-pipeline', weight: 40 },
-    { id: '3', type: 'host', name: 'prod-host-01', weight: 30 },
-  ] : []
+  const resources: Resource[] = resourcesData?.data || []
 
   const permissions: Permission[] = permissionsData ? [
     { id: '1', userId: 'u1', userName: 'admin', role: 'admin', level: 100 },
@@ -206,23 +195,29 @@ export function ProjectDetail() {
                           fontSize: '14px',
                         }}
                         onClick={() => {
-                          if (resource.type === 'device') navigate(`/devices/${resource.id}`)
-                          else if (resource.type === 'host') navigate(`/physical-hosts/${resource.id}`)
-                          else if (resource.type === 'pipeline') navigate(`/pipelines/${resource.id}`)
+                          if (resource.resource_type === 'device') navigate(`/devices/${resource.resource_id}`)
+                          else if (resource.resource_type === 'physical_host') navigate(`/physical-hosts/${resource.resource_id}`)
+                          else if (resource.resource_type === 'pipeline') navigate(`/pipelines/${resource.resource_id}`)
                         }}
                       >
-                        {resource.name}
+                        {resource.resource_id}
                       </button>
                     </td>
-                    <td style={{ padding: '12px 16px', color: 'var(--color-text-secondary)' }}>{resource.type}</td>
-                    <td style={{ padding: '12px 16px', color: 'var(--color-text-primary)' }}>{resource.weight}%</td>
+                    <td style={{ padding: '12px 16px', color: 'var(--color-text-secondary)' }}>{resource.resource_type}</td>
+                    <td style={{ padding: '12px 16px', color: 'var(--color-text-primary)' }}>{(resource.weight * 100).toFixed(0)}%</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </Card>
           <div style={{ marginTop: '16px', color: 'var(--color-text-muted)', fontSize: '14px' }}>
-            Total weight: {resources.reduce((sum, r) => sum + r.weight, 0)}% (should equal 100%)
+            Total weight: {(resources.reduce((sum, r) => sum + r.weight, 0) * 100).toFixed(0)}%
+            {resources.reduce((sum, r) => sum + r.weight, 0) > 1 && (
+              <span style={{ color: 'var(--color-error)', marginLeft: '8px' }}>Warning: Over 100%</span>
+            )}
+            {resources.reduce((sum, r) => sum + r.weight, 0) < 1 && resources.reduce((sum, r) => sum + r.weight, 0) > 0 && (
+              <span style={{ color: 'var(--color-warning)', marginLeft: '8px' }}>Unallocated: {((1 - resources.reduce((sum, r) => sum + r.weight, 0)) * 100).toFixed(0)}%</span>
+            )}
           </div>
         </div>
       )}

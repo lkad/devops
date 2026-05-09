@@ -114,4 +114,35 @@ export const projectsApi = {
   // Tree view
   getProjectTree: () =>
     apiClient.get<ProjectTreeResponse>('/api/v1/projects/tree'),
+
+  // Project resources
+  getProjectResources: (projectId: string) =>
+    apiClient.get<{data: Resource[]}>(`/api/org/projects/${projectId}/resources`),
+
+  linkResource: (projectId: string, resourceType: string, resourceId: string, weight: number = 1.0) =>
+    apiClient.post<Resource>(`/api/org/projects/${projectId}/resources`, {
+      resource_type: resourceType,
+      resource_id: resourceId,
+      weight,
+    }),
+
+  updateResourceWeight: (projectId: string, resourceType: string, resourceId: string, weight: number) =>
+    apiClient.patch<Resource>(`/api/org/projects/${projectId}/resources/${resourceType}/${resourceId}`, { weight }),
+
+  unlinkResource: (projectId: string, resourceType: string, resourceId: string) =>
+    apiClient.delete<void>(`/api/org/projects/${projectId}/resources/${resourceType}/${resourceId}`),
+}
+
+// Resource interface for project resources
+export interface Resource {
+  id: string
+  resource_type: 'device' | 'pipeline' | 'physical_host'
+  resource_id: string
+  weight: number
+}
+
+// Separate API for physical host project linking
+export const projectApi = {
+  getProjectsForPhysicalHost: (hostId: string) =>
+    apiClient.get<Project[]>(`/api/physical-hosts/${hostId}/projects`),
 }

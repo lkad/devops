@@ -1,6 +1,7 @@
 package project
 
 import (
+	"math"
 	"strings"
 	"time"
 
@@ -335,8 +336,35 @@ func (r *Repository) GetProjectResource(projectID, resourceID string) (*ProjectR
 		ProjectID:    gpr.ProjectID,
 		ResourceType: gpr.ResourceType,
 		ResourceID:   gpr.ResourceID,
+		Weight:       gpr.Weight,
 		CreatedAt:    gpr.CreatedAt,
 	}, nil
+}
+
+func (r *Repository) UpdateProjectResourceWeight(projectID, resourceID string, weight float64) error {
+	return r.db.Model(&GORMResource{}).
+		Where("project_id = ? AND resource_id = ?", projectID, resourceID).
+		Update("weight", weight).Error
+}
+
+// GetProjectsByResourceID returns all projects linked to a specific resource
+func (r *Repository) GetProjectsByResourceID(resourceType ResourceType, resourceID string) ([]*ProjectResource, error) {
+	var gprs []GORMResource
+	if err := r.db.Where("resource_type = ? AND resource_id = ?", resourceType, resourceID).Find(&gprs).Error; err != nil {
+		return nil, err
+	}
+	result := make([]*ProjectResource, len(gprs))
+	for i, gpr := range gprs {
+		result[i] = &ProjectResource{
+			ID:           gpr.ID,
+			ProjectID:    gpr.ProjectID,
+			ResourceType: gpr.ResourceType,
+			ResourceID:   gpr.ResourceID,
+			Weight:       gpr.Weight,
+			CreatedAt:    gpr.CreatedAt,
+		}
+	}
+	return result, nil
 }
 
 // Permission CRUD
@@ -418,7 +446,7 @@ func (r *Repository) GetFinOpsData(period string) ([]FinOpsRow, error) {
 		ProjectType  string
 		Project      string
 		ResourceType string
-		Count        int64
+		Count        float64
 		Unit         string
 	}
 	var results []finOpsResult
@@ -429,7 +457,7 @@ func (r *Repository) GetFinOpsData(period string) ([]FinOpsRow, error) {
 			p.type as project_type,
 			p.name as project,
 			pr.resource_type,
-			COUNT(*) as count,
+			COALESCE(SUM(pr.weight), 1.0) as count,
 			CASE
 				WHEN pr.resource_type = 'device' THEN 'nodes'
 				WHEN pr.resource_type = 'physical_host' THEN 'nodes'
@@ -456,7 +484,7 @@ func (r *Repository) GetFinOpsData(period string) ([]FinOpsRow, error) {
 			ProjectType:  r.ProjectType,
 			Project:      r.Project,
 			ResourceType: r.ResourceType,
-			Count:        int(r.Count),
+			Count:        int(math.Round(r.Count)),
 			Unit:         r.Unit,
 		}
 	}
@@ -648,6 +676,7 @@ func (r *Repository) resourcesFromGORM(resources []GORMResource) []*Resource {
 			ID:           resources[i].ID,
 			ResourceType: resources[i].ResourceType,
 			ResourceID:   resources[i].ResourceID,
+			Weight:       resources[i].Weight,
 			CreatedAt:    resources[i].CreatedAt,
 		}
 	}
