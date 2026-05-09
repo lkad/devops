@@ -69,8 +69,16 @@ async function request<T>(
     } catch {
       errorData = await response.text()
     }
+    // Extract message from structured error response
+    let message = `Request failed with status ${response.status}`
+    if (errorData && typeof errorData === 'object' && 'error' in errorData) {
+      const err = errorData as { error: { message?: string; code?: string } }
+      if (err.error?.message) {
+        message = err.error.message
+      }
+    }
     throw new ApiError(
-      `Request failed with status ${response.status}`,
+      message,
       response.status,
       errorData
     )

@@ -75,7 +75,7 @@ export function BusinessLineForm({ isOpen, onClose, onSuccess, businessLine }: B
             label="Name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            error={error && !name.trim() ? error : undefined}
+            error={error}
             placeholder="Enter business line name"
             autoFocus
           />
