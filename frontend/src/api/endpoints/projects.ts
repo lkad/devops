@@ -26,6 +26,12 @@ export interface Project {
   createdAt: string
 }
 
+export interface Permission {
+  userId: string
+  role: 'owner' | 'editor' | 'viewer'
+  createdAt: string
+}
+
 export interface CreateBusinessLineRequest {
   name: string
   description?: string
@@ -110,6 +116,10 @@ export const projectsApi = {
 
   deleteProject: (id: string) =>
     apiClient.delete<void>(`/api/org/projects/${id}`),
+
+  // Project permissions
+  getProjectPermissions: (id: string) =>
+    apiClient.get<Permission[]>(`/api/org/projects/${id}/permissions`),
 
   // Tree view
   getProjectTree: () =>

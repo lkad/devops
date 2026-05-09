@@ -48,7 +48,7 @@ export function ProjectDetail() {
     searchQuery: '',
     selectedResourceId: '',
     selectedResourceName: '',
-    weight: 0,
+    weight: 1.0,
   })
 
   const { data: project, isLoading } = useQuery({
@@ -64,7 +64,7 @@ export function ProjectDetail() {
 
   const { data: permissionsData } = useQuery({
     queryKey: ['project', id, 'permissions'],
-    queryFn: () => projectsApi.getProject(id!),
+    queryFn: () => projectsApi.getProjectPermissions(id!),
     enabled: activeTab === 'permissions' && !!id,
   })
 
@@ -90,10 +90,13 @@ export function ProjectDetail() {
 
   const resources: Resource[] = resourcesData?.data || []
 
-  const permissions: Permission[] = permissionsData ? [
-    { id: '1', userId: 'u1', userName: 'admin', role: 'admin', level: 100 },
-    { id: '2', userId: 'u2', userName: 'developer', role: 'editor', level: 50 },
-  ] : []
+  const permissions: Permission[] = permissionsData?.map((p, i) => ({
+    id: String(i),
+    userId: p.userId,
+    userName: p.userId,
+    role: p.role,
+    level: p.role === 'owner' ? 100 : p.role === 'editor' ? 50 : 25,
+  })) || []
 
   return (
     <div className={styles.container}>
@@ -306,9 +309,9 @@ export function ProjectDetail() {
                   min="0"
                   max="100"
                   className={styles.formInput}
-                  value={linkModal.weight || ''}
-                  onChange={(e) => setLinkModal({ ...linkModal, weight: parseInt(e.target.value) || 0 })}
-                  placeholder="0"
+                  value={(linkModal.weight * 100) || ''}
+                  onChange={(e) => setLinkModal({ ...linkModal, weight: (parseInt(e.target.value) || 0) / 100 })}
+                  placeholder="100"
                 />
               </div>
 
