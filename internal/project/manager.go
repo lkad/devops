@@ -120,6 +120,10 @@ func (m *Manager) CreateProjectTypeHTTP(w http.ResponseWriter, r *http.Request) 
 		Color:       input.Color,
 	}
 	if err := m.repo.CreateProjectType(pt); err != nil {
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+			apierror.Conflict(w, "project type with this name already exists")
+			return
+		}
 		apierror.InternalErrorFromErr(w, err)
 		return
 	}
@@ -206,6 +210,10 @@ func (m *Manager) CreateBusinessLineHTTP(w http.ResponseWriter, r *http.Request)
 	}
 	bl := NewBusinessLine(input.Name, input.Description)
 	if err := m.repo.CreateBusinessLine(bl); err != nil {
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+			apierror.Conflict(w, "business line with this name already exists")
+			return
+		}
 		apierror.InternalErrorFromErr(w, err)
 		return
 	}
@@ -363,6 +371,10 @@ func (m *Manager) CreateSystemHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	sys := NewSystem(blID, input.Name, input.Description)
 	if err := m.repo.CreateSystem(sys); err != nil {
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+			apierror.Conflict(w, "system with this name already exists")
+			return
+		}
 		apierror.InternalErrorFromErr(w, err)
 		return
 	}
@@ -525,6 +537,10 @@ func (m *Manager) CreateProjectHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	proj := NewProject(sysID, input.Name, input.Type, input.Description)
 	if err := m.repo.CreateProject(proj); err != nil {
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+			apierror.Conflict(w, "project with this name already exists")
+			return
+		}
 		apierror.InternalErrorFromErr(w, err)
 		return
 	}
@@ -908,6 +924,10 @@ func (m *Manager) GrantPermissionHTTP(w http.ResponseWriter, r *http.Request) {
 	projID := id
 	perm := NewPermission(level, &projID, input.SystemID, input.BusinessLineID, input.Role, input.Subject)
 	if err := m.repo.CreatePermission(perm); err != nil {
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+			apierror.Conflict(w, "permission already exists")
+			return
+		}
 		apierror.InternalErrorFromErr(w, err)
 		return
 	}

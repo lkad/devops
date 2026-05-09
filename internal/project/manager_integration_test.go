@@ -244,6 +244,72 @@ func TestProjectAPI_BusinessLines_CreateAndList(t *testing.T) {
 	t.Logf("Found %d business lines", len(data))
 }
 
+// TestProjectAPI_BusinessLines_DuplicateName tests that creating a business line with
+// a duplicate name returns 409 Conflict instead of 500 Internal Server Error
+func TestProjectAPI_BusinessLines_DuplicateName(t *testing.T) {
+	baseURL, token := skipIfNoProjectDeps(t)
+
+	// Create a business line with unique name
+	blName := uniqueName("test-bl-duplicate")
+	createPayload := map[string]interface{}{
+		"name":        blName,
+		"description": "first creation",
+	}
+
+	req, err := makeReq("POST", baseURL+"/api/org/business-lines", token, createPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to create business line: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 201 or 200 for first creation, got %d", resp.StatusCode)
+	}
+
+	// Try to create another business line with the same name
+	duplicatePayload := map[string]interface{}{
+		"name":        blName,
+		"description": "duplicate name",
+	}
+
+	req2, err := makeReq("POST", baseURL+"/api/org/business-lines", token, duplicatePayload)
+	if err != nil {
+		t.Fatalf("Failed to create duplicate request: %v", err)
+	}
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("Failed to create duplicate business line: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	// Should return 409 Conflict, not 500
+	if resp2.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(resp2.Body)
+		t.Errorf("Expected 409 Conflict for duplicate name, got %d. Body: %s", resp2.StatusCode, string(body))
+	}
+
+	// Verify error response format
+	var errResp map[string]interface{}
+	if err := json.NewDecoder(resp2.Body).Decode(&errResp); err != nil {
+		t.Fatalf("Failed to decode error response: %v", err)
+	}
+
+	errObj, ok := errResp["error"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected error object in response")
+	}
+
+	if errObj["code"] != "CONFLICT" {
+		t.Errorf("Expected error code CONFLICT, got %v", errObj["code"])
+	}
+
+	t.Logf("Duplicate name correctly returned 409 Conflict: %v", errObj["message"])
+}
+
 // TestProjectAPI_BusinessLines_Get tests getting a single business line via real HTTP
 func TestProjectAPI_BusinessLines_Get(t *testing.T) {
 	baseURL, token := skipIfNoProjectDeps(t)
