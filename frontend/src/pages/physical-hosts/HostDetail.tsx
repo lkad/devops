@@ -112,6 +112,40 @@ export function HostDetail() {
     enabled: activeTab === 'projects' && !!id,
   })
 
+  // Fetch project resources for all linked projects to get weights
+  const { data: projectResourcesData } = useQuery({
+    queryKey: ['physical-host', id, 'projects', 'resources'],
+    queryFn: async () => {
+      if (!linkedProjects) return {}
+      const results: Record<string, { weight: number; resourceId: string }> = {}
+      await Promise.all(
+        linkedProjects.map(async (project) => {
+          const resources = await projectsApi.getProjectResources(project.id)
+          const hostResource = resources.data.find(
+            (r) => r.resource_type === 'physical_host' && r.resource_id === id
+          )
+          if (hostResource) {
+            results[project.id] = { weight: hostResource.weight, resourceId: hostResource.id }
+          }
+        })
+      )
+      return results
+    },
+    enabled: activeTab === 'projects' && !!linkedProjects && linkedProjects.length > 0,
+  })
+
+  const updateWeightMutation = useMutation({
+    mutationFn: ({ projectId, weight }: { projectId: string; weight: number }) =>
+      projectsApi.updateResourceWeight(projectId, 'physical_host', id!, weight),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['physical-host', id, 'projects', 'resources'] })
+      showToast('Weight updated', 'success')
+    },
+    onError: (error: Error) => {
+      showToast(error.message || 'Failed to update weight', 'error')
+    },
+  })
+
   const unlinkMutation = useMutation({
     mutationFn: (projectId: string) => projectsApi.unlinkResource(projectId, 'physical_host', id!),
     onSuccess: () => {
@@ -521,42 +555,87 @@ export function HostDetail() {
               </div>
             ) : linkedProjects && linkedProjects.length > 0 ? (
               <div className="space-y-3">
-                {linkedProjects.map((project) => (
-                  <div
-                    key={project.id}
-                    className="flex items-center justify-between p-4 bg-surface rounded-lg hover:bg-surface-elevated transition-colors group"
-                  >
-                    <div className="flex items-center gap-3 flex-1">
-                      <div className="p-2 bg-surface-elevated rounded-lg group-hover:bg-primary/10">
-                        <FolderOpen className="w-4 h-4 text-text-secondary group-hover:text-primary" />
+                {linkedProjects.map((project) => {
+                  const projectWeight = projectResourcesData?.[project.id]
+                  return (
+                    <div
+                      key={project.id}
+                      className="flex items-center justify-between p-4 bg-surface rounded-lg hover:bg-surface-elevated transition-colors group"
+                    >
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="p-2 bg-surface-elevated rounded-lg group-hover:bg-primary/10">
+                          <FolderOpen className="w-4 h-4 text-text-secondary group-hover:text-primary" />
+                        </div>
+                        <Link to={`/projects/${project.id}`} className="flex-1">
+                          <p className="text-sm font-medium text-text">{project.name}</p>
+                          <p className="text-xs text-text-muted mt-0.5">
+                            {project.type === 'frontend' ? '前端项目' : '后端项目'}
+                          </p>
+                        </Link>
                       </div>
-                      <Link to={`/projects/${project.id}`} className="flex-1">
-                        <p className="text-sm font-medium text-text">{project.name}</p>
-                        <p className="text-xs text-text-muted mt-0.5">
-                          {project.type === 'frontend' ? '前端项目' : '后端项目'}
-                        </p>
-                      </Link>
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            style={{
+                              width: '60px',
+                              padding: '4px 8px',
+                              border: '1px solid var(--color-border)',
+                              borderRadius: '4px',
+                              background: 'var(--color-surface-elevated)',
+                              color: 'var(--color-text-primary)',
+                              fontSize: '14px',
+                            }}
+                            value={projectWeight ? (projectWeight.weight * 100).toFixed(0) : '100'}
+                            onChange={(e) => {
+                              const newWeight = (parseInt(e.target.value) || 0) / 100
+                              if (projectWeight) {
+                                updateWeightMutation.mutate({ projectId: project.id, weight: newWeight })
+                              }
+                            }}
+                          />
+                          <span className="text-xs text-text-muted">%</span>
+                        </div>
+                        <span className="text-xs text-text-muted">
+                          创建于 {new Date(project.createdAt).toLocaleDateString()}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            if (confirm('确定要取消关联此项目吗？')) {
+                              unlinkMutation.mutate(project.id)
+                            }
+                          }}
+                          disabled={unlinkMutation.isPending}
+                          className="px-3 py-1.5 text-xs font-medium text-error bg-error/10 hover:bg-error/20 rounded-md transition-colors disabled:opacity-50"
+                        >
+                          {unlinkMutation.isPending ? '处理中...' : '取消关联'}
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-text-muted">
-                        创建于 {new Date(project.createdAt).toLocaleDateString()}
-                      </span>
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          if (confirm('确定要取消关联此项目吗？')) {
-                            unlinkMutation.mutate(project.id)
-                          }
-                        }}
-                        disabled={unlinkMutation.isPending}
-                        className="px-3 py-1.5 text-xs font-medium text-error bg-error/10 hover:bg-error/20 rounded-md transition-colors disabled:opacity-50"
-                      >
-                        {unlinkMutation.isPending ? '处理中...' : '取消关联'}
-                      </button>
-                    </div>
+                  )
+                })}
+                {/* Total weight display */}
+                {linkedProjects.length > 0 && (
+                  <div className="flex items-center justify-between p-3 bg-surface-elevated rounded-lg">
+                    <span className="text-sm font-medium text-text">Total Weight</span>
+                    <span className="text-sm text-text-muted">
+                      {(() => {
+                        const total = Object.values(projectResourcesData || {}).reduce((sum, r) => sum + r.weight, 0)
+                        return `${(total * 100).toFixed(0)}%`
+                      })()}
+                      {(() => {
+                        const total = Object.values(projectResourcesData || {}).reduce((sum, r) => sum + r.weight, 0)
+                        if (total > 1) return <span style={{ color: 'var(--color-error)', marginLeft: '8px' }}>Warning: Over 100%</span>
+                        if (total < 1 && total > 0) return <span style={{ color: 'var(--color-warning)', marginLeft: '8px' }}>Unallocated: {((1 - total) * 100).toFixed(0)}%</span>
+                        return null
+                      })()}
+                    </span>
                   </div>
-                ))}
+                )}
               </div>
             ) : (
               <div className="text-center py-12 text-text-secondary">

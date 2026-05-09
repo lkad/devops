@@ -14,15 +14,15 @@
 ## 3. Frontend - Project Resources with Weights
 
 - [x] 3.1 Update ProjectDetail.tsx resources tab to show weight column
-- [ ] 3.2 Add inline weight editor (input field or slider)
+- [x] 3.2 Add inline weight editor (input field or slider)
 - [x] 3.3 Show total weight sum and warn if > 100% or < 100%
-- [ ] 3.4 Persist weight changes via PATCH API
+- [x] 3.4 Persist weight changes via PATCH API
 
 ## 4. Frontend - Host Detail Projects with Weights
 
 - [x] 4.1 Update HostDetail.tsx 关联项目 tab to show weight column
-- [ ] 4.2 Add inline weight editor
-- [ ] 4.3 Show total weight sum and warn if > 100% or < 100%
+- [x] 4.2 Add inline weight editor
+- [x] 4.3 Show total weight sum and warn if > 100% or < 100%
 
 ## 5. Database Migration
 

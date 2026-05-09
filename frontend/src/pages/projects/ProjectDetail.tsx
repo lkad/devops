@@ -75,6 +75,18 @@ export function ProjectDetail() {
     },
   })
 
+  const updateWeightMutation = useMutation({
+    mutationFn: ({ resourceType, resourceId, weight }: { resourceType: string; resourceId: string; weight: number }) =>
+      projectsApi.updateResourceWeight(id!, resourceType, resourceId, weight),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project', id, 'resources'] })
+    },
+  })
+
+  const handleWeightChange = (resourceType: string, resourceId: string, newWeight: number) => {
+    updateWeightMutation.mutate({ resourceType, resourceId, weight: newWeight })
+  }
+
   if (isLoading) {
     return <div className={styles.container}>Loading...</div>
   }
@@ -207,7 +219,32 @@ export function ProjectDetail() {
                       </button>
                     </td>
                     <td style={{ padding: '12px 16px', color: 'var(--color-text-secondary)' }}>{resource.resource_type}</td>
-                    <td style={{ padding: '12px 16px', color: 'var(--color-text-primary)' }}>{(resource.weight * 100).toFixed(0)}%</td>
+                    <td style={{ padding: '12px 16px' }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        style={{
+                          width: '60px',
+                          padding: '4px 8px',
+                          border: '1px solid var(--color-border)',
+                          borderRadius: '4px',
+                          background: 'var(--color-surface-elevated)',
+                          color: 'var(--color-text-primary)',
+                          fontSize: '14px',
+                        }}
+                        value={(resource.weight * 100).toFixed(0)}
+                        onChange={(e) => {
+                          const newWeight = (parseInt(e.target.value) || 0) / 100
+                          handleWeightChange(resource.resource_type, resource.resource_id, newWeight)
+                        }}
+                        onBlur={(e) => {
+                          const newWeight = (parseInt(e.target.value) || 0) / 100
+                          handleWeightChange(resource.resource_type, resource.resource_id, newWeight)
+                        }}
+                      />
+                      <span style={{ marginLeft: '4px', color: 'var(--color-text-muted)' }}>%</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
