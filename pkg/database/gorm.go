@@ -93,6 +93,34 @@ func addMissingDeletedAtColumns() error {
 	return nil
 }
 
+// addMissingUpdatedAtColumns adds updated_at columns to existing tables
+// that were created before UpdatedAt fields were added to GORM models
+func addMissingUpdatedAtColumns() error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	tables := []string{"project_resources", "project_permissions", "devices", "k8s_clusters"}
+	for _, table := range tables {
+		// Check if column exists
+		var count int64
+		err := db.Raw(fmt.Sprintf(`
+			SELECT COUNT(*) FROM information_schema.columns
+			WHERE table_name = '%s' AND column_name = 'updated_at'
+		`, table)).Count(&count).Error
+		if err != nil {
+			continue
+		}
+		if count == 0 {
+			// Add the column
+			if err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP", table)).Error; err != nil {
+				// Log but don't fail - some tables might not exist yet
+				continue
+			}
+		}
+	}
+	return nil
+}
+
 // AutoMigrate runs database migrations
 func AutoMigrate() error {
 	if db == nil {
@@ -101,6 +129,10 @@ func AutoMigrate() error {
 	// First add missing deleted_at columns to existing tables
 	// This must happen BEFORE AutoMigrate runs, as some tables were created before gorm.Model soft delete
 	if err := addMissingDeletedAtColumns(); err != nil {
+		return err
+	}
+	// Add missing updated_at columns to existing tables
+	if err := addMissingUpdatedAtColumns(); err != nil {
 		return err
 	}
 	// Run AutoMigrate - continue even if some models fail (handle legacy constraints)

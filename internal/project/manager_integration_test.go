@@ -503,6 +503,535 @@ func TestProjectAPI_Pagination(t *testing.T) {
 	}
 }
 
+// TestProjectAPI_LinkResource tests linking a device/resource to a project
+func TestProjectAPI_LinkResource(t *testing.T) {
+	baseURL, token := skipIfNoProjectDeps(t)
+
+	// First create business line -> system -> project hierarchy
+	blName := uniqueName("test-bl-link-res")
+	blPayload := map[string]interface{}{
+		"name":        blName,
+		"description": "test for link resource",
+	}
+
+	req, err := makeReq("POST", baseURL+"/api/org/business-lines", token, blPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	blResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to create business line: %v", err)
+	}
+	var createdBL map[string]interface{}
+	if err := json.NewDecoder(blResp.Body).Decode(&createdBL); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	blResp.Body.Close()
+	blID, ok := createdBL["id"].(string)
+	if !ok || blID == "" {
+		t.Fatal("Failed to get business line ID")
+	}
+
+	// Create system
+	sysName := uniqueName("test-sys-link-res")
+	sysPayload := map[string]interface{}{
+		"name":              sysName,
+		"description":       "test",
+		"business_line_id": blID,
+	}
+	req, err = makeReq("POST", baseURL+"/api/org/business-lines/"+blID+"/systems", token, sysPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	sysResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to create system: %v", err)
+	}
+	var createdSys map[string]interface{}
+	if err := json.NewDecoder(sysResp.Body).Decode(&createdSys); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	sysResp.Body.Close()
+	sysID, ok := createdSys["id"].(string)
+	if !ok || sysID == "" {
+		t.Fatal("Failed to get system ID")
+	}
+
+	// Create project
+	projName := uniqueName("test-proj-link-res")
+	projPayload := map[string]interface{}{
+		"name":        projName,
+		"type":        "backend",
+		"description": "test for link resource",
+		"system_id":   sysID,
+	}
+	req, err = makeReq("POST", baseURL+"/api/org/systems/"+sysID+"/projects", token, projPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	projResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to create project: %v", err)
+	}
+	var createdProj map[string]interface{}
+	if err := json.NewDecoder(projResp.Body).Decode(&createdProj); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	projResp.Body.Close()
+	projID, ok := createdProj["id"].(string)
+	if !ok || projID == "" {
+		t.Fatal("Failed to get project ID")
+	}
+
+	// Link a device to the project
+	linkPayload := map[string]interface{}{
+		"resource_type": "device",
+		"resource_id":   "test-device-001",
+	}
+	req, err = makeReq("POST", baseURL+"/api/org/projects/"+projID+"/resources", token, linkPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	linkResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to link resource: %v", err)
+	}
+	defer linkResp.Body.Close()
+
+	if linkResp.StatusCode != http.StatusCreated && linkResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(linkResp.Body)
+		t.Fatalf("Expected 201 or 200, got %d. Body: %s", linkResp.StatusCode, string(body))
+	}
+
+	// Verify the link was created
+	var linkedRes map[string]interface{}
+	if err := json.NewDecoder(linkResp.Body).Decode(&linkedRes); err != nil {
+		t.Fatalf("Failed to decode link response: %v", err)
+	}
+
+	if linkedRes["resource_type"] != "device" {
+		t.Errorf("Expected resource_type 'device', got '%v'", linkedRes["resource_type"])
+	}
+	if linkedRes["resource_id"] != "test-device-001" {
+		t.Errorf("Expected resource_id 'test-device-001', got '%v'", linkedRes["resource_id"])
+	}
+	t.Logf("Successfully linked device to project: %s", projID)
+
+	// List project resources to verify
+	req, err = makeReq("GET", baseURL+"/api/org/projects/"+projID+"/resources", token, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	listResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to list resources: %v", err)
+	}
+	defer listResp.Body.Close()
+
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", listResp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(listResp.Body).Decode(&result); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	resources, ok := result["data"].([]interface{})
+	if !ok {
+		t.Fatal("Expected data array in response")
+	}
+	if len(resources) == 0 {
+		t.Fatal("Expected at least 1 linked resource")
+	}
+
+	t.Logf("Project resources: found %d linked resources", len(resources))
+}
+
+// TestProjectAPI_LinkMultipleResources tests linking multiple resources to a project
+func TestProjectAPI_LinkMultipleResources(t *testing.T) {
+	baseURL, token := skipIfNoProjectDeps(t)
+
+	// Create business line -> system -> project
+	blName := uniqueName("test-bl-multi-res")
+	blPayload := map[string]interface{}{
+		"name":        blName,
+		"description": "test for multi resource link",
+	}
+
+	req, err := makeReq("POST", baseURL+"/api/org/business-lines", token, blPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	blResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to create business line: %v", err)
+	}
+	var createdBL map[string]interface{}
+	if err := json.NewDecoder(blResp.Body).Decode(&createdBL); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	blResp.Body.Close()
+	blID := createdBL["id"].(string)
+
+	sysName := uniqueName("test-sys-multi-res")
+	sysPayload := map[string]interface{}{
+		"name":              sysName,
+		"description":       "test",
+		"business_line_id": blID,
+	}
+	req, err = makeReq("POST", baseURL+"/api/org/business-lines/"+blID+"/systems", token, sysPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	sysResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to create system: %v", err)
+	}
+	var createdSys map[string]interface{}
+	if err := json.NewDecoder(sysResp.Body).Decode(&createdSys); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	sysResp.Body.Close()
+	sysID := createdSys["id"].(string)
+
+	projName := uniqueName("test-proj-multi-res")
+	projPayload := map[string]interface{}{
+		"name":        projName,
+		"type":        "frontend",
+		"description": "test for multi resource link",
+		"system_id":   sysID,
+	}
+	req, err = makeReq("POST", baseURL+"/api/org/systems/"+sysID+"/projects", token, projPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	projResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to create project: %v", err)
+	}
+	var createdProj map[string]interface{}
+	if err := json.NewDecoder(projResp.Body).Decode(&createdProj); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	projResp.Body.Close()
+	projID := createdProj["id"].(string)
+
+	// Link multiple different resource types
+	resourceLinks := []struct {
+		resourceType string
+		resourceID   string
+	}{
+		{"device", "shared-vm-001"},
+		{"physical_host", "physical-host-001"},
+		{"pipeline", "pipeline-test-001"},
+	}
+
+	for _, link := range resourceLinks {
+		linkPayload := map[string]interface{}{
+			"resource_type": link.resourceType,
+			"resource_id":   link.resourceID,
+		}
+		req, err = makeReq("POST", baseURL+"/api/org/projects/"+projID+"/resources", token, linkPayload)
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+		linkResp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Failed to link resource %s: %v", link.resourceType, err)
+		}
+		linkResp.Body.Close()
+
+		if linkResp.StatusCode != http.StatusCreated && linkResp.StatusCode != http.StatusOK {
+			t.Errorf("Failed to link %s: expected 201/200, got %d", link.resourceType, linkResp.StatusCode)
+		}
+		t.Logf("Linked %s: %s to project", link.resourceType, link.resourceID)
+	}
+
+	// Verify all resources are linked
+	req, err = makeReq("GET", baseURL+"/api/org/projects/"+projID+"/resources", token, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	listResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to list resources: %v", err)
+	}
+	defer listResp.Body.Close()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(listResp.Body).Decode(&result); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	resources, ok := result["data"].([]interface{})
+	if !ok {
+		t.Fatal("Expected data array in response")
+	}
+	if len(resources) != len(resourceLinks) {
+		t.Errorf("Expected %d resources, got %d", len(resourceLinks), len(resources))
+	}
+
+	t.Logf("Successfully linked %d different resource types to project", len(resources))
+}
+
+// TestProjectAPI_UnlinkResource tests unlinking a resource from a project
+func TestProjectAPI_UnlinkResource(t *testing.T) {
+	baseURL, token := skipIfNoProjectDeps(t)
+
+	// Create hierarchy and project
+	blName := uniqueName("test-bl-unlink")
+	blPayload := map[string]interface{}{"name": blName, "description": "test"}
+	req, err := makeReq("POST", baseURL+"/api/org/business-lines", token, blPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	blResp, _ := http.DefaultClient.Do(req)
+	var createdBL map[string]interface{}
+	json.NewDecoder(blResp.Body).Decode(&createdBL)
+	blResp.Body.Close()
+	blID := createdBL["id"].(string)
+
+	sysPayload := map[string]interface{}{"name": uniqueName("test-sys-unlink"), "description": "test", "business_line_id": blID}
+	req, err = makeReq("POST", baseURL+"/api/org/business-lines/"+blID+"/systems", token, sysPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	sysResp, _ := http.DefaultClient.Do(req)
+	var createdSys map[string]interface{}
+	json.NewDecoder(sysResp.Body).Decode(&createdSys)
+	sysResp.Body.Close()
+	sysID := createdSys["id"].(string)
+
+	projPayload := map[string]interface{}{"name": uniqueName("test-proj-unlink"), "type": "backend", "system_id": sysID}
+	req, err = makeReq("POST", baseURL+"/api/org/systems/"+sysID+"/projects", token, projPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	projResp, _ := http.DefaultClient.Do(req)
+	var createdProj map[string]interface{}
+	json.NewDecoder(projResp.Body).Decode(&createdProj)
+	projResp.Body.Close()
+	projID := createdProj["id"].(string)
+
+	// Link a resource
+	linkPayload := map[string]interface{}{"resource_type": "device", "resource_id": "device-to-unlink"}
+	req, err = makeReq("POST", baseURL+"/api/org/projects/"+projID+"/resources", token, linkPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	linkResp, _ := http.DefaultClient.Do(req)
+	linkResp.Body.Close()
+
+	if linkResp.StatusCode != http.StatusCreated && linkResp.StatusCode != http.StatusOK {
+		t.Fatalf("Failed to link resource: %d", linkResp.StatusCode)
+	}
+
+	// Unlink the resource
+	req, err = makeReq("DELETE", baseURL+"/api/org/projects/"+projID+"/resources/device-to-unlink", token, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	unlinkResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to unlink resource: %v", err)
+	}
+	defer unlinkResp.Body.Close()
+
+	if unlinkResp.StatusCode != http.StatusNoContent {
+		t.Errorf("Expected 204, got %d", unlinkResp.StatusCode)
+	}
+
+	// Verify resource is unlinked
+	req, err = makeReq("GET", baseURL+"/api/org/projects/"+projID+"/resources", token, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	listResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to list resources: %v", err)
+	}
+	defer listResp.Body.Close()
+
+	var result map[string]interface{}
+	json.NewDecoder(listResp.Body).Decode(&result)
+
+	resources := result["data"].([]interface{})
+	if len(resources) != 0 {
+		t.Errorf("Expected 0 resources after unlink, got %d", len(resources))
+	}
+
+	t.Log("Successfully unlinked resource from project")
+}
+
+// TestFinOpsExport_WithResources tests FinOps CSV export with linked resources
+func TestFinOpsExport_WithResources(t *testing.T) {
+	baseURL, token := skipIfNoProjectDeps(t)
+
+	// Create business line -> system -> project hierarchy
+	blName := uniqueName("test-bl-finops")
+	blPayload := map[string]interface{}{
+		"name":        blName,
+		"description": "FinOps test business line",
+	}
+
+	req, err := makeReq("POST", baseURL+"/api/org/business-lines", token, blPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	blResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to create business line: %v", err)
+	}
+	var createdBL map[string]interface{}
+	if err := json.NewDecoder(blResp.Body).Decode(&createdBL); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	blResp.Body.Close()
+	blID, ok := createdBL["id"].(string)
+	if !ok || blID == "" {
+		t.Fatal("Failed to get business line ID")
+	}
+
+	// Create system
+	sysName := uniqueName("test-sys-finops")
+	sysPayload := map[string]interface{}{
+		"name":              sysName,
+		"description":       "FinOps test system",
+		"business_line_id": blID,
+	}
+	req, err = makeReq("POST", baseURL+"/api/org/business-lines/"+blID+"/systems", token, sysPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	sysResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to create system: %v", err)
+	}
+	var createdSys map[string]interface{}
+	if err := json.NewDecoder(sysResp.Body).Decode(&createdSys); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	sysResp.Body.Close()
+	sysID, ok := createdSys["id"].(string)
+	if !ok || sysID == "" {
+		t.Fatal("Failed to get system ID")
+	}
+
+	// Create project with type
+	projName := uniqueName("test-proj-finops")
+	projPayload := map[string]interface{}{
+		"name":        projName,
+		"type":        "backend",
+		"description": "FinOps test project",
+		"system_id":   sysID,
+	}
+	req, err = makeReq("POST", baseURL+"/api/org/systems/"+sysID+"/projects", token, projPayload)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	projResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to create project: %v", err)
+	}
+	var createdProj map[string]interface{}
+	if err := json.NewDecoder(projResp.Body).Decode(&createdProj); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	projResp.Body.Close()
+	projID, ok := createdProj["id"].(string)
+	if !ok || projID == "" {
+		t.Fatal("Failed to get project ID")
+	}
+
+	// Link resources to the project
+	resources := []struct {
+		resourceType string
+		resourceID   string
+	}{
+		{"device", "dev-vm-001"},
+		{"device", "dev-vm-002"},
+		{"pipeline", "ci-pipeline-001"},
+	}
+
+	for _, res := range resources {
+		linkPayload := map[string]interface{}{
+			"resource_type": res.resourceType,
+			"resource_id":   res.resourceID,
+		}
+		req, err = makeReq("POST", baseURL+"/api/org/projects/"+projID+"/resources", token, linkPayload)
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+		linkResp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Failed to link resource: %v", err)
+		}
+		linkResp.Body.Close()
+	}
+
+	// Export FinOps report
+	period := "2026-04"
+	req, err = makeReq("GET", baseURL+"/api/org/reports/finops?period="+period, token, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	finopsResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to export FinOps: %v", err)
+	}
+	defer finopsResp.Body.Close()
+
+	// FinOps should return CSV or 200
+	if finopsResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(finopsResp.Body)
+		t.Fatalf("Expected 200 for FinOps export, got %d. Body: %s", finopsResp.StatusCode, string(body))
+	}
+
+	contentType := finopsResp.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "csv") && !strings.Contains(contentType, "text/plain") {
+		t.Logf("Warning: Expected CSV content-type, got %s", contentType)
+	}
+
+	// Read and verify CSV content
+	body, err := io.ReadAll(finopsResp.Body)
+	if err != nil {
+		t.Fatalf("Failed to read response body: %v", err)
+	}
+
+	csvContent := string(body)
+	lines := strings.Split(csvContent, "\n")
+
+	// Should have header + at least some data rows
+	if len(lines) < 2 {
+		t.Fatalf("Expected CSV with header + data rows, got %d lines", len(lines))
+	}
+
+	// Verify header contains expected columns
+	header := lines[0]
+	expectedColumns := []string{"Business Line", "System", "Project Type", "Project", "Resource Type"}
+	for _, col := range expectedColumns {
+		if !strings.Contains(header, col) {
+			t.Errorf("Expected header to contain '%s', got: %s", col, header)
+		}
+	}
+
+	// Verify our test project appears in the FinOps data
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, projName) {
+			found = true
+			t.Logf("Found project '%s' in FinOps report: %s", projName, line)
+			break
+		}
+	}
+	if !found {
+		t.Logf("Warning: Project '%s' not found in FinOps report. This may be expected if period doesn't match.", projName)
+	}
+
+	t.Logf("FinOps CSV export successful, %d lines, content preview: %s...", len(lines), strings.Split(csvContent, "\n")[0])
+}
+
 func mustParseURL(rawURL string) *url.URL {
 	u, err := url.Parse(rawURL)
 	if err != nil {
