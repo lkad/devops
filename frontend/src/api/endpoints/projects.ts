@@ -121,9 +121,24 @@ export const projectsApi = {
   getProjectPermissions: (id: string) =>
     apiClient.get<Permission[]>(`/api/org/projects/${id}/permissions`),
 
-  // Tree view
-  getProjectTree: () =>
-    apiClient.get<ProjectTreeResponse>('/api/v1/projects/tree'),
+  // Tree view - fetch hierarchically
+  getProjectTree: async (): Promise<ProjectTreeResponse> => {
+    const businessLines = await apiClient.get<BusinessLine[]>('/api/org/business-lines')
+    const tree: ProjectTreeResponse = { businessLines: [] }
+
+    for (const bl of businessLines) {
+      const systems = await apiClient.get<System[]>(`/api/org/business-lines/${bl.id}/systems`)
+      tree.businessLines.push({ ...bl, systems: [] })
+
+      for (const sys of systems) {
+        const projects = await apiClient.get<Project[]>(`/api/org/systems/${sys.id}/projects`)
+        tree.businessLines[tree.businessLines.length - 1].systems.push({ ...sys, projects: [] })
+        tree.businessLines[tree.businessLines.length - 1].systems[tree.businessLines[tree.businessLines.length - 1].systems.length - 1].projects = projects
+      }
+    }
+
+    return tree
+  },
 
   // Project resources
   getProjectResources: (projectId: string) =>
