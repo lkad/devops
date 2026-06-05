@@ -20,6 +20,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/devops-toolkit/backend/internal/alerts"
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/internal/auth"
 	"github.com/devops-toolkit/backend/internal/auth/ldap"
 	"github.com/devops-toolkit/backend/internal/config"
@@ -83,6 +84,7 @@ func run() error {
 		registerLogsRoutes(eng, db, log)
 		registerMetricsRoutes(eng, db, log)
 		registerAlertsRoutes(eng, db, log)
+		registerAuditRoutes(eng, db, log)
 		registerWsHubRoutes(eng, cfg, log)
 		registerLogStreamRoutes(eng, db, log)
 	} else {
@@ -546,4 +548,26 @@ func (logstreamRealtimeAdapter) Publish(channel string, payload any) {
 	// hub and emits canonical realtime.Event values to the channel.
 	_ = channel
 	_ = payload
+}
+
+// registerAuditRoutes wires the audit-logging module. The emitter
+// is a BufferedEmitter wrapping a DBEmitter so the audit path is
+// non-blocking under load; overflow drops with a slog.Warn. The
+// service exposes /api/v1/audit and /api/v1/audit/:id.
+func registerAuditRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db, audit.AllModels()...); err != nil {
+		log.Error("audit AutoMigrate failed", "err", err)
+		return
+	}
+	repo := audit.NewRepository(db)
+	emitter := audit.NewBufferedEmitter(audit.NewDBEmitter(repo), audit.BufferedEmitterConfig{
+		BufferSize: 1024,
+		Logger:     log.Logger,
+	})
+	svc := audit.NewService(audit.ServiceConfig{
+		Repo:    repo,
+		Emitter: emitter,
+	})
+	audit.NewHandler(svc).Register(&r.RouterGroup)
+	log.Info("audit routes registered")
 }
