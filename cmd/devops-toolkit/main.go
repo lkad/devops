@@ -20,6 +20,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/devops-toolkit/backend/internal/alerts"
+	"github.com/devops-toolkit/backend/internal/auth"
 	"github.com/devops-toolkit/backend/internal/auth/ldap"
 	"github.com/devops-toolkit/backend/internal/config"
 	dbpkg "github.com/devops-toolkit/backend/internal/database"
@@ -28,6 +29,7 @@ import (
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/internal/hostproject"
 	"github.com/devops-toolkit/backend/internal/k8s"
+	"github.com/devops-toolkit/backend/internal/k8s/logstream"
 	"github.com/devops-toolkit/backend/internal/logs"
 	"github.com/devops-toolkit/backend/internal/metrics"
 	"github.com/devops-toolkit/backend/internal/physicalhost"
@@ -35,6 +37,8 @@ import (
 	projectpkg "github.com/devops-toolkit/backend/internal/project"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 	"github.com/devops-toolkit/backend/pkg/logger"
+	"github.com/devops-toolkit/backend/internal/ws/hub"
+	"github.com/gorilla/websocket"
 )
 
 func main() {
@@ -79,6 +83,8 @@ func run() error {
 		registerLogsRoutes(eng, db, log)
 		registerMetricsRoutes(eng, db, log)
 		registerAlertsRoutes(eng, db, log)
+		registerWsHubRoutes(eng, cfg, log)
+		registerLogStreamRoutes(eng, db, log)
 	} else {
 		log.Warn("router is not a *gin.Engine; auth routes not registered")
 	}
@@ -486,4 +492,58 @@ func registerAlertsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	})
 	alerts.NewHandler(svc).Register(&r.RouterGroup)
 	log.Info("alerts routes registered")
+}
+
+// registerWsHubRoutes wires the websocket-hub module: starts the
+// hub's Run loop on the application context and registers /ws.
+// JWT signer is reconstructed from the same secret as the auth
+// routes so the upgrade path can verify the token.
+func registerWsHubRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) {
+	secret := os.Getenv("APP_JWT_SECRET")
+	if secret == "" {
+		secret = "dev-secret-do-not-use-in-prod"
+	}
+	signer, err := auth.NewSigner(secret, time.Hour)
+	if err != nil {
+		log.Error("ws hub: signer init failed", "err", err)
+		return
+	}
+	h := hub.NewHub(hub.HubConfig{Limits: hub.DefaultLimits()})
+	go h.Run(context.Background())
+	upgrader := &websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     func(*http.Request) bool { return true },
+	}
+	hub.RegisterRoutes(r, h, signer, upgrader)
+	log.Info("websocket hub routes registered")
+}
+
+// registerLogStreamRoutes wires the k8s-pod-log-streaming module.
+// The LogClient is a Fake in dev; the production swap-in is the
+// KubeLogClient which itself wraps a client-go function seam. The
+// RealtimePublisher here is a no-op in dev (logs events are still
+// returned to the WS/SSE client even when no hub is wired).
+func registerLogStreamRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	_ = db // no AutoMigrate; log stream is read-mostly
+	client := &logstream.FakeLogClient{}
+	streamer := logstream.NewKubeStreamer(client)
+	pub := &logstreamRealtimeAdapter{} // bridges the local interface to the realtime package
+	svc := logstream.NewService(streamer, client, pub)
+	logstream.NewHandler(svc, logstream.HandlerConfig{}).Register(&r.RouterGroup)
+	log.Info("k8s pod log stream routes registered")
+}
+
+// logstreamRealtimeAdapter bridges logstream.RealtimePublisher
+// (Publish(string, any)) to realtime.HubPublisher (Publish(ctx, Event)).
+// In dev it's a no-op; production swaps in a HubPublisher that fans
+// out to the live WebSocket subscribers.
+type logstreamRealtimeAdapter struct{}
+
+func (logstreamRealtimeAdapter) Publish(channel string, payload any) {
+	// Intentionally a no-op in dev. When the realtime hub is wired
+	// in main.go, replace this with a HubPublisher that wraps the
+	// hub and emits canonical realtime.Event values to the channel.
+	_ = channel
+	_ = payload
 }
