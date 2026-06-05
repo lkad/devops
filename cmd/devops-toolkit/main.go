@@ -16,11 +16,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/devops-toolkit/backend/internal/auth/ldap"
 	"github.com/devops-toolkit/backend/internal/config"
 	dbpkg "github.com/devops-toolkit/backend/internal/database"
+	devicepkg "github.com/devops-toolkit/backend/internal/device"
 	"github.com/devops-toolkit/backend/internal/handler"
+	projectpkg "github.com/devops-toolkit/backend/internal/project"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 	"github.com/devops-toolkit/backend/pkg/logger"
 )
@@ -52,12 +55,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	_ = db // Phase 1 only verifies the connection; AutoMigrate runs once modules register.
 	log.Info("database connected", "driver", cfg.Database.Driver)
 
 	router := buildRouter(log)
 	if eng, ok := router.(*gin.Engine); ok {
 		registerAuthRoutes(eng, cfg, log)
+		registerProjectRoutes(eng, db, log)
+		registerDeviceRoutes(eng, db, log)
 	} else {
 		log.Warn("router is not a *gin.Engine; auth routes not registered")
 	}
@@ -246,4 +250,53 @@ func devRoleToGroups(role string) []string {
 	default:
 		return nil
 	}
+}
+
+// registerProjectRoutes wires the project-hierarchy module onto the
+// Gin engine. Phase 3 owns this registration. AutoMigrate registers
+// ProjectType, Project, and ProjectMember; the service enforces the
+// 3-level depth cap at create/update time.
+func registerProjectRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db,
+		&projectpkg.ProjectType{},
+		&projectpkg.Project{},
+		&projectpkg.ProjectMember{},
+	); err != nil {
+		log.Error("project AutoMigrate failed", "err", err)
+		return
+	}
+	repo := projectpkg.NewRepository(db)
+	svc := projectpkg.NewService(repo)
+	h := projectpkg.NewHandler(svc, repo)
+	v1 := r.Group("/api/v1")
+	h.Register(v1)
+	log.Info("project routes registered")
+}
+
+// registerDeviceRoutes wires the device-management module onto the
+// Gin engine. AutoMigrate covers Device, DeviceGroup, and
+// ConfigurationTemplate. The service enforces the 4-state model
+// (online/monitoring_issue/offline/maintenance) and action rules.
+func registerDeviceRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db, devicepkg.AllModels()...); err != nil {
+		log.Error("device AutoMigrate failed", "err", err)
+		return
+	}
+	repo := devicepkg.NewRepository(db)
+	svc := devicepkg.NewService(repo)
+	h := devicepkg.NewHandler(svc)
+	v1 := r.Group("/api/v1")
+	h.Register(v1)
+
+	// device-groups and configuration-templates have separate
+	// sub-handlers with their own Register methods.
+	groupRepo := devicepkg.NewGroupRepository(db)
+	groupSvc := devicepkg.NewGroupService(groupRepo)
+	devicepkg.NewGroupHandler(groupSvc).Register(v1)
+
+	tmplRepo := devicepkg.NewTemplateRepository(db)
+	tmplSvc := devicepkg.NewTemplateService(tmplRepo)
+	devicepkg.NewTemplateHandler(tmplSvc).Register(v1)
+
+	log.Info("device routes registered")
 }
