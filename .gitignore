@@ -1,5 +1,5 @@
 # Binaries and executables
-devops-toolkit
+/devops-toolkit
 devops-toolkit.exe
 *.exe
 *.test
@@ -7,6 +7,7 @@ devops-toolkit.exe
 coverage.html
 coverage.txt
 bin/
+cmd/devops-toolkit/devops-toolkit
 
 # Build outputs
 cmd/devops-toolkit/devops-toolkit
