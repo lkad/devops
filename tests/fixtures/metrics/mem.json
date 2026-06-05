@@ -1,0 +1,48 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {
+          "__name__": "node_memory_MemTotal_bytes",
+          "instance": "dc1-web-21:9100",
+          "job": "node"
+        },
+        "value": [1749100800, "16777216000"]
+      },
+      {
+        "metric": {
+          "__name__": "node_memory_MemAvailable_bytes",
+          "instance": "dc1-web-21:9100",
+          "job": "node"
+        },
+        "value": [1749100800, "8394967000"]
+      },
+      {
+        "metric": {
+          "__name__": "node_memory_MemFree_bytes",
+          "instance": "dc1-web-21:9100",
+          "job": "node"
+        },
+        "value": [1749100800, "2097152000"]
+      },
+      {
+        "metric": {
+          "__name__": "node_memory_Buffers_bytes",
+          "instance": "dc1-web-21:9100",
+          "job": "node"
+        },
+        "value": [1749100800, "524288000"]
+      },
+      {
+        "metric": {
+          "__name__": "node_memory_Cached_bytes",
+          "instance": "dc1-web-21:9100",
+          "job": "node"
+        },
+        "value": [1749100800, "5773527000"]
+      }
+    ]
+  }
+}

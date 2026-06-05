@@ -1,0 +1,44 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {
+          "__name__": "node_cpu_seconds_total",
+          "instance": "dc1-web-21:9100",
+          "job": "node",
+          "mode": "idle"
+        },
+        "value": [1749100800, "18456.32"]
+      },
+      {
+        "metric": {
+          "__name__": "node_cpu_seconds_total",
+          "instance": "dc1-web-21:9100",
+          "job": "node",
+          "mode": "user"
+        },
+        "value": [1749100800, "1023.45"]
+      },
+      {
+        "metric": {
+          "__name__": "node_cpu_seconds_total",
+          "instance": "dc1-web-21:9100",
+          "job": "node",
+          "mode": "system"
+        },
+        "value": [1749100800, "234.12"]
+      },
+      {
+        "metric": {
+          "__name__": "node_cpu_seconds_total",
+          "instance": "dc1-web-21:9100",
+          "job": "node",
+          "mode": "iowait"
+        },
+        "value": [1749100800, "12.34"]
+      }
+    ]
+  }
+}

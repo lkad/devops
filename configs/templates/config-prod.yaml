@@ -1,0 +1,117 @@
+# config-prod.yaml — production template.
+#
+# IMPORTANT: This file MUST NOT contain real secrets. Every secret is
+# referenced as a ${VAR} placeholder and resolved from the environment at
+# startup. The startup code path (see internal/config) refuses to boot if
+# any of these vars are unset in ENV=production.
+#
+# Required environment variables (no defaults):
+#   APP__JWT_SECRET        HS256 signing key (>= 32 bytes recommended)
+#   DATABASE__URL          postgres://user:pass@host:5432/dbname?sslmode=require
+#   LDAP__URL              ldap(s)://host:389 (or 636 for LDAPS)
+#   LDAP__BIND_DN          bind DN for service account
+#   LDAP__BIND_PASSWORD    bind password for service account
+#   LDAP__BASE_DN          search base for user lookups
+#
+# Optional but strongly recommended:
+#   ELASTICSEARCH__URL     https://es.internal:9200
+#   LOKI__URL              http://loki.internal:3100
+#   PROMETHEUS__URL        http://prometheus.internal:9090
+#
+# mTLS is enabled by default (auth.mtls.enabled = true). To disable, set
+# the env var to "false" and rotate your cert chain accordingly.
+
+environment: production
+
+app:
+  name: devops-toolkit
+  env: production
+  host: 0.0.0.0
+  port: 3000
+  log_level: info
+  tls:
+    enabled: true
+    cert_file: /etc/devops-toolkit/tls/cert.pem
+    key_file: /etc/devops-toolkit/tls/key.pem
+
+database:
+  driver: postgres
+  url: ${DATABASE__URL}
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 600  # seconds
+  ssl_mode: require
+
+redis:
+  host: ${REDIS__HOST:-redis}
+  port: 6379
+  password: ${REDIS__PASSWORD:-}
+  db: 0
+
+logs:
+  backend: elasticsearch
+  elasticsearch:
+    url: ${ELASTICSEARCH__URL}
+    username: ${ELASTICSEARCH__USERNAME:-}
+    password: ${ELASTICSEARCH__PASSWORD:-}
+  loki:
+    url: ${LOKI__URL:-}
+  local:
+    path: ""
+
+ldap:
+  url: ${LDAP__URL}
+  bind_dn: ${LDAP__BIND_DN}
+  bind_password: ${LDAP__BIND_PASSWORD}
+  base_dn: ${LDAP__BASE_DN}
+  user_filter: "(uid=%s)"
+  dev_bypass: false  # MUST be false in production
+  dev_users: []
+
+auth:
+  dev_bypass: false
+  jwt_secret: ${APP__JWT_SECRET}
+  jwt_expiry: 3600
+  mtls:
+    enabled: true
+    ca_file: /etc/devops-toolkit/tls/ca.pem
+    require_client_cert: true
+
+alerts:
+  channels:
+    - name: slack-ops
+      type: slack
+      url: ${ALERT__SLACK_WEBHOOK:-}
+    - name: email-leads
+      type: email
+      smtp_host: ${ALERT__SMTP_HOST:-}
+      smtp_port: 587
+      to: ${ALERT__EMAIL_TO:-}
+  suppression:
+    enable_in_maintenance: true
+
+k8s:
+  default_namespace: default
+  in_cluster: false
+  kubeconfig_path: ${KUBECONFIG:-}
+
+physicalhost:
+  monitoring_interval: 60
+  ssh_timeout: 30
+
+audit:
+  enabled: true
+  retention_days: 365
+  sink: postgres
+
+websocket:
+  ping_interval: 30
+  write_timeout: 10
+  read_timeout: 60
+
+use_mock:
+  vmware: false
+  snmp: false
+  ssh: false
+
+seed_data: none

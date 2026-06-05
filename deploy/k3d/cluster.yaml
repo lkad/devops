@@ -1,0 +1,20 @@
+# deploy/k3d/cluster.yaml — k3d cluster spec for HA testing.
+#
+# Used by scripts/k3d-setup.sh deploy. Traefik ingress is disabled per the
+# spec (Requirement: k3d Cluster Integration → Traefik disabled) so the
+# cluster is left ready for a custom ingress setup.
+apiVersion: k3d.io/v1alpha4
+kind: Simple
+metadata:
+  name: dev-cluster-1
+servers: 1
+agents: 2
+image: rancher/k3s:v1.28.4-k3s2
+ports:
+  - port: 6550:6550  # K8s API exposed on the host
+    nodeFilters: [loadbalancer]
+options:
+  k3s:
+    extraArgs:
+      - arg: --disable=traefik
+        nodeFilters: [server:0:0]

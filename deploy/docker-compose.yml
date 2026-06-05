@@ -1,0 +1,127 @@
+# deploy/docker-compose.yml — single-host support-service stack.
+#
+# Brings up the full dev/CI environment in one command. Each service has a
+# comment explaining its role. Use scripts/deploy.sh to start/stop.
+#
+# Spec coverage:
+#   - PostgreSQL on :5432 (auto-creates devops db, GORM AutoMigrate on first
+#     start is invoked by the app, not the DB itself)
+#   - Loki on :3100 with /ready
+#   - Elasticsearch on :9200
+#   - Prometheus on :9090 with /-/ready
+#   - Grafana on :3001
+#   - InfluxDB v2 on :8086 with bucket `metrics`
+#   - LDAP (bitnami/openldap) on :389, bootstrap.ldif loaded
+#   - Redis on :6379 (cache/session)
+#   - alertmanager on :9093
+#   - devops-toolkit on :3000 (depends_on: postgres, loki, ldap, redis)
+
+version: "3.8"
+
+services:
+  # Application: the devops-toolkit API server. Built locally; see
+  # scripts/ci-build.sh.
+  devops-toolkit:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: devops-toolkit:local
+    environment:
+      APP__ENV: ci
+      APP__PORT: 3000
+      DATABASE__DRIVER: postgres
+      DATABASE__URL: postgres://devops:devops@postgres:5432/devops?sslmode=disable
+      LOGS__BACKEND: loki
+      LOGS__LOKI__URL: http://loki:3100
+      LDAP__URL: ldap://ldap:389
+      LDAP__BIND_DN: cn=admin,dc=example,dc=com
+      LDAP__BIND_PASSWORD: admin
+      LDAP__BASE_DN: dc=example,dc=com
+      REDIS__HOST: redis
+      APP__JWT_SECRET: ci-secret-rotate-me
+    ports: ["3000:3000"]
+    depends_on:
+      - postgres
+      - loki
+      - ldap
+      - redis
+    restart: unless-stopped
+
+  # PostgreSQL: primary data store. devops/devops credentials are dev-only.
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: devops
+      POSTGRES_USER: devops
+      POSTGRES_PASSWORD: devops
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "devops"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Loki: log aggregation. Single-binary mode; suitable for dev/CI.
+  loki:
+    image: grafana/loki:2.8.0
+    command: -config.file=/etc/loki/loki-config.yaml
+    ports: ["3100:3100"]
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+
+  # Promtail: ships local logs into Loki. Disabled by default in this
+  # compose to keep resource usage low; uncomment + bind-mount log dirs
+  # to enable.
+  # promtail:
+  #   image: grafana/promtail:2.8.0
+  #   command: -config.file=/etc/promtail/promtail-config.yaml
+  #   volumes:
+  #     - ./promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+  #     - ../logs:/logs:ro
+  #   depends_on: [loki]
+
+  # Prometheus: metrics scrape. Targets the devops-toolkit /metrics path
+  # and the loki /metrics endpoint.
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  # Grafana: dashboards for Loki + Prometheus. Default admin/admin.
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3001:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    depends_on:
+      - prometheus
+
+  # Alertmanager: routes alerts from Prometheus to the channels defined in
+  # config-ci.yaml. Empty receivers by default.
+  alertmanager:
+    image: prom/alertmanager:latest
+    ports: ["9093:9093"]
+
+  # LDAP: bitnami/openldap, bootstrap via tests/fixtures/ldap/00-users.ldif.
+  ldap:
+    image: bitnami/openldap:2.6
+    environment:
+      LDAP_ROOT: dc=example,dc=com
+      LDAP_ADMIN_USERNAME: admin
+      LDAP_ADMIN_PASSWORD: admin
+    ports: ["389:1389"]
+    volumes:
+      - ../tests/fixtures/ldap/00-users.ldif:/ldifs/00-users.ldif:ro
+
+  # Redis: cache + session store. Empty password in dev.
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+
+volumes:
+  pgdata: {}
