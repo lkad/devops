@@ -1,0 +1,50 @@
+# CI environment config — used by automated tests
+app:
+  name: devops-toolkit
+  env: ci
+  host: 127.0.0.1
+  port: 8081
+  log_level: warn
+
+database:
+  driver: sqlite
+  dsn: ":memory:"
+  max_open_conns: 1
+  max_idle_conns: 1
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+
+logs:
+  backend: local
+  local:
+    path: tests/fixtures/logs
+
+ldap:
+  url: ""
+  dev_bypass: true
+  dev_users:
+    - username: test_admin
+      password: test
+      role: SuperAdmin
+    - username: test_viewer
+      password: test
+      role: Auditor
+
+alerts:
+  channels: []
+
+k8s:
+  default_namespace: default
+  in_cluster: false
+
+physicalhost:
+  monitoring_interval: 5
+
+websocket:
+  ping_interval: 30
+  write_timeout: 10
+  read_timeout: 60

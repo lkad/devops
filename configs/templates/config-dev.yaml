@@ -1,0 +1,65 @@
+# Dev environment config
+app:
+  name: devops-toolkit
+  env: dev
+  host: 0.0.0.0
+  port: 8080
+  log_level: debug
+
+database:
+  driver: sqlite
+  dsn: tests/fixtures/db/dev.db
+  max_open_conns: 25
+  max_idle_conns: 5
+  conn_max_lifetime: 300  # seconds
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+
+logs:
+  backend: local
+  local:
+    path: tests/fixtures/logs
+  elasticsearch:
+    url: ""
+    username: ""
+    password: ""
+  loki:
+    url: ""
+
+ldap:
+  url: ""
+  bind_dn: ""
+  bind_password: ""
+  base_dn: ""
+  user_filter: ""
+  dev_bypass: true
+  dev_users:
+    - username: admin
+      password: admin
+      role: SuperAdmin
+    - username: viewer
+      password: viewer
+      role: Auditor
+
+alerts:
+  channels: []
+  suppression:
+    enable_in_maintenance: true
+
+k8s:
+  default_namespace: default
+  in_cluster: false
+  kubeconfig_path: ""
+
+physicalhost:
+  monitoring_interval: 30  # seconds
+  ssh_timeout: 10
+
+websocket:
+  ping_interval: 30  # seconds
+  write_timeout: 10
+  read_timeout: 60
