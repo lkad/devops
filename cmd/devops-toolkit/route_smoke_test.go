@@ -12,12 +12,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/devops-toolkit/backend/internal/alerts"
 	"github.com/devops-toolkit/backend/internal/config"
 	dbpkg "github.com/devops-toolkit/backend/internal/database"
 	devicepkg "github.com/devops-toolkit/backend/internal/device"
 	"github.com/devops-toolkit/backend/internal/discovery"
 	"github.com/devops-toolkit/backend/internal/hostproject"
 	"github.com/devops-toolkit/backend/internal/k8s"
+	"github.com/devops-toolkit/backend/internal/logs"
+	"github.com/devops-toolkit/backend/internal/metrics"
 	"github.com/devops-toolkit/backend/internal/physicalhost"
 	"github.com/devops-toolkit/backend/internal/pipeline"
 	projectpkg "github.com/devops-toolkit/backend/internal/project"
@@ -137,6 +140,28 @@ func TestRouteSmoke_ProjectAndDeviceRegistered(t *testing.T) {
 	plSvc := pipeline.NewService(plRepo, plExec)
 	pipeline.NewHandler(plSvc).Register(v1)
 
+	// Phase 5: logs (no DB), metrics, alerts.
+	logBackend := logs.NewLocal(logs.LocalConfig{})
+	logs.NewHandler(logs.NewService(logBackend, logs.ServiceConfig{}), logBackend).Register(v1)
+
+	if err := dbpkg.AutoMigrate(db, metrics.AllModels()...); err != nil {
+		t.Fatalf("metrics migrate: %v", err)
+	}
+	mRepo := metrics.NewRepository(db)
+	mSvc := metrics.NewService(mRepo, metrics.NewFakeScraper())
+	metrics.NewHandler(mSvc).Register(v1)
+
+	if err := dbpkg.AutoMigrate(db, alerts.AllModels()...); err != nil {
+		t.Fatalf("alerts migrate: %v", err)
+	}
+	aRepo := alerts.NewRepository(db)
+	aSvc := alerts.NewService(alerts.ServiceConfig{
+		Repo:        aRepo,
+		Dispatcher:  alerts.NewFakeDispatcher(),
+		Suppression: alerts.NewFakeSuppressionChecker(),
+	})
+	alerts.NewHandler(aSvc).Register(v1)
+
 	cases := []struct {
 		name   string
 		method string
@@ -157,6 +182,14 @@ func TestRouteSmoke_ProjectAndDeviceRegistered(t *testing.T) {
 		{"k8s clusters create no body -> 400", http.MethodPost, "/api/v1/k8s/clusters", http.StatusBadRequest},
 		{"pipelines list empty", http.MethodGet, "/api/v1/pipelines", http.StatusOK},
 		{"pipelines create no body -> 400", http.MethodPost, "/api/v1/pipelines", http.StatusBadRequest},
+		// Phase 5 additions
+		{"logs capabilities", http.MethodGet, "/api/v1/logs/capabilities", http.StatusOK},
+		{"logs query (empty)", http.MethodGet, "/api/v1/logs/query", http.StatusOK},
+		{"logs streams (empty)", http.MethodGet, "/api/v1/logs/streams", http.StatusOK},
+		{"metrics list empty", http.MethodGet, "/api/v1/metrics", http.StatusOK},
+		{"metrics series empty", http.MethodGet, "/api/v1/metrics/series", http.StatusOK},
+		{"alerts list empty", http.MethodGet, "/api/v1/alerts", http.StatusOK},
+		{"alert channels list empty", http.MethodGet, "/api/v1/alerts/channels", http.StatusOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

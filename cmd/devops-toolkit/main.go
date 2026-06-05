@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/devops-toolkit/backend/internal/alerts"
 	"github.com/devops-toolkit/backend/internal/auth/ldap"
 	"github.com/devops-toolkit/backend/internal/config"
 	dbpkg "github.com/devops-toolkit/backend/internal/database"
@@ -27,6 +28,8 @@ import (
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/internal/hostproject"
 	"github.com/devops-toolkit/backend/internal/k8s"
+	"github.com/devops-toolkit/backend/internal/logs"
+	"github.com/devops-toolkit/backend/internal/metrics"
 	"github.com/devops-toolkit/backend/internal/physicalhost"
 	"github.com/devops-toolkit/backend/internal/pipeline"
 	projectpkg "github.com/devops-toolkit/backend/internal/project"
@@ -73,6 +76,9 @@ func run() error {
 		registerK8sClusterRoutes(eng, db, log)
 		registerHostProjectLinkRoutes(eng, db, log)
 		registerPipelineRoutes(eng, db, log)
+		registerLogsRoutes(eng, db, log)
+		registerMetricsRoutes(eng, db, log)
+		registerAlertsRoutes(eng, db, log)
 	} else {
 		log.Warn("router is not a *gin.Engine; auth routes not registered")
 	}
@@ -429,4 +435,55 @@ func registerPipelineRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	svc := pipeline.NewService(repo, exec)
 	pipeline.NewHandler(svc).Register(&r.RouterGroup)
 	log.Info("pipeline routes registered")
+}
+
+// registerLogsRoutes wires the log-aggregation module. The backend
+// is the Local filesystem reader in dev mode; production deployments
+// swap to ES or Loki by changing cfg.Logs.Backend and instantiating
+// the matching backend. The /capabilities endpoint always returns
+// 200 (with a "unavailable" row if the backend is misconfigured).
+func registerLogsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	_ = db // logs module is read-only; no AutoMigrate needed
+	backend := logs.NewLocal(logs.LocalConfig{
+		Dir: envOr("LOG_STORAGE_DIR", "tests/fixtures/logs"),
+	})
+	svc := logs.NewService(backend, logs.ServiceConfig{})
+	logs.NewHandler(svc, backend).Register(&r.RouterGroup)
+	log.Info("logs routes registered", "backend", "local")
+}
+
+// registerMetricsRoutes wires the metrics-collection module. The
+// scraper is a no-op Fake in dev; production swaps in the
+// PrometheusScraper (injected with an HTTPClient). The metrics
+// middleware (metrics.Middleware) is exposed for main.go to
+// install as a global Gin middleware in a follow-up.
+func registerMetricsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db, metrics.AllModels()...); err != nil {
+		log.Error("metrics AutoMigrate failed", "err", err)
+		return
+	}
+	repo := metrics.NewRepository(db)
+	svc := metrics.NewService(repo, metrics.NewFakeScraper())
+	metrics.NewHandler(svc).Register(&r.RouterGroup)
+	log.Info("metrics routes registered")
+}
+
+// registerAlertsRoutes wires the alert-notification module. The
+// dispatcher is the LogDispatcher (writes to slog); the suppression
+// checker is a no-op (returns false) in dev. Production wires the
+// real physicalhost service into a DefaultSuppressionChecker.
+func registerAlertsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db, alerts.AllModels()...); err != nil {
+		log.Error("alerts AutoMigrate failed", "err", err)
+		return
+	}
+	repo := alerts.NewRepository(db)
+	svc := alerts.NewService(alerts.ServiceConfig{
+		Repo:        repo,
+		Dispatcher:  alerts.NewLogDispatcher(log.Logger),
+		Suppression: alerts.NewFakeSuppressionChecker(),
+		Logger:      log.Logger,
+	})
+	alerts.NewHandler(svc).Register(&r.RouterGroup)
+	log.Info("alerts routes registered")
 }
