@@ -1,6 +1,10 @@
 # k8s-cluster-management
 
-## MODIFIED Requirements
+## Purpose
+
+Define the multi-cluster Kubernetes management subsystem: register clusters by kubeconfig (in-cluster, on-prem, managed EKS/GKE/AKS), continuously monitor cluster health, list nodes/workloads/pods, fetch pod logs, exec into containers, and collect metrics. The original local-k3d approach was removed in favor of kubeconfig-based registration (see REMOVED Requirements below).
+
+## Requirements
 
 ### Requirement: Cluster Registration
 The system SHALL register K8s clusters by storing kubeconfig content.
@@ -146,8 +150,8 @@ The system SHALL support operations across multiple clusters.
 - **WHEN** system broadcasts log/metric events
 - **THEN** message is sent to all connected cluster subscribers via WebSocket
 
-## REMOVED Requirements
+## Deprecated Capabilities
 
-### Requirement: k3d Cluster Lifecycle
-**Reason**: Cluster management changed from k3d local clusters to kubeconfig-based remote cluster registration
-**Migration**: Use POST /api/k8s/clusters with kubeconfig instead of k3d creation
+### k3d Cluster Lifecycle (removed)
+**Reason**: Cluster management changed from k3d local clusters to kubeconfig-based remote cluster registration.
+**Migration**: Use `POST /api/k8s/clusters` with a kubeconfig payload instead of creating a local k3d cluster.

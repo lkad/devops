@@ -3,6 +3,13 @@
 **Version:** 2.1
 **Last Updated:** 2026-04-28
 
+> **📖 相关文档:**
+> - 文档索引: [DOCUMENT_INDEX.md](DOCUMENT_INDEX.md)
+> - 冲突清单: [docs/CONFLICTS.md](docs/CONFLICTS.md)
+> - 工程补充: [PRD_ENGINEERING_SUPPLEMENT.md](PRD_ENGINEERING_SUPPLEMENT.md)
+> - 后端规格: [REQUIREMENTS.md](REQUIREMENTS.md)
+> - 形式化规格: [openspec/specs/](openspec/specs/)
+
 ---
 
 ## 修订说明 (v2.1)
@@ -597,6 +604,55 @@ queryLogs(options = {}) {
 | Local | 应用层周期清理 |
 | Elasticsearch | Index Lifecycle Management (ILM) Policy |
 | Loki | chunk_target_size + retention_period 配置 |
+
+### 4.6.1 后端兼容性 — Universal Query DSL
+
+三种后端的查询语法和能力差异很大（Lucene / LogQL / 子串匹配），但**前端代码不应该因为后端切换而改动**。解决方案：**Universal Query DSL + 能力声明 + 优雅降级**。
+
+**Universal 子集（所有后端必须支持）:**
+
+| 字段 | 含义 |
+|------|------|
+| `start_time` / `end_time` | 时间范围（默认 24h）|
+| `level` | 日志级别过滤 |
+| `source` | 来源过滤 |
+| `search` | 子串匹配 |
+| `limit` / `offset` | 分页 |
+| `order_by` | `time:desc` / `time:asc` |
+
+**Advanced 子集（客户端先调 `/capabilities` 再用）:**
+
+| 字段 | 含义 | Local | ES | Loki |
+|------|------|-------|----|----|
+| `regex` | 正则搜索 | ❌ | ✅ | ✅ |
+| `fields{}` | 字段过滤 | ❌ | ✅ | ✅ |
+| `structured_query` | Lucene/LogQL | ❌ | ✅ | ✅ |
+
+**能力声明端点:** `GET /api/v1/logs/capabilities` 返回当前后端支持什么，客户端按能力显示/隐藏 UI 控件。
+
+**降级原则:**
+
+1. **永远不在没通知的情况下改变结果** — 降级必须在 `meta.degraded_features` 中列出
+2. **不支持 → 400 错误 + 标准错误码** — `UNSUPPORTED_FEATURE` / `TIME_RANGE_EXCEEDED` / `RESULT_TOO_LARGE` 等
+3. **截断/缩范围 → `meta` 通知** — `meta.degraded_features: ["time_range: capped to 720h", "limit: capped to 5000"]`
+4. **不允许 client-side 后处理** — 所有翻译发生在 API 层
+
+**响应 meta 字段:**
+
+```json
+{
+  "meta": {
+    "backend": "loki",
+    "query_translated": true,
+    "translation_strategy": "fallback",
+    "degraded_features": ["time_range: capped to 720h"],
+    "capabilities": { ... }
+  }
+}
+```
+
+**形式化规格:** [openspec/specs/log-aggregation/spec.md](../openspec/specs/log-aggregation/spec.md) (16 requirements, 44 scenarios)
+**详细设计:** [docs/LOG-QUERY-API.md](../docs/LOG-QUERY-API.md) — 13 章节完整设计
 
 ### 4.7 数据模型
 
@@ -1306,12 +1362,13 @@ K8s pod logs support two modes: real-time streaming and historical query.
 ### 11.2 状态管理
 
 ```
-状态: online | monitoring_issue | offline
+状态: online | monitoring_issue | offline | maintenance
 
 判断规则:
 - 监控正常 → online
 - 监控显示 DOWN，SSH 确认成功 → monitoring_issue (监控异常，但主机正常)
 - 监控显示 DOWN，SSH 也失败 → offline (主机确实离线)
+- 运维主动标记 → maintenance (计划内维护，详见 §11.7)
 ```
 
 **状态说明:**
@@ -1321,11 +1378,14 @@ K8s pod logs support two modes: real-time streaming and historical query.
 | online | 正常 | 成功 | ✅ 在线 | 无 |
 | monitoring_issue | DOWN | 成功 | ⚠️ 监控异常 | 可选 |
 | offline | DOWN | 失败 | ❌ 离线 | 是 |
+| maintenance | 任意 | 任意 | 🔧 维护中 | 抑制（外部通道）|
 
 **设计理由:**
 - 监控数据可能因网络、采集 agent 问题而丢失
 - SSH 确认可以区分"主机真的挂了"和"监控本身的问题"
 - monitoring_issue 状态让运维人员知道需要检查监控本身
+- maintenance 状态用于主动计划内维护，期间**不向外部通道**（Slack/PD/Email）发送该主机的告警，但**健康检查继续运行**并记录到 log 通道以便审计
+- 详见 §11.7 维护模式
 
 ### 11.3 指标采集
 
@@ -1385,6 +1445,49 @@ K8s pod logs support two modes: real-time streaming and historical query.
 | SSH 心跳失败 | 监控也显示 DOWN | state=offline | 触发告警 |
 | 指标采集 | 正常主机 | 返回 CPU/内存/磁盘 | 字段存在，值合理 |
 | 配置推送 | 有效配置 | SSH 推送成功 | 远程配置更新 |
+
+### 11.7 维护模式 (Maintenance Mode)
+
+运维可主动将物理主机置于 `maintenance` 状态，用于补丁、固件升级、硬件更换等计划内维护。
+
+**核心行为:**
+
+| 行为 | 维护中 | 维护结束后 |
+|------|--------|-----------|
+| 健康检查 (SSH/监控) | 继续运行 | 恢复 |
+| 告警 → 外部通道 (Slack/PD/Email) | **抑制** | 恢复 |
+| 告警 → log 通道 | **记录** (含 reason) | 继续 |
+| 指标采集 | 继续 (但标记为维护) | 恢复 |
+| 状态轮转 | 锁定为 maintenance | 显式 exit 才变 |
+| 主机列表 UI | 显示 🔧 徽章 + 进度条 | 恢复正常 |
+
+**API:**
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/physical-hosts/:id/maintenance` | POST | 进入维护（需 reason + expected_end_time）|
+| `/api/physical-hosts/:id/maintenance` | DELETE | 退出维护 |
+| `/api/physical-hosts/maintenances` | GET | 列出当前所有维护中的主机 |
+| `/api/physical-hosts/:id/maintenance-history` | GET | 该主机的维护审计历史 |
+
+**审计追溯:**
+
+每次进入/退出维护都写审计日志（[audit-logging](../openspec/specs/audit-logging/spec.md)），字段包括 actor、reason、expected_end_time、actual_start、actual_end、关联告警 ID 列表。
+
+**与告警子系统集成:**
+
+- 维护期间，该主机产生的告警**默认抑制**对外部通道
+- 但仍记录到 log 通道并打 `suppressed=true, suppression_reason="maintenance"` 标签
+- 审计员可通过 `/api/alerts/suppressed?host_id=X` 查看被抑制的告警列表
+- 维护退出后，告警自动恢复
+
+**为什么用 4 态而不是 5 态:**
+
+- 维护是"主动声明"的状态，不是被动检测的状态
+- 它和 online/monitoring_issue/offline 是**正交**的：维护期间监控仍可正常/异常
+- 4 态模型（active 3 态 + 1 个 maintenance flag）保持状态机简单，避免 N×M 笛卡尔积
+
+**形式化规格:** [openspec/specs/physical-host-monitoring/spec.md](../openspec/specs/physical-host-monitoring/spec.md) (Requirement: Maintenance Mode, Maintenance Audit Trail)
 
 ---
 
@@ -1688,6 +1791,43 @@ devops:
 | 状态同步 | Containerlab | 设备状态变更 | 状态更新 | 监控数据刷新 |
 | 权限检查 | Mock | 不同角色 | 权限正确 | Auditor 只能读 |
 | FinOps 导出 | Mock | period=2026-04 | CSV 生成 | 权重计算正确 |
+
+### 14.7 准备清单 (跨层通用)
+
+除 §14.2 的环境分层外，**任何一层**都需要以下基础设施才能启动。完整清单见 [docs/TEST-ENVIRONMENT.md](../docs/TEST-ENVIRONMENT.md)。
+
+**核心类别 (~30 个文件):**
+
+| 类别 | 数量 | 路径 | 内容 |
+|------|------|------|------|
+| 基础设施配置 | 3 | `deploy/` | Containerlab topology + docker-compose + k3d cluster |
+| 编排脚本 | 11 | `scripts/` | setup / teardown / clab / k3d / db / ldap / seed / verify 等 |
+| 配置模板 | 4 | `configs/templates/` | dev / ci / prod-template / 默认值 |
+| Mock 种子数据 | 6 套 | `tests/fixtures/` | LDAP 10 用户 / 8 设备 / 3 BL+6 系统+12 项目 / 5 告警规则 / 100 日志 / Prometheus 采集 |
+| 验证脚本 | 3 | `scripts/verify/` | conn / data / flow |
+| CI 工作流 | 2 | `.github/workflows/` | test-unit / test-integration |
+
+**脚本标准接口:**
+
+所有编排脚本必须实现 `deploy | destroy | status | logs | help` 五个子命令，使用 `set -euo pipefail`，颜色输出，写日志到 `./logs/`。
+
+**配置加载逻辑:**
+
+```go
+// 启动时根据 ENV 变量选择 config-{env}.yaml
+env := os.Getenv("ENV")  // dev | ci | prod
+configPath := filepath.Join("configs", fmt.Sprintf("config-%s.yaml", env))
+overrideFromEnv(cfg)  // 环境变量覆盖
+```
+
+| 环境 | dev_bypass | use_mock | seed_data |
+|------|-----------|----------|-----------|
+| dev | true | all true | minimal |
+| ci | false | all false | full |
+| prod | false | none | none |
+
+**形式化规格:** [openspec/specs/test-environment/spec.md](../openspec/specs/test-environment/spec.md) (19 requirements, 54 scenarios)
+**详细清单:** [docs/TEST-ENVIRONMENT.md](../docs/TEST-ENVIRONMENT.md) — 12 章节、961 行
 
 ---
 

@@ -1,6 +1,10 @@
 # project-hierarchy
 
-## ADDED Requirements
+## Purpose
+
+Define the 3-level project hierarchy: BusinessLine (事业部) → System (系统) → Project (项目). Each level has CRUD operations, weight fields for cost allocation, and per-level RBAC. Projects can be linked to physical hosts (N:N) and K8s namespaces (1:N). This is the core organizational model used across the platform for resource allocation, cost reporting, and access control.
+
+## Requirements
 
 ### Requirement: Business Line Management
 The system SHALL support Business Line CRUD operations.
@@ -119,6 +123,14 @@ The system SHALL export resource usage CSV for billing.
 All CRUD operations on project hierarchy SHALL be logged to audit trail.
 See [audit-logging](../audit-logging/spec.md) for full requirements.
 
+#### Scenario: Create project is audited
+- **WHEN** user creates a Project via POST /api/projects
+- **THEN** an audit log entry is recorded with actor, action=create, target=project, and the new project payload
+
 ### Requirement: Query Audit Logs
-Audit log query endpoint is provided via the audit-logging module.
+The system SHALL expose audit log query for project hierarchy changes via the audit-logging module.
 See [audit-logging](../audit-logging/spec.md) for query parameters and response format.
+
+#### Scenario: Query project audit logs
+- **WHEN** user requests GET /api/audit-logs?resource_type=project
+- **THEN** system returns the audit trail for project hierarchy changes

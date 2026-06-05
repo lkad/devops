@@ -1,6 +1,10 @@
 # k8s-pod-log-streaming
 
-## ADDED Requirements
+## Purpose
+
+Define real-time K8s pod log streaming: WebSocket-based follow mode for live tail, historical log navigation with pagination, multi-pod and multi-container selection, and integration with the central Logs service for persistence and querying. Time-range queries are capped at 30 days (Loki's max). Search supports substring match, with regex/structured query capability depending on the active log backend.
+
+## Requirements
 
 ### Requirement: Real-time Log Streaming
 The system SHALL stream Pod logs in real-time via WebSocket.

@@ -1,6 +1,10 @@
 # database-schema
 
-## ADDED Requirements
+## Purpose
+
+Define the database layer conventions: GORM v2 with PostgreSQL, versioned migrations, snake_case table names, UUID primary keys (with `id` column auto-set), `created_at` / `updated_at` / `deleted_at` timestamps on every table, and soft-delete by default. All schema changes go through GORM AutoMigrate on startup, with explicit migration scripts for breaking changes.
+
+## Requirements
 
 ### Requirement: Versioned Migrations
 Database changes SHALL be managed through versioned migration files.
@@ -84,12 +88,20 @@ Fields that must be unique SHALL have explicit UNIQUE constraints.
 username VARCHAR(255) UNIQUE NOT NULL
 ```
 
+#### Scenario: Reject duplicate unique value
+- **WHEN** user inserts a row with a username that already exists
+- **THEN** database rejects the insert with a unique-constraint violation
+
 ### Requirement: Check Constraints
 Valid values SHALL be enforced with CHECK constraints.
 
 ```sql
 state VARCHAR(50) NOT NULL CHECK (state IN ('pending', 'active', 'retire'))
 ```
+
+#### Scenario: Reject invalid value
+- **WHEN** user inserts a row with state="invalid"
+- **THEN** database rejects the insert with a check-constraint violation
 
 ### Requirement: Indexes
 Frequently queried columns SHALL have indexes.
@@ -98,6 +110,10 @@ Frequently queried columns SHALL have indexes.
 CREATE INDEX idx_devices_state ON devices(state);
 CREATE INDEX idx_devices_labels ON devices USING GIN(labels);
 ```
+
+#### Scenario: Query uses index
+- **WHEN** user runs SELECT on an indexed column
+- **THEN** query plan shows index scan instead of sequential scan
 
 ### Requirement: Migration Testing
 Migrations SHALL be tested before deployment.

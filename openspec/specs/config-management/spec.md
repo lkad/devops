@@ -1,6 +1,10 @@
 # config-management
 
-## ADDED Requirements
+## Purpose
+
+Define how configuration is loaded and overridden at runtime: YAML files in `configs/templates/config-{env}.yaml` provide the base, environment variables override individual fields using `__` nested syntax (e.g. `DATABASE__HOST=db.internal`). Configs are validated at startup; production configs require all secrets to come from env vars and reject hardcoded passwords.
+
+## Requirements
 
 ### Requirement: YAML Configuration File
 Application SHALL load configuration from `config.yaml`.
@@ -79,6 +83,10 @@ k8s:           # Kubernetes settings
 physicalhost: # Physical host monitoring
 websocket:     # WebSocket settings
 ```
+
+#### Scenario: Load config with all sections
+- **WHEN** config file contains all standard sections
+- **THEN** each section is parsed into the corresponding Go struct
 
 ### Requirement: Config Hot Reload
 Application SHALL support configuration hot reload without restart.

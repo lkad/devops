@@ -1,5 +1,9 @@
 # Device Management
 
+## Purpose
+
+Define the unified device management subsystem covering all three device types (PhysicalHost, VirtualMachine, NetworkDevice) with shared concerns: state machines, hierarchy (datacenter → rack → device), configuration templates, search, and bulk actions. Each device type has its own detailed spec (physical-host-monitoring, vmware-integration, network-device-management) but shares this common backbone.
+
 ## Overview
 
 设备管理模块涵盖物理机、虚拟机、网络设备三大类别的完整生命周期管理，支持发现、监控、配置管理和告警。
@@ -272,6 +276,10 @@ The system SHALL enforce a strict device state machine with validated transition
 ### Requirement: Device Types
 The system SHALL support multiple device types: PhysicalHost, Container, NetworkDevice, LoadBalancer, CloudInstance, IoT_Device.
 
+#### Scenario: Register device with type
+- **WHEN** user creates device with type=PhysicalHost
+- **THEN** system accepts and stores the device with the specified type
+
 ### Requirement: Device Hierarchy
 The system SHALL support parent-child relationships between devices.
 
@@ -282,14 +290,30 @@ The system SHALL support parent-child relationships between devices.
 ### Requirement: Device Groups
 The system SHALL support flat, hierarchical, and dynamic device grouping.
 
+#### Scenario: Create device group
+- **WHEN** user creates a group with name and member device IDs
+- **THEN** system creates the group and links the member devices
+
 ### Requirement: Configuration Templates
 The system SHALL support Jinja2-style configuration templates with inheritance.
+
+#### Scenario: Apply template to device
+- **WHEN** user applies template to device with variables
+- **THEN** system renders template and pushes rendered config to device
 
 ### Requirement: Device Search
 The system SHALL support searching devices by tags via GET /api/devices/search?tag=label=value.
 
+#### Scenario: Search by tag
+- **WHEN** user sends GET /api/devices/search?tag=env=prod
+- **THEN** system returns devices with matching tag
+
 ### Requirement: Device Actions
 The system SHALL support executing actions on devices via POST /api/devices/:id/actions.
+
+#### Scenario: Execute device action
+- **WHEN** user sends POST /api/devices/:id/actions with action=reboot
+- **THEN** system executes the action and returns execution status
 
 ## Validation Rules
 

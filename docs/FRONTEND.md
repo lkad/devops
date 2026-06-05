@@ -1,8 +1,15 @@
 # Frontend Requirements — DevOps Toolkit
 
 **状态:** Draft
-**最后更新:** 2026-04-29
+**最后更新:** 2026-06-05
 **基于:** PRD.md v2.1, DESIGN.md
+
+> **📖 重新开发请先读:** [DOCUMENT_INDEX.md](../DOCUMENT_INDEX.md)
+>
+> 本文档描述前端实现规格。设计系统参见 [DESIGN.md](../DESIGN.md)。权威产品需求参见 [PRD.md](../PRD.md) v2.1 和 [openspec/specs/](../openspec/specs/)。
+>
+> **相关 API 设计文档:**
+> - [docs/LOG-QUERY-API.md](LOG-QUERY-API.md) — 日志查询兼容性设计（capabilities / 降级 / 错误码）
 
 ---
 
@@ -134,12 +141,16 @@
 - SSH 指标展示（CPU/内存/磁盘）
 - 服务状态监控
 - 配置推送
+- 维护模式管理（进入/退出/查看）
 
 **组件:**
 - `PhysicalHostTable` — 主机列表
 - `HostMetricsPanel` — 指标面板（仪表盘样式）
 - `ServiceStatusList` — 服务状态列表
 - `ConfigPushForm` — 配置推送表单
+- `MaintenanceBanner` — 维护模式横幅（在主机详情页顶部）
+- `MaintenanceDialog` — 进入维护确认对话框
+- `MaintenanceList` — 当前维护中的主机列表
 
 **状态显示:**
 | 状态 | 颜色 | 说明 |
@@ -147,6 +158,54 @@
 | online | success (绿) | 监控正常，SSH 正常 |
 | monitoring_issue | warning (黄) | 监控 DOWN，SSH 正常 |
 | offline | error (红) | 监控 DOWN，SSH 失败 |
+| **maintenance** | 紫 (`#a855f7`) | 手动维护中，外部告警被抑制 |
+
+#### 3.3.1 维护模式 UX
+
+**进入维护流程：**
+
+1. 在 [HostDetail] 页面右上角操作菜单点击"进入维护模式"
+2. 弹出 `MaintenanceDialog` 对话框，要求填写：
+   - 维护原因（必填，文本框，最多 500 字符）
+   - 预计时长（必填，下拉：30min / 1h / 2h / 4h / 8h / 24h / 自定义）
+3. 二次确认对话框（提示"进入维护后，外部告警将被抑制"）
+4. 调用 `POST /api/physical-hosts/:id/maintenance`
+5. 成功后状态徽章变为紫色，顶部显示 `MaintenanceBanner`
+
+**MaintenanceBanner 内容：**
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  🛠 Maintenance Mode — Started 2026-06-05 14:30 by alice        │
+│  Reason: 升级数据库 schema (预计 2 小时)                        │
+│  Progress: ████████░░░░░░░░ 50% (elapsed 1h / expected 2h)      │
+│  [Exit Maintenance]                                              │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+- 背景：`rgba(168, 85, 247, 0.1)`
+- 边框：`#a855f7` 1px
+- 进度条基于 `expected_duration` 计算
+- 超出预计时长时显示警告（黄色图标 + "Overdue by X minutes"）
+
+**退出维护流程：**
+
+1. 点击 `MaintenanceBanner` 的 `[Exit Maintenance]` 按钮
+2. 确认对话框（提示"退出后所有告警恢复正常推送"）
+3. 调用 `DELETE /api/physical-hosts/:id/maintenance`
+4. 状态变回 `online`，Banner 消失
+
+**列表页过滤：**
+- `PhysicalHostTable` 顶部筛选器增加 `State` 下拉
+- 选项：All / Online / Monitoring Issue / Offline / **Maintenance**
+- 选择 "Maintenance" 时，只显示维护中的主机，并显示 `MaintenanceList` 视图
+
+**列表页徽章：**
+- 维护中的主机在表格中显示紫色 "Maintenance" 徽章
+- 鼠标悬停显示 Tooltip：维护原因 + 开始时间 + 维护人
+
+**审计记录可见性：**
+- HostDetail 页面底部"Activity" Tab 显示维护进入/退出记录
+- 来源：审计日志（`action=maintenance_enter|exit`）
 
 ### 3.4 CI/CD 流水线
 
@@ -190,12 +249,43 @@
 - 告警通道管理（创建/编辑/删除）
 - 告警历史查询
 - 告警统计
+- **维护模式告警抑制**（显示被抑制的告警）
 
 **组件:**
 - `AlertChannelList` — 通道列表
 - `AlertChannelForm` — 通道表单（Slack/Webhook/Email/Log）
 - `AlertHistoryTable` — 历史记录
 - `AlertStatsChart` — 统计图表
+- `SuppressedAlertBadge` — 抑制告警徽章（紫色，区别于正常告警）
+- `SuppressionReasonTooltip` — 悬停显示抑制原因
+
+#### 3.6.1 维护模式告警抑制显示
+
+**AlertHistoryTable 列扩展：**
+- 新增 `Status` 列：
+  - 正常发送：默认显示
+  - **Suppressed**（紫色徽章）：鼠标悬停显示 `Suppressed due to: <host> in maintenance since <time>`
+- 时间戳旁显示 `🛠 Suppressed` 标签
+
+**过滤功能：**
+- AlertHistoryTable 顶部增加 `Show suppressed` 切换开关（默认关）
+- 开启时，表格中包含 `suppressed=true` 的告警
+- 也可使用 query 参数 `?suppressed=true`
+
+**AlertStatsChart 扩展：**
+- 统计图表新增"Suppressed (24h)"区块
+- 显示数字 + 折线图（按小时分布）
+- Tooltip 显示"X alerts suppressed by maintenance on <host>"
+
+**物理主机关联：**
+- 在 [HostDetail] 的告警 Tab 中，过滤该主机的告警
+- 顶部显示：`X active alerts / Y suppressed during maintenance`
+- 维护期间该主机的告警**全部**显示为 Suppressed 状态
+
+**WebSocket 通知：**
+- 内部 WebSocket `alert` 通道仍接收 suppression 事件
+- 顶部 Toast 显示（仅内部使用，紫色样式）："Alert 'high-cpu' suppressed: server-01 in maintenance"
+- 持续 3 秒，可点击跳转到该主机的告警列表
 
 ### 3.7 K8s 多集群管理
 
@@ -316,6 +406,7 @@
 | 物理主机 | `/api/physical-hosts/:id` | GET, DELETE |
 | 物理主机 | `/api/physical-hosts/:id/services` | GET |
 | 物理主机 | `/api/physical-hosts/:id/config` | POST |
+| **物理主机** | **`/api/physical-hosts/:id/maintenance`** | **POST, DELETE（维护模式）** |
 | 流水线 | `/api/pipelines` | GET, POST |
 | 流水线 | `/api/pipelines/:id` | GET, DELETE |
 | 流水线 | `/api/pipelines/:id/execute` | POST |
@@ -325,6 +416,8 @@
 | 日志 | `/api/logs/filters` | GET, POST |
 | 告警 | `/api/alerts/channels` | GET, POST |
 | 告警 | `/api/alerts/history` | GET |
+| **告警** | **`/api/alerts/history?suppressed=true`** | **GET（过滤抑制告警）** |
+| **告警** | **`/api/alerts/stats`** | **GET（含 suppressed_count）** |
 | K8s | `/api/k8s/clusters` | GET, POST |
 | K8s | `/api/k8s/clusters/:name` | DELETE |
 | K8s | `/api/k8s/clusters/:name/health` | GET |
@@ -523,9 +616,11 @@ frontend/
 - [ ] 实现 Dashboard 页面
 - [ ] 实现设备管理模块
 - [ ] 实现物理主机模块
+  - [ ] 维护模式 UI（MaintenanceDialog / MaintenanceBanner / 列表过滤）
 - [ ] 实现流水线模块
 - [ ] 实现日志模块
 - [ ] 实现告警模块
+  - [ ] 抑制告警显示（SuppressedAlertBadge / 过滤切换 / 统计扩展）
 - [ ] 实现 K8s 多集群模块
 - [ ] 实现项目管理模块
 - [ ] 实现报表模块

@@ -1,6 +1,10 @@
 # audit-logging
 
-## ADDED Requirements
+## Purpose
+
+Define the audit trail subsystem: every state-changing operation (create, update, delete, permission grant) is recorded with actor, target, before/after values, timestamp, and request context. The audit log is append-only, queryable by admins, and retained for a configurable period (default 365 days for production).
+
+## Requirements
 
 ### Requirement: Audit Log Entry Creation
 The system SHALL create audit log entries for all CRUD operations on auditable entities.

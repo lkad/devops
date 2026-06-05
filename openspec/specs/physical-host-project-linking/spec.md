@@ -1,4 +1,10 @@
-## ADDED Requirements
+# physical-host-project-linking
+
+## Purpose
+
+Define the many-to-many relationship between physical hosts and projects: a host can serve multiple projects (e.g. a database host serving order-backend and payment-gateway), and a project can span multiple hosts. This is the resource-allocation data model that the cost-allocation feature is built on. Hosts in maintenance are still shown linked to projects but flagged with maintenance status.
+
+## Requirements
 
 ### Requirement: Physical Host Project Links
 The system SHALL display and manage project associations for physical hosts.

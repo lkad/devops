@@ -1,6 +1,10 @@
 # websocket-hub
 
-## ADDED Requirements
+## Purpose
+
+Define the central WebSocket connection hub: a single goroutine-safe broker that maintains the set of connected clients, accepts client registrations, manages channel subscriptions (one client can subscribe to many channels), and dispatches messages from publishers to subscribers. The hub is the only place that touches the connection map; all other code publishes via channels.
+
+## Requirements
 
 ### Requirement: WebSocket Upgrade
 Server SHALL accept WebSocket connections at `/ws` endpoint.
@@ -88,6 +92,10 @@ All broadcast messages SHALL follow standard format.
     "timestamp": "2026-04-27T10:00:00Z"
 }
 ```
+
+#### Scenario: Parse incoming message
+- **WHEN** hub receives a JSON message on a subscribed channel
+- **THEN** hub extracts channel, type, data, and timestamp fields correctly
 
 ### Requirement: Broadcast to Channel
 Messages SHALL be broadcast to all clients subscribed to the channel.

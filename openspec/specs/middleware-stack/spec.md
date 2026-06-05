@@ -1,6 +1,10 @@
 # middleware-stack
 
-## ADDED Requirements
+## Purpose
+
+Define the HTTP middleware chain and execution order: Recovery → RequestID → CORS → Logger → Auth → RBAC → Handler. Each middleware has a single responsibility, the chain is composable, and the order is fixed (recovery first, auth/rbac only on protected paths, logger wraps everything for observability).
+
+## Requirements
 
 ### Requirement: Middleware Execution Order
 Middleware SHALL be executed in specific order: CORS → Recovery → Logging → Metrics → Auth → RBAC.
@@ -108,6 +112,10 @@ func Chain(h http.Handler, middlewares ...Middleware) http.Handler {
     return h
 }
 ```
+
+#### Scenario: Chain multiple middlewares
+- **WHEN** handler is wrapped with [Logger, Auth, RBAC] middlewares
+- **THEN** request flow is: Logger → Auth → RBAC → handler → RBAC → Auth → Logger
 
 ### Requirement: Context Propagation
 Middleware SHALL propagate request context to handlers.

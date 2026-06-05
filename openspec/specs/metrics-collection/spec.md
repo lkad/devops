@@ -1,6 +1,10 @@
 # metrics-collection
 
-## ADDED Requirements
+## Purpose
+
+Define how application and infrastructure metrics are collected and exposed: Prometheus-compatible `/metrics` endpoint for scraping, JSON `/api/metrics` endpoint for the frontend dashboard, counter/gauge/histogram metric types, and integration with InfluxDB for long-term storage of physical-host and network-device metrics. Metrics cover HTTP request rates, device health, alert counts, and pipeline execution stats.
+
+## Requirements
 
 ### Requirement: Prometheus Metrics Endpoint
 The system SHALL expose metrics in Prometheus text format at GET /metrics.

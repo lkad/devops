@@ -1,6 +1,10 @@
 # network-discovery
 
-## ADDED Requirements
+## Purpose
+
+Define how new devices are discovered and onboarded: scheduled network scans (CIDR-based), SNMP sweeps, SSH probes, and pull-based discovery where devices register themselves. Discovered devices enter the system as `PENDING` state and require approval or auto-registration rules to transition to `ONLINE`. Discovery is decoupled from monitoring — a device can be discovered without being monitored.
+
+## Requirements
 
 ### Requirement: Network Scanning
 The system SHALL scan networks for device discovery via SNMP and SSH probing.

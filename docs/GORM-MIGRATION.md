@@ -6,6 +6,10 @@
 
 **状态**: ✅ 已完成
 
+> **📖 重新开发请先读:** [DOCUMENT_INDEX.md](../DOCUMENT_INDEX.md)
+>
+> 本文为历史迁移记录，保留作为决策追溯参考。当前 ORM 规范参见 [REQUIREMENTS.md](../REQUIREMENTS.md) 第 2 节。
+
 ---
 
 ## 1. 背景与目标

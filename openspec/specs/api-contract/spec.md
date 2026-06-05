@@ -1,6 +1,10 @@
 # api-contract
 
-## ADDED Requirements
+## Purpose
+
+Define the RESTful API conventions used across all modules: URL structure (`/api/v1/<resource>`), standard HTTP methods, response envelope shapes (list with pagination, error with code+message), and HTTP status code semantics. This is the contract that every module's HTTP layer must follow so the frontend can build a unified client.
+
+## Requirements
 
 ### Requirement: RESTful URL Structure
 All API endpoints SHALL follow RESTful conventions with consistent URL structure.
@@ -108,6 +112,12 @@ The system SHALL define and use standard error codes.
 | NOT_FOUND | 404 | Resource not found |
 | CONFLICT | 409 | Resource conflict (e.g., duplicate) |
 | INVALID_STATE | 422 | Invalid state transition |
+| RATE_LIMITED | 429 | Rate limit exceeded |
+| INTERNAL_ERROR | 500 | Unexpected server error |
+
+#### Scenario: Return standard error code
+- **WHEN** resource lookup fails
+- **THEN** server returns 404 with error.code="NOT_FOUND"
 | RATE_LIMITED | 429 | Rate limit exceeded |
 | INTERNAL_ERROR | 500 | Unexpected server error |
 

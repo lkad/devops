@@ -1,6 +1,10 @@
 # rbac-permissions
 
-## ADDED Requirements
+## Purpose
+
+Define the local RBAC layer: 5 system roles (SuperAdmin, Operator, Developer, Auditor, ReadOnly) with a fixed permission matrix, plus per-project `viewer`/`editor`/`admin` roles. Authorization happens at the service layer (not just middleware) and supports label-based access control for resource scoping. Audit logging is mandatory for all permission grants and role changes.
+
+## Requirements
 
 ### Requirement: Role-Based Access Control
 The system SHALL enforce RBAC with four roles: SuperAdmin, Operator, Developer, Auditor.
@@ -40,6 +44,10 @@ The system SHALL enforce the following permission matrix:
 | SuperAdmin | ✅ | ✅ | ✅ | ✅ |
 
 *Operator can restart non-production devices only
+
+#### Scenario: Auditor cannot modify config
+- **WHEN** user with role=Auditor attempts to PUT /api/devices/:id/config
+- **THEN** system returns 403 FORBIDDEN
 
 ### Requirement: Label-Based Access Control
 The system SHALL enforce access control based on device labels.

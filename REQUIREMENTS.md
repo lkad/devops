@@ -358,10 +358,23 @@ BusinessLine (事业群级权限)
 - Loki
 
 **功能:**
-- 日志查询
+- 日志查询 (Universal Query DSL)
 - 日志统计
 - 告警规则
 - 保留策略
+
+**核心设计 (跨后端兼容):**
+
+- `LogBackend` interface 抽象 (`Query` / `Stats` / `Capabilities` / `Health`)
+- 启动时根据 `LOG_STORAGE_BACKEND` 环境变量选一个后端
+- Universal Query DSL: 所有后端必须支持 start_time/end_time/level/source/search/limit/offset/order_by
+- Advanced 字段 (regex/fields/structured_query) 走 capabilities 检查
+- 能力端点 `GET /api/v1/logs/capabilities` 返回当前后端支持什么
+- 降级通过响应 `meta.degraded_features` 透明通知
+- 标准错误码 (UNSUPPORTED_FEATURE/TIME_RANGE_EXCEEDED/QUERY_TIMEOUT/RESULT_TOO_LARGE/BACKEND_UNAVAILABLE/RATE_LIMITED)
+
+**形式化规格:** [openspec/specs/log-aggregation/spec.md](../openspec/specs/log-aggregation/spec.md) (16 requirements, 44 scenarios)
+**详细设计:** [docs/LOG-QUERY-API.md](../docs/LOG-QUERY-API.md) (13 章节)
 
 ### 5.4 CI/CD 流水线
 
@@ -407,6 +420,28 @@ BusinessLine (事业群级权限)
 - 心跳监控
 - 指标采集
 - 配置推送
+
+**4 态状态机:**
+
+```
+online | monitoring_issue | offline | maintenance
+```
+
+| 状态 | 触发 | 告警 |
+|------|------|------|
+| online | 监控+SSH 都正常 | 无 |
+| monitoring_issue | 监控 DOWN, SSH 正常 | 可选 |
+| offline | 监控+SSH 都失败 | 是 |
+| maintenance | 运维主动标记 | **抑制外部通道**，保留 log |
+
+**维护模式 API:**
+- `POST /api/physical-hosts/:id/maintenance` — 进入（需 reason + expected_end_time）
+- `DELETE /api/physical-hosts/:id/maintenance` — 退出
+- `GET /api/physical-hosts/maintenances` — 列出所有维护中
+- `GET /api/physical-hosts/:id/maintenance-history` — 审计历史
+
+**形式化规格:** [openspec/specs/physical-host-monitoring/spec.md](../openspec/specs/physical-host-monitoring/spec.md) (13 requirements)
+**告警侧:** [openspec/specs/alert-notification/spec.md](../openspec/specs/alert-notification/spec.md) (Maintenance Mode Alert Suppression)
 
 ### 6.3 网络发现
 
@@ -477,6 +512,33 @@ auth:
   dev_bypass: false
 ```
 
+### 8.3 测试环境 (三层)
+
+启动时根据 `ENV` 环境变量选择配置 + 后端组合，**同一份代码**支撑三层环境。
+
+| ENV | 配置 | 后端 | Mock | 启动时间 | 适用 |
+|-----|------|------|------|---------|------|
+| `dev` | `config-dev.yaml` | Local / Fake* | all | < 30s | 单元测试 |
+| `ci` | `config-ci.yaml` | Loki / ES / Containerlab | none | 2-5min | 集成测试 |
+| `prod` | `config-prod.yaml` | 真实硬件 | none | - | 生产 |
+
+**关键文件 (~30 个):**
+
+- `deploy/containerlab/topology.yml` — 8 节点双 DC
+- `deploy/docker-compose.yml` — PostgreSQL / Loki / ES / Prometheus / InfluxDB / LDAP / Grafana
+- `deploy/k3d/cluster.yaml` — k3d 集群
+- `scripts/setup.sh {dev|ci|prod}` — 一键启动
+- `scripts/clab.sh` / `k3d-setup.sh` / `db-setup.sh` / `ldap-seed.sh` / `seed-data.sh` / `verify.sh`
+- `configs/templates/config-{dev,ci,prod}.yaml`
+- `tests/fixtures/{ldap,db,devices,logs,metrics,projects}/`
+- `scripts/verify/{verify-conn,verify-data,verify-flow}.sh`
+- `.github/workflows/{test-unit,test-integration}.yml`
+
+**脚本标准接口:** `deploy | destroy | status | logs | help`，使用 `set -euo pipefail`。
+
+**形式化规格:** [openspec/specs/test-environment/spec.md](../openspec/specs/test-environment/spec.md) (19 requirements, 54 scenarios)
+**详细清单:** [docs/TEST-ENVIRONMENT.md](../docs/TEST-ENVIRONMENT.md) (12 章节, 961 行)
+
 ---
 
 ## 附录 A: 文件结构
@@ -530,4 +592,94 @@ pkg/
 
 ---
 
-*文档版本: 1.0*
+## 附录 C: 功能完成状态（来自原 TODOS.md）
+
+**最后更新:** 2026-04-28
+
+### 后端模块状态
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| 日志系统 | ✅ 完成 | Local/ES/Loki 后端，查询委托 |
+| Prometheus 指标 | ✅ 完成 | /metrics 端点，计数器/仪表/直方图 |
+| 告警通知 | ✅ 完成 | Slack/webhook/email/log 通道，限流 |
+| WebSocket | ✅ 完成 | 实时事件广播 |
+| CI/CD 流水线 | ✅ 完成 | 执行引擎，阶段模拟，运行历史 |
+| 设备管理 | ✅ 完成 | 状态机，设备组，层级关系，配置模板 |
+| LDAP 认证 | ✅ 完成 | LDAP 认证，组角色映射 |
+| 权限模型 | ✅ 完成 | 中间件强制执行，基于标签的访问控制 |
+| K8s 多集群 | ✅ 完成 | k3d 集群管理，多集群健康检查 |
+| 物理主机管理 | ✅ 完成 | SSH 连接管理，状态监控，指标采集 |
+| 项目管理 | ✅ 完成 | 事业群 → 系统 → 项目 层级，FinOps 报表 |
+| 审计日志 | ✅ 完成 | 项目管理变动记录，审计界面 |
+| GORM ORM | ✅ 完成 | database/sql 迁移到 GORM |
+
+### 项目管理细节
+
+- 事业群 CRUD (`/api/org/business-lines`)
+- 系统 CRUD (`/api/org/business-lines/:id/systems`)
+- 项目 CRUD (`/api/org/systems/:id/projects`)
+- 资源链接 (`/api/org/projects/:id/resources`)
+- 级别 RBAC 权限 (viewer, editor, admin)
+- FinOps CSV 导出 (`/api/org/reports/finops?period=YYYY-MM`)
+- 审计日志 (`/api/org/audit-logs`) - 记录所有 CRUD 变动
+- PostgreSQL 迁移
+
+**数据模型:**
+- BusinessLine → System → Project (3 级层级)
+- ProjectResource (链接表)
+- ProjectPermission (本地 RBAC，LDAP 仅用于认证)
+
+### 前端路由与页面
+
+| 路由 | 组件 | 状态 |
+|------|------|------|
+| `/devices` | DeviceList | ✅ |
+| `/devices/:id` | DeviceDetail | ✅ |
+| `/physical-hosts` | HostList | ✅ |
+| `/physical-hosts/:id` | HostDetail | ✅ |
+| `/physical-hosts/:id/services` | HostServices | ✅ |
+| `/physical-hosts/:id/config` | HostConfig | ✅ |
+| `/pipelines` | PipelineList | ✅ |
+| `/pipelines/:id` | PipelineDetail | ✅ |
+| `/pipelines/:id/run` | PipelineRun | ✅ |
+| `/logs` | LogViewer | ✅ |
+| `/logs/alerts` | LogAlerts | ✅ |
+| `/alerts` | AlertChannels | ✅ |
+| `/alerts/history` | AlertHistory | ✅ |
+| `/k8s` | ClusterList | ✅ |
+| `/k8s/:cluster` | ClusterDetail | ✅ |
+| `/k8s/:cluster/nodes` | ClusterNodes | ✅ |
+| `/k8s/:cluster/pods` | ClusterPods | ✅ |
+| `/k8s/:cluster/namespaces` | ClusterNamespaces | ✅ |
+| `/projects` | ProjectList | ✅ |
+| `/projects/:id` | ProjectDetail | ✅ |
+| `/projects/:id/resources` | ProjectResources | ✅ |
+| `/projects/:id/permissions` | ProjectPermissions | ✅ |
+
+### 测试覆盖
+
+**当前状态:** 450+ tests passing（含 K8s 集成测试）
+
+| 模块 | 测试数 |
+|------|--------|
+| device | 8+ |
+| project | 24+ |
+| k8s | 16+ |
+| logs/metrics/alerts/websocket/pipeline/physicalhost/discovery/auth/ldap | + |
+
+### 已知问题 (DX Critical Fixes)
+
+1. **LICENSE 文件** — 已添加（参见根目录 LICENSE）
+2. **mux.Vars(r) bug** — Gin 迁移后 K8s 部分 handler 仍使用 mux.Vars，应改用 gin.Context.Param
+3. **设备类型验证** — Device type 接受任意字符串，需添加枚举验证
+
+### 重新开发注意事项
+
+- **状态已过时**: TODO 列表引用了已删除的代码路径（`devops-toolkit/frontend/...`、`cmd/devops-toolkit/main.go`），仅作历史参考
+- **测试数据**: K8s 集成测试连接真实 k3d 集群（dev-cluster-1, dev-cluster-2），不适用 mock
+- **代码已删除**: 整个代码库已清理，需从零重建（参见 [CHANGELOG.md](../CHANGELOG.md) 的清理记录）
+
+---
+
+*文档版本: 1.0 (合并自原 REQUIREMENTS.md + TODOS.md)*

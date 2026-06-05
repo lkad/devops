@@ -1,6 +1,10 @@
 # websocket-realtime
 
-## ADDED Requirements
+## Purpose
+
+Define how real-time events are broadcast to connected clients: domain events (device state change, alert fired, pipeline finished, log tail update) are published to channel names, the hub dispatches to subscribed clients, and clients can subscribe/unsubscribe on the fly. Authentication is required at connection time; per-channel authorization is enforced based on user role and label-based access.
+
+## Requirements
 
 ### Requirement: WebSocket Connection
 The system SHALL accept WebSocket connections at /ws endpoint.

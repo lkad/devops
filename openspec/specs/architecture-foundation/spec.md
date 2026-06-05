@@ -1,6 +1,10 @@
 # architecture-foundation
 
-## ADDED Requirements
+## Purpose
+
+Define the layered Go backend architecture: handler → service → repository → model, with the package structure (`cmd/`, `internal/<module>/{handler,service,repository,model}`) and cross-cutting concerns (auth, middleware, config). This is the structural backbone every module follows; deviations require justification.
+
+## Requirements
 
 ### Requirement: Package Structure
 Each module in `internal/` SHALL follow the same package structure with handler, service, repository, and models files.

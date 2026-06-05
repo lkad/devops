@@ -1,6 +1,10 @@
 # cicd-pipeline
 
-## ADDED Requirements
+## Purpose
+
+Define the CI/CD pipeline subsystem: pipeline definitions as YAML with sequential stages (validate → build → test → security_scan → deploy), CRUD operations, execution with run history and statistics, and deployment strategies (blue-green, canary, rolling). Pipelines can be triggered manually, by API, or by webhook (e.g. Git push), and every run records stage-level timing, logs, and artifacts.
+
+## Requirements
 
 ### Requirement: Pipeline CRUD Operations
 The system SHALL provide Create, Read, Update, and Delete operations for CI/CD pipelines via REST API.
@@ -72,8 +76,6 @@ The system SHALL provide pipeline execution statistics.
 #### Scenario: Get pipeline stats
 - **WHEN** user requests GET /api/pipelines/:id/stats
 - **THEN** system returns success rate, average duration, last 10 executions
-
-## ADDED Requirements
 
 ### Requirement: Pipeline YAML Structure
 The system SHALL accept YAML defining pipeline stages with names, commands, and environment variables.

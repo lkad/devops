@@ -1,5 +1,14 @@
 # Architecture — DevOps Toolkit
 
+> **⚠️ 文档警告:** 本文档部分内容已过时（迁移前状态）。
+>
+> 重新开发时，请同时参考：
+> - [REQUIREMENTS.md](REQUIREMENTS.md) — 当前技术规格
+> - [docs/CONFLICTS.md](docs/CONFLICTS.md) — 详细冲突清单
+> - [openspec/specs/](openspec/specs/) — 权威形式化规格
+>
+> 主要冲突：HTTP 框架（gorilla/mux → Gin）、配置库（YAML → Viper）、项目 Type（内嵌枚举 → 独立表）
+
 ## Overview
 
 DevOps Toolkit is a Go-based internal platform for managing infrastructure, CI/CD pipelines, logs, alerts, and physical hosts. The system is organized around an **organizational hierarchy** (Business Line → System → Project) that provides project management and FinOps reporting capabilities.
@@ -66,7 +75,7 @@ Project
 ├── id (UUID, PK)
 ├── system_id (FK → System, CASCADE)
 ├── name (string)
-├── type (enum: frontend, backend)
+├── project_type_id (FK → ProjectType, CASCADE)  <!-- ⚠️ 独立表设计，详见 CONFLICTS.md #3 -->
 ├── description (string)
 ├── created_at, updated_at
 
@@ -91,6 +100,8 @@ ProjectPermission
 ```
 
 #### Enums
+
+> **⚠️ 冲突 #3:** REQUIREMENTS.md v2.1 采用独立 `project_types` 表 + `GORMProjectType` 模型，而非内嵌枚举。本节保留旧设计供参考，新实现应采用独立表。
 
 ```go
 type ProjectType string
@@ -199,15 +210,95 @@ The project hierarchy can be viewed in real-time via WebSocket subscriptions:
 
 ## Technical Stack
 
-| Component | Technology |
-|-----------|------------|
-| HTTP Server | `net/http` + `gorilla/mux` |
-| WebSocket | `gorilla/websocket` |
-| Database | PostgreSQL (`lib/pq`) |
-| SSH | `golang.org/x/crypto/ssh` |
-| K8s | k3d/kind CLI + `client-go` |
-| Config | YAML + environment overrides |
-| Testing | Go `testing` package |
+> **⚠️ 部分字段已过时。** HTTP Server 已迁移到 Gin，DB 驱动已迁移到 GORM，详见 [docs/CONFLICTS.md](docs/CONFLICTS.md) 冲突 #1、#2。
+
+| Component | Technology | 状态 |
+|-----------|------------|------|
+| HTTP Server | `net/http` + `gorilla/mux` | ⚠️ 已迁移到 Gin |
+| WebSocket | `gorilla/websocket` | ✅ |
+| Database | PostgreSQL (`lib/pq`) | ⚠️ 已迁移到 GORM |
+| SSH | `golang.org/x/crypto/ssh` | ✅ |
+| K8s | k3d/kind CLI + `client-go` | ✅ |
+| Config | YAML + environment overrides | ⚠️ 已改用 Viper |
+| Logging | `log/slog` (stdlib) | ✅ |
+| Testing | Go `testing` package | ✅ |
+
+## Cross-Cutting Patterns
+
+### 1. Backend Capability Abstraction (LogBackend)
+
+日志子系统需要支持 Local / Elasticsearch / Loki 三种后端，三者查询语法差异巨大。**架构原则：后端可换，客户端零改动**。
+
+**三层架构:**
+
+```
+┌─────────────────────────────────────────┐
+│  Client (Frontend / 第三方)             │
+│  - 用 Universal Query DSL 请求           │
+│  - 先调 /capabilities 知道能用啥         │
+│  - 看响应 meta 知道是否降级              │
+└─────────────────────────────────────────┘
+                  ↕ HTTP API (稳定契约)
+┌─────────────────────────────────────────┐
+│  API 适配层 (Go)                         │
+│  - 接收标准 LogQuery，校验，补充默认值   │
+│  - 调 backend.Query(Query) → LogPage    │
+│  - 错误码映射 (backend err → 标准 err)  │
+│  - 加 meta 信息到响应                    │
+└─────────────────────────────────────────┘
+                  ↕ LogBackend interface
+┌─────────────────────────────────────────┐
+│  后端实现                                │
+│  - LocalBackend (子串匹配，内存扫)        │
+│  - ElasticsearchBackend (翻译成 Lucene)   │
+│  - LokiBackend (翻译成 LogQL)            │
+└─────────────────────────────────────────┘
+```
+
+**核心不变式:**
+
+1. **LogEntry schema 永远不变** — 字段名/类型/含义固定
+2. **所有后端都能跑 Universal 子集** — 这是 SLA
+3. **能力查询永远先于高级查询** — 客户端应先调 `/capabilities`
+4. **错误永远可重试判断** — 标准错误码 (UNSUPPORTED_FEATURE / TIME_RANGE_EXCEEDED / BACKEND_UNAVAILABLE 等)
+5. **降级永远透明** — `meta.degraded_features` 必须有
+6. **后端切换 = 0 客户端代码改动**
+
+**形式化规格:** [openspec/specs/log-aggregation/spec.md](openspec/specs/log-aggregation/spec.md) (16 requirements)
+**详细设计:** [docs/LOG-QUERY-API.md](docs/LOG-QUERY-API.md) (13 章节)
+
+### 2. Maintenance Mode (Alert Suppression Pattern)
+
+物理主机可主动进入 `maintenance` 状态，期间的告警**抑制到外部通道**（Slack/PD/Email）但**保留到 log 通道**用于审计。
+
+**核心设计:**
+
+| 层 | 行为 |
+|----|------|
+| 状态机 | 在 online/monitoring_issue/offline 之上叠加 maintenance flag |
+| 告警 | 维护中的主机产生的告警 `suppress_external=true`、仍记录到 log |
+| 审计 | 维护进入/退出写审计日志，含 reason / expected_end_time |
+| 审计员 | 通过 `/api/alerts/suppressed?host_id=X` 查看被抑制的告警 |
+
+**为什么用 4 态而不是 5 态:** maintenance 与运行态正交（维护中监控仍可正常/异常），用 flag 模式避免 N×M 笛卡尔积。
+
+**形式化规格:** [openspec/specs/physical-host-monitoring/spec.md](openspec/specs/physical-host-monitoring/spec.md) (Maintenance Mode, Maintenance Audit Trail)
+**告警侧:** [openspec/specs/alert-notification/spec.md](openspec/specs/alert-notification/spec.md) (Maintenance Mode Alert Suppression)
+
+### 3. Three-Tier Test Environment
+
+三层环境策略是 dev/ci/prod 跨层可复用的模式，**架构层面**关注的不是工具而是**抽象契约**：
+
+| 层 | 契约 | 启动时间 | 适用 |
+|----|------|---------|------|
+| dev | `use_mock=all`, `dev_bypass=true` | < 30s | 单元测试、快速迭代 |
+| ci | 真实后端集成 + Containerlab | 2-5min | E2E、CI 集成 |
+| prod | 真实硬件 + 完整监控 | - | 真实流量 |
+
+**核心规则:** 同一份代码 + 不同 env config = 不同层。配置加载在启动时根据 `ENV` 环境变量选择 `config-{env}.yaml`，不修改代码。
+
+**形式化规格:** [openspec/specs/test-environment/spec.md](openspec/specs/test-environment/spec.md) (19 requirements, 54 scenarios)
+**详细清单:** [docs/TEST-ENVIRONMENT.md](docs/TEST-ENVIRONMENT.md)
 
 ## Directory Structure
 

@@ -4,6 +4,10 @@
 **最后更新:** 2026-04-29
 **基于:** PRD.md v2.1
 
+> **📖 重新开发请先读:** [DOCUMENT_INDEX.md](../DOCUMENT_INDEX.md) 和 [CONFLICTS.md](CONFLICTS.md)
+>
+> 本文档与其他文档的冲突记录在 [CONFLICTS.md](CONFLICTS.md)。权威来源是 [openspec/specs/](../openspec/specs/)。
+
 ---
 
 ## 1. 概述
@@ -22,7 +26,7 @@ Go 后端 API 服务，为前端和第三方集成提供统一的 REST API。
 | 数据库 | PostgreSQL 15+ | 主数据存储 |
 | 认证 | LDAP + JWT | 用户认证 |
 | 配置 | Viper | 配置管理 |
-| 日志 | Zap | 结构化日志 |
+| 日志 | log/slog | 标准库结构化日志（2026 推荐）|
 | WebSocket | gorilla/websocket | 实时通信 |
 
 ---

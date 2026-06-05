@@ -97,6 +97,8 @@
 | uat | `rgba(168, 85, 247, 0.15)` | `#a855f7` | UAT |
 | prod | `rgba(239, 68, 68, 0.15)` | `#ef4444` | 生产 |
 
+> 维护状态色与 UAT 相同（`#a855f7`），体现"非故障、非活跃"语义。在物理主机列表/详情页用"Maintenance"标签区分。
+
 ### 状态色（物理主机）
 
 | 状态 | 色值 | 说明 |
@@ -104,6 +106,7 @@
 | online | `#22c55e` (Success) | 监控正常，SSH 正常 |
 | monitoring_issue | `#f59e0b` (Warning) | 监控 DOWN，SSH 正常 |
 | offline | `#ef4444` (Error) | 监控 DOWN，SSH 失败 |
+| maintenance | `#a855f7` (UAT 色 / 紫) | 手动维护模式，抑制外部告警 |
 
 ---
 

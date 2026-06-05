@@ -1,6 +1,10 @@
 # ldap-authentication
 
-## ADDED Requirements
+## Purpose
+
+Define the LDAP authentication flow: bind to LDAP server with user credentials, retrieve group memberships, map groups to local RBAC roles (SuperAdmin, Operator, Developer, Auditor, ReadOnly), and issue a JWT containing user identity and effective role. The system uses LDAP only for authentication; authorization is handled by the local RBAC layer.
+
+## Requirements
 
 ### Requirement: LDAP User Authentication
 The system SHALL authenticate users against configured LDAP server.
