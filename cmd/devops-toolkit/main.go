@@ -1,375 +1,148 @@
+// Command devops-toolkit is the entry point for the DevOps Toolkit backend.
+// Phase 1 wires up: config loader, slog logger, GORM database connection,
+// and a Gin HTTP server with /health and a /api/v1/capabilities placeholder.
+// Subsequent phases add module routes via the same router.
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/devops-toolkit/internal/alerts"
-	"github.com/devops-toolkit/internal/auth"
-	"github.com/devops-toolkit/internal/auth/ldap"
-	"github.com/devops-toolkit/internal/config"
-	"github.com/devops-toolkit/internal/device"
-	"github.com/devops-toolkit/internal/discovery"
-	"github.com/devops-toolkit/internal/ginadapter"
-	"github.com/devops-toolkit/internal/k8s"
-	"github.com/devops-toolkit/internal/logs"
-	"github.com/devops-toolkit/internal/metrics"
-	"github.com/devops-toolkit/internal/physicalhost"
-	"github.com/devops-toolkit/internal/pipeline"
-	"github.com/devops-toolkit/internal/project"
-	"github.com/devops-toolkit/internal/websocket"
-	"github.com/devops-toolkit/pkg/database"
 	"github.com/gin-gonic/gin"
+
+	"github.com/devops-toolkit/backend/internal/config"
+	dbpkg "github.com/devops-toolkit/backend/internal/database"
+	"github.com/devops-toolkit/backend/internal/handler"
+	"github.com/devops-toolkit/backend/pkg/contracts"
+	"github.com/devops-toolkit/backend/pkg/logger"
 )
 
 func main() {
-	// Load configuration
-	cfg, err := config.Load("config.yaml")
-	if err != nil {
-		log.Printf("Config load error (using defaults): %v", err)
-		cfg = &config.Config{
-			Server: config.ServerConfig{Port: 3000, Host: "0.0.0.0"},
-		}
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+		os.Exit(1)
 	}
-
-	// Initialize managers
-	wsHub := websocket.NewHub()
-	go wsHub.Run()
-
-	// Initialize LDAP client (uses env vars: LDAP_URL, LDAP_BASE_DN, etc.)
-	ldapClient, err := ldap.NewClient(ldap.DefaultConfig())
-	if err != nil {
-		log.Printf("Warning: LDAP client unavailable: %v", err)
-		ldapClient = nil
-	}
-
-	// Initialize auth handler
-	authHandler := auth.NewHandler(ldapClient, &cfg.Auth)
-
-	// Initialize database
-	db, err := database.NewGORM(&database.GORMConfig{
-		Host:     cfg.Database.Host,
-		Port:     cfg.Database.Port,
-		User:     cfg.Database.User,
-		Password: cfg.Database.Password,
-		Name:     cfg.Database.Name,
-		SSLMode:  cfg.Database.SSLMode,
-	})
-	if err != nil {
-		log.Printf("Warning: Database connection failed: %v", err)
-	} else {
-		database.SetGORM(db)
-		// Run auto migrations with fallback for k8s_clusters table
-		if err := database.AutoMigrateWithFallback(); err != nil {
-			log.Printf("Warning: AutoMigrate failed: %v", err)
-		}
-	}
-
-	deviceMgr := device.NewManager(db)
-
-	// Create user provider that extracts user from request context
-	userProvider := &authUserProvider{}
-
-	projectMgr := project.NewManagerWithDB(db, userProvider)
-	logMgr := logs.NewManager(logs.LogsConfig{
-		Backend:       cfg.Logs.Backend,
-		RetentionDays: cfg.Logs.RetentionDays,
-		Path:          cfg.Logs.Path,
-		ESURL:          cfg.Logs.ESURL,
-		LokiURL:        cfg.Logs.LokiURL,
-	}, func(entry *logs.Entry) {
-		wsHub.BroadcastLog(entry)
-	})
-
-	// Connect device manager to logs for event logging
-	deviceMgr.SetLogsManager(logMgr)
-
-	// Connect K8s cluster manager to device manager for unified K8s cluster operations
-	k8sMgr := k8s.NewClusterManager(db)
-	k8s.SetGlobalClusterManager(k8sMgr)
-	deviceMgr.SetClusterManager(k8sMgr)
-
-	// Import existing k3d clusters on startup (migrate from file-based to DB)
-	if db != nil {
-		if err := k8sMgr.ImportExistingK3dClusters(); err != nil {
-			log.Printf("Warning: Failed to import existing k3d clusters: %v", err)
-		}
-		// Note: K8s cluster migration to devices table is handled separately
-		// via deviceMgr.SetClusterManager(k8sMgr) above
-	}
-
-	metricsMgr := metrics.NewCollector()
-	alertsMgr := alerts.NewManager(metricsMgr)
-	pipelineMgr := pipeline.NewManager()
-	discoveryMgr := discovery.NewManager()
-	physicalhostMgr := physicalhost.NewManager()
-
-	// Create Gin router
-	gin.SetMode(gin.ReleaseMode)
-	r := gin.New()
-
-	// Global middleware
-	r.Use(gin.Recovery())
-	r.Use(gin.Logger())
-
-	// HTTP metrics middleware
-	r.Use(func(c *gin.Context) {
-		start := time.Now()
-		path := c.Request.URL.Path
-		method := c.Request.Method
-
-		c.Next()
-
-		duration := time.Since(start).Milliseconds()
-		status := fmt.Sprintf("%d", c.Writer.Status())
-		metricsMgr.RecordHTTPRequest(path, method, status, float64(duration))
-	})
-
-	// Determine base path for API routes
-	basePath := cfg.Server.BasePath
-
-	// Create API router using group for base path
-	var api gin.IRouter
-	if basePath != "" && basePath != "/" {
-		api = r.Group(basePath)
-		log.Printf("Base path configured: %s", basePath)
-	} else {
-		api = r
-	}
-
-	// Health check (always at root for direct access and proxy health checks)
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
-	})
-
-	// Auth routes (using Gin methods)
-	api.POST("/api/auth/login", authHandler.LoginGin)
-	api.POST("/api/auth/logout", authHandler.LogoutGin)
-	api.GET("/api/auth/me", authHandler.MeGin)
-
-	// Device routes (using adapter for existing HTTP handlers)
-	if deviceMgr != nil {
-		api.GET("/api/devices", ginfadapter.GinToHTTPHandler(deviceMgr.ListDevicesHTTP))
-		api.POST("/api/devices", ginfadapter.GinToHTTPHandler(deviceMgr.CreateDeviceHTTP))
-		api.GET("/api/devices/:id", ginfadapter.GinToHTTPHandler(deviceMgr.GetDeviceHTTP, "id"))
-		api.PUT("/api/devices/:id", ginfadapter.GinToHTTPHandler(deviceMgr.UpdateDeviceHTTP, "id"))
-		api.DELETE("/api/devices/:id", ginfadapter.GinToHTTPHandler(deviceMgr.DeleteDeviceHTTP, "id"))
-		api.GET("/api/devices/search", ginfadapter.GinToHTTPHandler(deviceMgr.SearchDevicesHTTP))
-		api.PUT("/api/devices/:id/state", ginfadapter.GinToHTTPHandler(deviceMgr.TransitionStateHTTP, "id"))
-
-		// K8s cluster sub-resources
-		api.GET("/api/devices/:id/nodes", ginfadapter.GinToHTTPHandler(deviceMgr.GetClusterNodesHTTP, "id"))
-		api.GET("/api/devices/:id/pods", ginfadapter.GinToHTTPHandler(deviceMgr.GetClusterPodsHTTP, "id"))
-		api.GET("/api/devices/:id/namespaces", ginfadapter.GinToHTTPHandler(deviceMgr.GetClusterNamespacesHTTP, "id"))
-	}
-
-	// Pipeline routes
-	api.GET("/api/pipelines", ginfadapter.GinToHTTPHandler(pipelineMgr.ListPipelinesHTTP))
-	api.POST("/api/pipelines", ginfadapter.GinToHTTPHandler(pipelineMgr.CreatePipelineHTTP))
-	api.GET("/api/pipelines/:id", ginfadapter.GinToHTTPHandler(pipelineMgr.GetPipelineHTTP, "id"))
-	api.DELETE("/api/pipelines/:id", ginfadapter.GinToHTTPHandler(pipelineMgr.DeletePipelineHTTP, "id"))
-	api.POST("/api/pipelines/:id/execute", ginfadapter.GinToHTTPHandler(pipelineMgr.ExecutePipelineHTTP, "id"))
-
-	// Log routes
-	api.GET("/api/logs", ginfadapter.GinToHTTPHandler(logMgr.QueryLogsHTTP))
-	api.POST("/api/logs", ginfadapter.GinToHTTPHandler(logMgr.CreateLogHTTP))
-	api.GET("/api/logs/stats", ginfadapter.GinToHTTPHandler(logMgr.GetStatsHTTP))
-	api.GET("/api/logs/alerts", ginfadapter.GinToHTTPHandler(logMgr.ListAlertRulesHTTP))
-	api.POST("/api/logs/alerts", ginfadapter.GinToHTTPHandler(logMgr.CreateAlertRuleHTTP))
-	api.GET("/api/logs/retention", ginfadapter.GinToHTTPHandler(logMgr.GetRetentionPolicyHTTP))
-	api.PUT("/api/logs/retention", ginfadapter.GinToHTTPHandler(logMgr.UpdateRetentionPolicyHTTP))
-	api.POST("/api/logs/retention/apply", ginfadapter.GinToHTTPHandler(logMgr.ApplyRetentionPolicyHTTP))
-	api.GET("/api/logs/filters", ginfadapter.GinToHTTPHandler(logMgr.ListSavedFiltersHTTP))
-	api.POST("/api/logs/filters", ginfadapter.GinToHTTPHandler(logMgr.CreateSavedFilterHTTP))
-	api.POST("/api/logs/generate", ginfadapter.GinToHTTPHandler(logMgr.GenerateSampleLogsHTTP))
-
-	// Metrics
-	r.GET("/metrics", func(c *gin.Context) {
-		metricsMgr.ServePrometheus(c.Writer, c.Request)
-	})
-	api.GET("/api/metrics", ginfadapter.GinToHTTPHandler(metricsMgr.ServeJSON))
-
-	// Alert routes
-	api.GET("/api/alerts/channels", ginfadapter.GinToHTTPHandler(alertsMgr.ListChannelsHTTP))
-	api.POST("/api/alerts/channels", ginfadapter.GinToHTTPHandler(alertsMgr.AddChannelHTTP))
-	api.GET("/api/alerts/history", ginfadapter.GinToHTTPHandler(alertsMgr.GetHistoryHTTP))
-
-	// K8s routes
-	api.GET("/api/k8s/clusters", ginfadapter.GinToHTTPHandler(k8sMgr.ListClustersHTTP))
-	api.POST("/api/k8s/clusters", ginfadapter.GinToHTTPHandler(k8sMgr.RegisterClusterHTTP))
-	api.GET("/api/k8s/clusters/:name", ginfadapter.GinToHTTPHandler(k8sMgr.GetClusterHTTP, "name"))
-	api.PUT("/api/k8s/clusters/:name", ginfadapter.GinToHTTPHandler(k8sMgr.UpdateClusterHTTP, "name"))
-	api.DELETE("/api/k8s/clusters/:name", ginfadapter.GinToHTTPHandler(k8sMgr.DeleteClusterHTTP, "name"))
-	api.GET("/api/k8s/clusters/:name/health", ginfadapter.GinToHTTPHandler(k8sMgr.HealthCheckHTTP, "name"))
-	api.GET("/api/k8s/clusters/:name/nodes", ginfadapter.GinToHTTPHandler(k8sMgr.GetNodesHTTP, "name"))
-	api.GET("/api/k8s/clusters/:name/namespaces", ginfadapter.GinToHTTPHandler(k8sMgr.GetNamespacesHTTP, "name"))
-	api.GET("/api/k8s/clusters/:name/pods", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodsHTTP, "name"))
-	api.GET("/api/k8s/clusters/:name/pods/:pod/logs", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodLogsHTTP, "name", "pod"))
-	api.GET("/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/logs", ginfadapter.GinToHTTPHandler(k8sMgr.GetPodLogsWithNamespaceHTTP, "name", "ns", "pod"))
-	api.GET("/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/logs/historical", ginfadapter.GinToHTTPHandler(k8sMgr.GetHistoricalLogsHTTP, "name", "ns", "pod"))
-	api.POST("/api/k8s/clusters/:name/namespaces/:ns/pods/:pod/exec", ginfadapter.GinToHTTPHandler(k8sMgr.PodExecHTTP, "name", "ns", "pod"))
-	api.GET("/api/k8s/clusters/:name/metrics", ginfadapter.GinToHTTPHandler(k8sMgr.GetClusterMetricsHTTP, "name"))
-	api.POST("/api/k8s/maintenance", ginfadapter.GinToHTTPHandler(k8sMgr.MaintenanceOpHTTP))
-
-	// Physical host routes
-	api.GET("/api/physical-hosts", ginfadapter.GinToHTTPHandler(physicalhostMgr.ListHostsHTTP))
-	api.POST("/api/physical-hosts", ginfadapter.GinToHTTPHandler(physicalhostMgr.CreateHostHTTP))
-	api.GET("/api/physical-hosts/:id", ginfadapter.GinToHTTPHandler(physicalhostMgr.GetHostHTTP, "id"))
-	api.DELETE("/api/physical-hosts/:id", ginfadapter.GinToHTTPHandler(physicalhostMgr.DeleteHostHTTP, "id"))
-	api.GET("/api/physical-hosts/:id/services", ginfadapter.GinToHTTPHandler(physicalhostMgr.ListServicesHTTP, "id"))
-	api.POST("/api/physical-hosts/:id/config", ginfadapter.GinToHTTPHandler(physicalhostMgr.PushConfigHTTP, "id"))
-
-	// Physical host linked projects (via project manager)
-	if projectMgr != nil {
-		api.GET("/api/physical-hosts/:id/projects", ginfadapter.GinToHTTPHandler(projectMgr.GetProjectsForPhysicalHostHTTP, "id"))
-	}
-
-	// Discovery routes
-	api.GET("/api/discovery/status", ginfadapter.GinToHTTPHandler(discoveryMgr.GetStatusHTTP))
-	api.POST("/api/discovery/scan", ginfadapter.GinToHTTPHandler(discoveryMgr.ScanHTTP))
-
-	// WebSocket (always at root for proxy compatibility)
-	r.GET("/ws", func(c *gin.Context) {
-		wsHub.HandleWebSocket(c.Writer, c.Request)
-	})
-
-	// Project management routes (if available)
-	if projectMgr != nil {
-		// Project Types
-		api.GET("/api/org/project-types", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectTypesHTTP))
-		api.POST("/api/org/project-types", ginfadapter.GinToHTTPHandler(projectMgr.CreateProjectTypeHTTP))
-		api.PUT("/api/org/project-types/:id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateProjectTypeHTTP, "id"))
-		api.DELETE("/api/org/project-types/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteProjectTypeHTTP, "id"))
-
-		// Business Lines
-		api.GET("/api/org/business-lines", ginfadapter.GinToHTTPHandler(projectMgr.ListBusinessLinesHTTP))
-		api.POST("/api/org/business-lines", ginfadapter.GinToHTTPHandler(projectMgr.CreateBusinessLineHTTP))
-		api.GET("/api/org/business-lines/:id", ginfadapter.GinToHTTPHandler(projectMgr.GetBusinessLineHTTP, "id"))
-		api.PUT("/api/org/business-lines/:id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateBusinessLineHTTP, "id"))
-		api.DELETE("/api/org/business-lines/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteBusinessLineHTTP, "id"))
-
-		// Systems
-		api.GET("/api/org/business-lines/:id/systems", ginfadapter.GinToHTTPHandler(projectMgr.ListSystemsHTTP, "id"))
-		api.POST("/api/org/business-lines/:id/systems", ginfadapter.GinToHTTPHandler(projectMgr.CreateSystemHTTP, "id"))
-		api.GET("/api/org/systems/:id", ginfadapter.GinToHTTPHandler(projectMgr.GetSystemHTTP, "id"))
-		api.PUT("/api/org/systems/:id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateSystemHTTP, "id"))
-		api.DELETE("/api/org/systems/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteSystemHTTP, "id"))
-
-		// Projects
-		api.GET("/api/org/systems/:id/projects", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectsHTTP, "id"))
-		api.POST("/api/org/systems/:id/projects", ginfadapter.GinToHTTPHandler(projectMgr.CreateProjectHTTP, "id"))
-		api.GET("/api/org/projects/:id", ginfadapter.GinToHTTPHandler(projectMgr.GetProjectHTTP, "id"))
-		api.PUT("/api/org/projects/:id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateProjectHTTP, "id"))
-		api.DELETE("/api/org/projects/:id", ginfadapter.GinToHTTPHandler(projectMgr.DeleteProjectHTTP, "id"))
-
-		// Resource linking
-		api.GET("/api/org/projects/:id/resources", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectResourcesHTTP, "id"))
-		api.POST("/api/org/projects/:id/resources", ginfadapter.GinToHTTPHandler(projectMgr.LinkResourceHTTP, "id"))
-		api.DELETE("/api/org/projects/:id/resources/:resource_id", ginfadapter.GinToHTTPHandler(projectMgr.UnlinkResourceHTTP, "id", "resource_id"))
-		api.PATCH("/api/org/projects/:id/resources/:type/:resource_id", ginfadapter.GinToHTTPHandler(projectMgr.UpdateResourceWeightHTTP, "id", "type", "resource_id"))
-
-		// Permissions
-		api.GET("/api/org/projects/:id/permissions", ginfadapter.GinToHTTPHandler(projectMgr.ListProjectPermissionsHTTP, "id"))
-		api.POST("/api/org/projects/:id/permissions", ginfadapter.GinToHTTPHandler(projectMgr.GrantPermissionHTTP, "id"))
-		api.DELETE("/api/org/permissions/:perm_id", ginfadapter.GinToHTTPHandler(projectMgr.RevokePermissionHTTP, "perm_id"))
-
-		// FinOps export
-		api.GET("/api/org/reports/finops", ginfadapter.GinToHTTPHandler(projectMgr.ExportFinOpsHTTP))
-
-		// Audit logs
-		api.GET("/api/org/audit-logs", ginfadapter.GinToHTTPHandler(projectMgr.ListAuditLogsHTTP))
-	}
-
-	// Static files (frontend) - always served at root (proxy strips base path before forwarding)
-	if basePath != "" && basePath != "/" {
-		exePath, _ := os.Executable()
-		exeDir := filepath.Dir(exePath)
-		frontendDir := filepath.Join(exeDir, "frontend", "dist")
-		if _, err := os.Stat(frontendDir); err == nil {
-			r.Static("/assets", filepath.Join(frontendDir, "assets"))
-			r.GET("/favicon.svg", func(c *gin.Context) {
-				c.File(filepath.Join(frontendDir, "favicon.svg"))
-			})
-			r.NoRoute(func(c *gin.Context) {
-				c.File(filepath.Join(frontendDir, "index.html"))
-			})
-			log.Printf("Serving static files from %s", frontendDir)
-		}
-	} else {
-		exePath, _ := os.Executable()
-		exeDir := filepath.Dir(exePath)
-		frontendDir := filepath.Join(exeDir, "frontend", "dist")
-		if _, err := os.Stat(frontendDir); err == nil {
-			r.Static("/assets", filepath.Join(frontendDir, "assets"))
-			r.GET("/favicon.svg", func(c *gin.Context) {
-				c.File(filepath.Join(frontendDir, "favicon.svg"))
-			})
-			r.NoRoute(func(c *gin.Context) {
-				c.File(filepath.Join(frontendDir, "index.html"))
-			})
-			log.Printf("Serving static files from %s", frontendDir)
-		} else {
-			// Fallback: try relative path from current working directory
-			if _, err := os.Stat("./devops-toolkit/frontend/dist"); err == nil {
-				r.Static("/assets", "./devops-toolkit/frontend/dist/assets")
-				r.GET("/favicon.svg", func(c *gin.Context) {
-					c.File("./devops-toolkit/frontend/dist/favicon.svg")
-				})
-				r.NoRoute(func(c *gin.Context) {
-					c.File("./devops-toolkit/frontend/dist/index.html")
-				})
-				log.Printf("Serving static files from ./devops-toolkit/frontend/dist")
-			} else if _, err := os.Stat("./devops-toolkit/frontend"); err == nil {
-				r.NoRoute(func(c *gin.Context) {
-					c.File("./devops-toolkit/frontend/index.html")
-				})
-				log.Printf("Serving static files from ./devops-toolkit/frontend")
-			}
-		}
-	}
-
-	// Add JWT auth middleware for API routes (if LDAP is available or dev bypass enabled)
-	if ldapClient != nil || cfg.Auth.DevBypass {
-		api.Use(auth.MiddlewareGin(&cfg.Auth))
-	}
-
-	// Start server
-	addr := cfg.Server.Addr()
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: r,
-	}
-
-	go func() {
-		log.Printf("Starting server on %s", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
-		}
-	}()
-
-	// Graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	srv.Shutdown(ctx)
 }
 
-// authUserProvider implements project.UserProvider by extracting user from request context
-type authUserProvider struct{}
-
-func (a *authUserProvider) GetUserFromRequest(r *http.Request) *project.User {
-	if user := auth.GetUserFromContext(r.Context()); user != nil {
-		return &project.User{Username: user.Username}
+func run() error {
+	cfgPath := os.Getenv("CONFIG_PATH")
+	if cfgPath == "" {
+		cfgPath = "configs/templates/config-dev.yaml"
 	}
-	return nil
+	cfg, err := config.Load(config.WithConfigPath(cfgPath))
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	log := logger.New(
+		logger.WithLevel(cfg.App.LogLevel),
+		logger.WithFormat(envOr("LOG_FORMAT", "json")),
+	)
+	log.Info("starting devops-toolkit", "env", cfg.App.Env, "config", renderConfig(cfg))
+
+	db, err := dbpkg.Open(toDBConfig(cfg.Database))
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	_ = db // Phase 1 only verifies the connection; AutoMigrate runs once modules register.
+	log.Info("database connected", "driver", cfg.Database.Driver)
+
+	router := buildRouter(log)
+	srv := &http.Server{
+		Addr:              fmt.Sprintf("%s:%d", cfg.App.Host, cfg.App.Port),
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	// Graceful shutdown on SIGINT/SIGTERM.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	errCh := make(chan error, 1)
+	go func() {
+		log.Info("http server listening", "addr", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case sig := <-stop:
+		log.Info("shutdown signal received", "signal", sig.String())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return srv.Shutdown(ctx)
+	}
+}
+
+// buildRouter returns the HTTP handler tree. Kept as a separate
+// function so tests can call it without booting a listener.
+func buildRouter(log *logger.Logger) http.Handler {
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
+
+	r.GET("/health", func(c *gin.Context) {
+		handler.WriteJSON(c.Writer, http.StatusOK, gin.H{"status": "ok", "time": time.Now().UTC()})
+	})
+
+	// Standard 404 fallback renders the api-contract error envelope.
+	r.NoRoute(func(c *gin.Context) {
+		handler.WriteError(c.Writer, &contracts.APIError{
+			Code:    contracts.CodeNotFound,
+			Message: fmt.Sprintf("route %s %s not found", c.Request.Method, c.Request.URL.Path),
+		})
+	})
+
+	v1 := r.Group("/api/v1")
+	{
+		v1.GET("/capabilities", func(c *gin.Context) {
+			// Phase-1 placeholder; later phases add module-specific capability probes.
+			sections := []string{"app", "database", "logs", "ldap", "alerts", "k8s", "physicalhost", "websocket"}
+			handler.WriteJSON(c.Writer, http.StatusOK, gin.H{
+				"sections":  sections,
+				"phase":     1,
+				"build_tag": "foundation",
+			})
+		})
+	}
+	return r
+}
+
+// toDBConfig maps the config-tree DatabaseConfig to the database
+// package's ConnectionConfig. Kept here so config stays free of any
+// GORM dependency.
+func toDBConfig(c config.DatabaseConfig) dbpkg.ConnectionConfig {
+	return dbpkg.ConnectionConfig{
+		Driver:          c.Driver,
+		DSN:             c.DSN,
+		Host:            c.Host,
+		Port:            c.Port,
+		User:            c.User,
+		Password:        c.Password,
+		DBName:          c.DBName,
+		SSLMode:         c.SSLMode,
+		MaxOpenConns:    c.MaxOpenConns,
+		MaxIdleConns:    c.MaxIdleConns,
+		ConnMaxLifetime: c.ConnMaxLifetime,
+	}
+}
+
+// renderConfig is exposed for the test in this package. The masking
+// itself lives on (*config.Config).String.
+func renderConfig(c *config.Config) string {
+	return c.String()
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
