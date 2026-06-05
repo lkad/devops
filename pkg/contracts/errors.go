@@ -8,14 +8,19 @@ import "fmt"
 type ErrorCode string
 
 const (
-	CodeValidation   ErrorCode = "VALIDATION_ERROR"
-	CodeUnauthorized ErrorCode = "UNAUTHORIZED"
-	CodeForbidden    ErrorCode = "FORBIDDEN"
-	CodeNotFound     ErrorCode = "NOT_FOUND"
-	CodeConflict     ErrorCode = "CONFLICT"
-	CodeInvalidState ErrorCode = "INVALID_STATE"
-	CodeRateLimited  ErrorCode = "RATE_LIMITED"
-	CodeInternal     ErrorCode = "INTERNAL_ERROR"
+	CodeValidation        ErrorCode = "VALIDATION_ERROR"
+	CodeUnauthorized      ErrorCode = "UNAUTHORIZED"
+	CodeForbidden         ErrorCode = "FORBIDDEN"
+	CodeNotFound          ErrorCode = "NOT_FOUND"
+	CodeConflict          ErrorCode = "CONFLICT"
+	CodeInvalidState      ErrorCode = "INVALID_STATE"
+	CodeRateLimited       ErrorCode = "RATE_LIMITED"
+	CodeInternal          ErrorCode = "INTERNAL_ERROR"
+	// Log-aggregation codes (per docs/LOG-QUERY-API.md §7.2).
+	CodeBackendUnavailable ErrorCode = "BACKEND_UNAVAILABLE" // 503
+	CodeQueryTimeout       ErrorCode = "QUERY_TIMEOUT"       // 504
+	CodeQueryTooLong       ErrorCode = "QUERY_TOO_LONG"      // 400
+	CodeTimeRangeExceeded  ErrorCode = "TIME_RANGE_EXCEEDED" // 422
 )
 
 // HTTPStatus maps an ErrorCode to its HTTP status code per the
@@ -25,6 +30,8 @@ func (c ErrorCode) HTTPStatus() int {
 	switch c {
 	case CodeValidation:
 		return 400
+	case CodeQueryTooLong:
+		return 400
 	case CodeUnauthorized:
 		return 401
 	case CodeForbidden:
@@ -33,12 +40,16 @@ func (c ErrorCode) HTTPStatus() int {
 		return 404
 	case CodeConflict:
 		return 409
-	case CodeInvalidState:
+	case CodeInvalidState, CodeTimeRangeExceeded:
 		return 422
 	case CodeRateLimited:
 		return 429
 	case CodeInternal:
 		return 500
+	case CodeQueryTimeout:
+		return 504
+	case CodeBackendUnavailable:
+		return 503
 	default:
 		return 500
 	}

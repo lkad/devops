@@ -39,7 +39,7 @@ Thumbs.db
 
 # Logs
 *.log
-logs/
+/logs/
 
 # Env
 .env

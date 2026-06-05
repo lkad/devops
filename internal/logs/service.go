@@ -1,0 +1,171 @@
+package logs
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"github.com/devops-toolkit/backend/pkg/contracts"
+)
+
+// ServiceConfig tunes the orchestration layer. MaxPageSize caps
+// the limit a client may request; the actual backend's limit is
+// also applied. RejectStructuredQueryOnLocal enables the strict
+// spec scenario "Lucene query on Local backend".
+type ServiceConfig struct {
+	MaxPageSize                 int
+	RejectStructuredQueryOnLocal bool
+}
+
+// Service is the orchestration layer between handlers and a
+// LogBackend. It owns defaults, time-range validation, query
+// length checks, and the Meta envelope that signals graceful
+// degradation. The service never reaches into the network — it
+// just composes a LogBackend.
+type Service struct {
+	backend LogBackend
+	cfg     ServiceConfig
+}
+
+// NewService constructs a Service. The backend is required; cfg
+// fields are optional (sane defaults applied).
+func NewService(b LogBackend, cfg ServiceConfig) *Service {
+	if cfg.MaxPageSize == 0 {
+		cfg.MaxPageSize = 1000
+	}
+	return &Service{backend: b, cfg: cfg}
+}
+
+// Capabilities returns the backend's feature surface unchanged.
+func (s *Service) Capabilities() Capabilities {
+	return s.backend.Capabilities()
+}
+
+// Streams is a thin pass-through.
+func (s *Service) Streams(ctx context.Context) ([]Stream, error) {
+	return s.backend.Streams(ctx)
+}
+
+// Query fills defaults, validates, and dispatches to the backend.
+// Returns a *contracts.APIError when validation fails so the
+// handler layer can render the standard envelope without unwrapping.
+func (s *Service) Query(ctx context.Context, q Query) (Result, error) {
+	caps := s.backend.Capabilities()
+
+	// Default time range: last 24h. Per the spec scenario
+	// "Default time range" — no client time → default to 24h.
+	now := time.Now().UTC()
+	if q.From.IsZero() && q.To.IsZero() {
+		q.From = now.Add(-24 * time.Hour)
+		q.To = now
+	} else if q.From.IsZero() {
+		q.To = now
+	} else if q.To.IsZero() {
+		q.To = now
+	}
+
+	// Time range cap: per the task brief, hard-reject when the
+	// range exceeds the backend's MaxTimeRange. This is the K8s
+	// "30 days max" rule.
+	if caps.MaxTimeRange > 0 {
+		if d := q.To.Sub(q.From); d > caps.MaxTimeRange {
+			return Result{}, ErrTimeRangeExceeded(int(d.Hours()), int(caps.MaxTimeRange.Hours()))
+		}
+	}
+
+	// Query length: per MaxQueryLength.
+	if caps.MaxQueryLength > 0 && len(q.Text) > caps.MaxQueryLength {
+		return Result{}, ErrQueryTooLong(len(q.Text), caps.MaxQueryLength)
+	}
+
+	// Structured query on Local backend — strict spec scenario.
+	if s.cfg.RejectStructuredQueryOnLocal && caps.BackendName == "local" {
+		if looksStructured(q.Text) {
+			return Result{}, &contracts.APIError{
+				Code:    contracts.CodeValidation,
+				Message: "Local backend only supports search (substring). Use search field or switch to elasticsearch backend",
+			}
+		}
+	}
+
+	// Limit cap. Mark Degraded when we have to clamp.
+	max := s.cfg.MaxPageSize
+	if caps.MaxQueryLength > 0 && max > caps.MaxQueryLength {
+		// Local is 1024 by default; we don't surface that as
+		// degradation for the cap path.
+	}
+	if q.Limit > max {
+		q.Limit = max
+	}
+
+	res, err := s.backend.Query(ctx, q)
+	if err != nil {
+		return Result{}, err
+	}
+
+	// Ensure Meta is populated even if the backend left it
+	// sparse (some backends skip filling it on the hot path).
+	if res.Meta.Backend == "" {
+		res.Meta.Backend = caps.BackendName
+	}
+
+	// If the result was truncated to fit the limit, mark
+	// Degraded so the UI can show a warning.
+	if q.Limit > 0 && res.Total > int64(q.Limit) {
+		res.Meta.Degraded = true
+		if res.Meta.Reason == "" {
+			res.Meta.Reason = "limit: capped to " + itoa(q.Limit)
+		}
+	}
+
+	// Populate limits map if the backend left it empty.
+	if res.Meta.Limits == nil {
+		res.Meta.Limits = map[string]any{
+			"max_page_size": s.cfg.MaxPageSize,
+		}
+		if caps.MaxTimeRange > 0 {
+			res.Meta.Limits["max_time_range"] = caps.MaxTimeRange.String()
+		}
+	}
+	return res, nil
+}
+
+// looksStructured detects a Lucene/LogQL-shaped substring. The
+// heuristic is conservative: a colon followed by a wildcard or
+// uppercase AND/OR is structured.
+func looksStructured(s string) bool {
+	if s == "" {
+		return false
+	}
+	upper := strings.ToUpper(s)
+	if strings.Contains(upper, " AND ") || strings.Contains(upper, " OR ") {
+		return true
+	}
+	if strings.Contains(s, ":*") {
+		return true
+	}
+	return false
+}
+
+// itoa avoids an extra import for one call.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
