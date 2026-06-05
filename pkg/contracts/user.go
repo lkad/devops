@@ -75,6 +75,11 @@ type User struct {
 	Username string `json:"username"`
 	Email    string `json:"email,omitempty"`
 	Role     Role   `json:"role"`
+	// ProjectRole is the user's per-project role inside the project
+	// they are currently acting in. Empty means "no project role";
+	// the rbac service treats the empty string as a non-privileged
+	// placeholder for permission evaluation.
+	ProjectRole ProjectRole `json:"project_role,omitempty"`
 }
 
 // JWTClaims is the decoded payload of a session JWT. Kept in contracts
