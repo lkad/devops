@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,7 +23,12 @@ import (
 	"github.com/devops-toolkit/backend/internal/config"
 	dbpkg "github.com/devops-toolkit/backend/internal/database"
 	devicepkg "github.com/devops-toolkit/backend/internal/device"
+	"github.com/devops-toolkit/backend/internal/discovery"
 	"github.com/devops-toolkit/backend/internal/handler"
+	"github.com/devops-toolkit/backend/internal/hostproject"
+	"github.com/devops-toolkit/backend/internal/k8s"
+	"github.com/devops-toolkit/backend/internal/physicalhost"
+	"github.com/devops-toolkit/backend/internal/pipeline"
 	projectpkg "github.com/devops-toolkit/backend/internal/project"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 	"github.com/devops-toolkit/backend/pkg/logger"
@@ -62,6 +68,11 @@ func run() error {
 		registerAuthRoutes(eng, cfg, log)
 		registerProjectRoutes(eng, db, log)
 		registerDeviceRoutes(eng, db, log)
+		registerPhysicalHostRoutes(eng, db, log)
+		registerDiscoveryRoutes(eng, db, log)
+		registerK8sClusterRoutes(eng, db, log)
+		registerHostProjectLinkRoutes(eng, db, log)
+		registerPipelineRoutes(eng, db, log)
 	} else {
 		log.Warn("router is not a *gin.Engine; auth routes not registered")
 	}
@@ -299,4 +310,123 @@ func registerDeviceRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	devicepkg.NewTemplateHandler(tmplSvc).Register(v1)
 
 	log.Info("device routes registered")
+}
+
+// registerPhysicalHostRoutes wires the physical-host monitoring module.
+// The 4-state machine (online/monitoring_issue/offline/maintenance) and
+// the maintenance mode with audit emission live here. Audit events are
+// logged via a no-op emitter (Phase 7 will replace it with the
+// audit-logging service).
+func registerPhysicalHostRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db, physicalhost.AllModels()...); err != nil {
+		log.Error("physicalhost AutoMigrate failed", "err", err)
+		return
+	}
+	repo := physicalhost.NewRepository(db)
+	monitor := physicalhost.NewMonitorService(physicalhost.MonitorConfig{
+		Repo:                repo,
+		Prober:              physicalhost.NewFake(),
+		ConsecutiveFailures: 3,
+		CheckInterval:       time.Minute,
+	})
+	maint := physicalhost.NewMaintenanceService(physicalhost.MaintenanceConfig{
+		Repo:    repo,
+		Auditor: logAuditEmitter{log: log},
+	})
+	physicalhost.NewHandler(physicalhost.HandlerConfig{
+		Repo:        repo,
+		Monitor:     monitor,
+		Maintenance: maint,
+	}).Register(&r.RouterGroup)
+	log.Info("physicalhost routes registered")
+}
+
+// logAuditEmitter is a no-op AuditEmitter that just logs the event.
+// Phase 7 (audit-logging) will replace this with a real emitter.
+type logAuditEmitter struct{ log *logger.Logger }
+
+func (a logAuditEmitter) EmitMaintenanceEnter(_ context.Context, ev physicalhost.AuditEvent) {
+	a.log.Info("physicalhost audit",
+		"action", "enter_maintenance",
+		"host_id", ev.HostID,
+		"user_id", ev.UserID,
+		"reason", ev.Reason,
+		"at", ev.At,
+	)
+}
+
+func (a logAuditEmitter) EmitMaintenanceExit(_ context.Context, ev physicalhost.AuditEvent) {
+	a.log.Info("physicalhost audit",
+		"action", "exit_maintenance",
+		"host_id", ev.HostID,
+		"user_id", ev.UserID,
+		"at", ev.At,
+	)
+}
+
+// registerDiscoveryRoutes wires the network-discovery module. Scanner
+// and Prober are fakes in dev mode; production deployments swap them
+// for real nmap/ICMP and SNMP impls.
+func registerDiscoveryRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db, discovery.AllModels()...); err != nil {
+		log.Error("discovery AutoMigrate failed", "err", err)
+		return
+	}
+	repo := discovery.NewRepository(db)
+	devs := devicepkg.NewRepository(db)
+	svc := discovery.NewService(repo, devs, discovery.NewFakeScanner(nil, nil), discovery.NewFakeProber(nil, nil))
+	discovery.NewHandler(svc).Register(&r.RouterGroup)
+	log.Info("discovery routes registered")
+}
+
+// registerK8sClusterRoutes wires the k8s-cluster-management module.
+// The AES-256 key is loaded from K8S_CRYPTO_KEY env var; in dev a
+// deterministic 32-byte key is used with a warning, mirroring the
+// JWT-secret pattern.
+func registerK8sClusterRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db, k8s.AllModels()...); err != nil {
+		log.Error("k8s AutoMigrate failed", "err", err)
+		return
+	}
+	key := []byte(envOr("K8S_CRYPTO_KEY", "dev-k8s-crypto-key-32-bytes-long-xx"))
+	if len(key) != 32 {
+		log.Warn("K8S_CRYPTO_KEY is not 32 bytes; deriving via SHA-256 (dev only)", "len", len(key))
+		h := sha256.Sum256(key)
+		key = h[:]
+	}
+	repo := k8s.NewRepository(db)
+	svc := k8s.NewService(repo, &k8s.FakeClient{}, key)
+	k8s.NewHandler(svc).Register(&r.RouterGroup)
+	log.Info("k8s cluster routes registered")
+}
+
+// registerHostProjectLinkRoutes wires the physical-host-project-linking
+// module. The service walks the project hierarchy when listing devices
+// for a project.
+func registerHostProjectLinkRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db, hostproject.AllModels()...); err != nil {
+		log.Error("hostproject AutoMigrate failed", "err", err)
+		return
+	}
+	repo := hostproject.NewRepository(db)
+	projectRepo := projectpkg.NewRepository(db)
+	projectSvc := projectpkg.NewService(projectRepo)
+	svc := hostproject.NewService(repo, projectSvc)
+	hostproject.NewHandler(svc).Register(&r.RouterGroup)
+	log.Info("hostproject routes registered")
+}
+
+// registerPipelineRoutes wires the cicd-pipeline module. The Executor
+// is the Local implementation (runs shell via os/exec); tests use
+// Fake via direct construction in service_test.go.
+func registerPipelineRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db, pipeline.AllModels()...); err != nil {
+		log.Error("pipeline AutoMigrate failed", "err", err)
+		return
+	}
+	repo := pipeline.NewRepository(db)
+	exec := pipeline.NewLocal(pipeline.WithMaxOutputBytes(1 << 20))
+	svc := pipeline.NewService(repo, exec)
+	pipeline.NewHandler(svc).Register(&r.RouterGroup)
+	log.Info("pipeline routes registered")
 }
