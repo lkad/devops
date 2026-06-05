@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/ldap"
 	"github.com/devops-toolkit/backend/internal/config"
 	dbpkg "github.com/devops-toolkit/backend/internal/database"
 	"github.com/devops-toolkit/backend/internal/handler"
@@ -54,6 +56,11 @@ func run() error {
 	log.Info("database connected", "driver", cfg.Database.Driver)
 
 	router := buildRouter(log)
+	if eng, ok := router.(*gin.Engine); ok {
+		registerAuthRoutes(eng, cfg, log)
+	} else {
+		log.Warn("router is not a *gin.Engine; auth routes not registered")
+	}
 	srv := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", cfg.App.Host, cfg.App.Port),
 		Handler:           router,
@@ -145,4 +152,98 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// registerAuthRoutes wires the LDAP login + health endpoints onto the
+// supplied Gin engine. It is a separate function (rather than being
+// inlined into buildRouter) so the middleware agent can call it from
+// the same router without colliding with route registrations.
+//
+// In dev_bypass mode the LDAP client is the in-memory Fake loaded
+// from config.LDAP.DevUsers; otherwise the Real client is used. The
+// JWT secret is read from LDAP.JWTSecret or, if empty, falls back to
+// a deployment-injected APP_JWT_SECRET env var, with a deterministic
+// dev-only default if neither is set (we log a warning so it never
+// silently ships to production).
+func registerAuthRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) {
+	client, err := buildLDAPClient(cfg)
+	if err != nil {
+		log.Error("ldap client init failed; auth routes will not be registered", "err", err)
+		return
+	}
+	svc := ldap.NewService(ldap.ServiceConfig{
+		Client:          client,
+		MaxFailedLogins: 5,
+		RateLimitWindow: time.Minute,
+	})
+
+	secret := os.Getenv("APP_JWT_SECRET")
+	if secret == "" {
+		secret = "dev-secret-do-not-use-in-prod"
+		log.Warn("no APP_JWT_SECRET configured; using dev-only fallback")
+	}
+
+	ttl := int64(3600)
+	if v := os.Getenv("APP_JWT_TTL_SECONDS"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			ttl = n
+		}
+	}
+	h := ldap.NewHandler(ldap.HandlerConfig{
+		Service:   svc,
+		JWTSecret: secret,
+		TokenTTL:  ttl,
+		Logger:    log.Logger,
+	})
+
+	auth := r.Group("/api/v1/auth")
+	auth.POST("/login", h.Login)
+	auth.GET("/ldap/health", h.Health)
+
+	log.Info("auth routes registered",
+		"dev_bypass", cfg.LDAP.DevBypass,
+		"dev_users", len(cfg.LDAP.DevUsers),
+		"token_ttl_seconds", ttl,
+	)
+}
+
+// buildLDAPClient selects the Fake or Real client based on the
+// configured DevBypass flag. The function lives here so the main
+// package is the only place that knows about the config flag.
+func buildLDAPClient(cfg *config.Config) (ldap.Client, error) {
+	if cfg.LDAP.DevBypass {
+		f := ldap.NewFake()
+		for _, u := range cfg.LDAP.DevUsers {
+			groups := devRoleToGroups(u.Role)
+			f.AddUser(u.Username, u.Password, "", groups)
+		}
+		return f, nil
+	}
+	return ldap.NewReal(ldap.RealConfig{
+		URL:          cfg.LDAP.URL,
+		BindDN:       cfg.LDAP.BindDN,
+		BindPassword: cfg.LDAP.BindPassword,
+		BaseDN:       cfg.LDAP.BaseDN,
+		UserFilter:   cfg.LDAP.UserFilter,
+		Timeout:      5 * time.Second,
+	}), nil
+}
+
+// devRoleToGroups synthesises a small LDAP group list for a dev
+// user so the role mapping in the service has something to match
+// against. Production deployments configure the real group DNs
+// in LDAPConfig.
+func devRoleToGroups(role string) []string {
+	switch role {
+	case "SuperAdmin":
+		return []string{"cn=SRE_Lead,ou=Groups,dc=example,dc=com"}
+	case "Operator":
+		return []string{"cn=IT_Ops,ou=Groups,dc=example,dc=com"}
+	case "Developer":
+		return []string{"cn=DevTeam_Payments,ou=Groups,dc=example,dc=com"}
+	case "Auditor":
+		return []string{"cn=Security_Auditors,ou=Groups,dc=example,dc=com"}
+	default:
+		return nil
+	}
 }
