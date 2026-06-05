@@ -1,0 +1,355 @@
+package project
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/devops-toolkit/backend/internal/handler"
+	"github.com/devops-toolkit/backend/pkg/contracts"
+)
+
+// Handler is the HTTP layer for the project-hierarchy module. It
+// is intentionally thin: it parses requests, calls the service,
+// and renders the response. Every business rule lives in
+// service.go; the handler never queries the repository directly.
+//
+// Routes are registered via Register on a parent *gin.RouterGroup
+// so the main entry point can mount them under /api/v1 alongside
+// other modules.
+type Handler struct {
+	svc  *Service
+	repo *Repository
+}
+
+// NewHandler returns a Handler bound to the supplied service and
+// repository. Both are required — the repository is consulted for
+// read-only paths (children, ancestors) where the service is a
+// pass-through.
+func NewHandler(svc *Service, repo *Repository) *Handler {
+	return &Handler{svc: svc, repo: repo}
+}
+
+// Register wires the project hierarchy routes onto the supplied
+// router group. The function is idempotent in the sense that
+// registering twice on the same group yields a Gin panic at
+// startup, which is the desired fail-fast behaviour.
+//
+//	group := r.Group("/api/v1")
+//	project.NewHandler(svc, repo).Register(group)
+func (h *Handler) Register(group *gin.RouterGroup) {
+	pt := group.Group("/project-types")
+	{
+		pt.GET("", h.listTypes)
+		pt.POST("", h.createType)
+	}
+	p := group.Group("/projects")
+	{
+		p.GET("", h.list)
+		p.POST("", h.create)
+		p.GET("/:id", h.get)
+		p.PUT("/:id", h.update)
+		p.DELETE("/:id", h.delete)
+		p.GET("/:id/children", h.children)
+		p.GET("/:id/ancestors", h.ancestors)
+		p.GET("/:id/members", h.listMembers)
+		p.POST("/:id/members", h.addMember)
+		p.DELETE("/:id/members/:user_id", h.removeMember)
+	}
+}
+
+// createTypeInput is the wire shape for POST /project-types. The
+// caller supplies a Name and an optional Description/Weight.
+type createTypeInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Weight      int    `json:"weight"`
+}
+
+// createType handles POST /project-types. Returns 201 with the
+// created type, or 4xx with a contracts.ErrorResponse envelope.
+func (h *Handler) createType(c *gin.Context) {
+	var in createTypeInput
+	if !h.bind(c, &in) {
+		return
+	}
+	pt, err := h.svc.CreateType(ProjectType{Name: in.Name, Description: in.Description, Weight: in.Weight})
+	if err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	handler.WriteCreated(c.Writer, pt)
+}
+
+// listTypes handles GET /project-types. Returns the full list —
+// the types are a small, slowly-changing vocabulary that the UI
+// caches.
+func (h *Handler) listTypes(c *gin.Context) {
+	pts, err := h.svc.ListTypes()
+	if err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	handler.WriteJSON(c.Writer, http.StatusOK, pts)
+}
+
+// createInput is the wire shape for POST /projects. Pointer
+// fields preserve "not set" semantics across the JSON boundary.
+type createInput struct {
+	Name        string  `json:"name"`
+	Code        string  `json:"code"`
+	Description string  `json:"description"`
+	ParentID    *string `json:"parent_id"`
+	TypeID      string  `json:"type_id"`
+	OwnerUserID *string `json:"owner_user_id"`
+	Weight      int     `json:"weight"`
+	Labels      JSONMap `json:"labels"`
+	Metadata    JSONMap `json:"metadata"`
+}
+
+// create handles POST /projects.
+func (h *Handler) create(c *gin.Context) {
+	var in createInput
+	if !h.bind(c, &in) {
+		return
+	}
+	p, err := h.svc.CreateProject(CreateProjectInput{
+		Name:        in.Name,
+		Code:        in.Code,
+		Description: in.Description,
+		ParentID:    in.ParentID,
+		TypeID:      in.TypeID,
+		OwnerUserID: in.OwnerUserID,
+		Weight:      in.Weight,
+		Labels:      in.Labels,
+		Metadata:    in.Metadata,
+	})
+	if err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	handler.WriteCreated(c.Writer, p)
+}
+
+// updateInput mirrors the service's UpdateProjectInput.
+type updateInput struct {
+	Name        *string `json:"name"`
+	ParentID    *string `json:"parent_id"`
+	Description *string `json:"description"`
+	OwnerUserID *string `json:"owner_user_id"`
+	Weight      *int    `json:"weight"`
+}
+
+// update handles PUT /projects/:id.
+func (h *Handler) update(c *gin.Context) {
+	var in updateInput
+	if !h.bind(c, &in) {
+		return
+	}
+	p, err := h.svc.UpdateProject(c.Param("id"), UpdateProjectInput{
+		Name:        in.Name,
+		ParentID:    in.ParentID,
+		Description: in.Description,
+		OwnerUserID: in.OwnerUserID,
+		Weight:      in.Weight,
+	})
+	if err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	handler.WriteJSON(c.Writer, http.StatusOK, p)
+}
+
+// delete handles DELETE /projects/:id. A non-leaf yields 422;
+// the rest are 204.
+func (h *Handler) delete(c *gin.Context) {
+	if err := h.svc.DeleteProject(c.Param("id")); err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	handler.WriteNoContent(c.Writer)
+}
+
+// get handles GET /projects/:id and returns the project plus its
+// direct children and members. The shape is { project, children,
+// members }; the spec's "Get Project with resource links" maps
+// to this payload.
+func (h *Handler) get(c *gin.Context) {
+	p, kids, members, err := h.svc.GetProjectWithRelations(c.Param("id"))
+	if err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	handler.WriteJSON(c.Writer, http.StatusOK, gin.H{
+		"project":  p,
+		"children": kids,
+		"members":  members,
+	})
+}
+
+// children handles GET /projects/:id/children. Returns a
+// paginated list per the api-contract spec.
+func (h *Handler) children(c *gin.Context) {
+	page, pageSize := readPagination(c)
+	kids, total, err := h.repo.List(Filter{ParentID: ptr(c.Param("id")), Limit: pageSize, Offset: (page - 1) * pageSize})
+	if err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	p := contracts.NewPagination(page, pageSize)
+	p.Total = total
+	p.HasMore = p.MoreAvailable()
+	handler.WriteList(c.Writer, kids, &p)
+}
+
+// ancestors handles GET /projects/:id/ancestors. The shape is a
+// plain array (no pagination) because the chain is bounded by
+// MaxDepth.
+func (h *Handler) ancestors(c *gin.Context) {
+	chain, err := h.svc.ListAncestors(c.Param("id"))
+	if err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	handler.WriteJSON(c.Writer, http.StatusOK, chain)
+}
+
+// listMembers handles GET /projects/:id/members. Returns the raw
+// array — projects typically have a small member set.
+func (h *Handler) listMembers(c *gin.Context) {
+	members, err := h.svc.ListMembers(c.Param("id"))
+	if err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	handler.WriteJSON(c.Writer, http.StatusOK, members)
+}
+
+// addMemberInput is the wire shape for POST /projects/:id/members.
+type addMemberInput struct {
+	UserID  string `json:"user_id"`
+	Role    string `json:"role"`
+	AddedBy string `json:"added_by"`
+}
+
+// addMember handles POST /projects/:id/members. The spec's
+// "Grant viewer/editor permission" maps here. A re-grant is an
+// upsert — the service promotes the role in place.
+func (h *Handler) addMember(c *gin.Context) {
+	var in addMemberInput
+	if !h.bind(c, &in) {
+		return
+	}
+	if err := h.svc.AssignMember(c.Param("id"), in.UserID, in.Role, in.AddedBy); err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	handler.WriteCreated(c.Writer, gin.H{
+		"project_id": c.Param("id"),
+		"user_id":    in.UserID,
+		"role":       in.Role,
+	})
+}
+
+// removeMember handles DELETE /projects/:id/members/:user_id.
+func (h *Handler) removeMember(c *gin.Context) {
+	if err := h.svc.RevokeMember(c.Param("id"), c.Param("user_id")); err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	handler.WriteNoContent(c.Writer)
+}
+
+// list handles GET /projects with the full filter set.
+func (h *Handler) list(c *gin.Context) {
+	page, pageSize := readPagination(c)
+	f := Filter{
+		TypeID:  c.Query("type_id"),
+		Search:  c.Query("search"),
+		Limit:   pageSize,
+		Offset:  (page - 1) * pageSize,
+	}
+	if v := c.Query("parent_id"); v != "" {
+		f.ParentID = &v
+	}
+	if v := c.Query("owner_id"); v != "" {
+		f.OwnerID = &v
+	}
+	if v := c.Query("depth"); v != "" {
+		if d, err := strconv.Atoi(v); err == nil {
+			f.Depth = d
+		}
+	}
+	items, total, err := h.svc.ListProjects(f)
+	if err != nil {
+		h.writeAPIError(c, err)
+		return
+	}
+	p := contracts.NewPagination(page, pageSize)
+	p.Total = total
+	p.HasMore = p.MoreAvailable()
+	handler.WriteList(c.Writer, items, &p)
+}
+
+// bind decodes the request body and renders a 400 envelope on
+// failure. We never let a malformed body reach the service layer.
+// On failure the method writes the error response itself so the
+// handler doesn't have to remember to render it.
+func (h *Handler) bind(c *gin.Context, dst any) bool {
+	if c.Request.Body == nil {
+		h.writeAPIError(c, &contracts.APIError{Code: contracts.CodeValidation, Message: "request body is required"})
+		return false
+	}
+	dec := json.NewDecoder(c.Request.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		if errors.Is(err, io.EOF) {
+			h.writeAPIError(c, &contracts.APIError{Code: contracts.CodeValidation, Message: "request body is empty"})
+			return false
+		}
+		h.writeAPIError(c, &contracts.APIError{Code: contracts.CodeValidation, Message: "invalid request body: " + err.Error()})
+		return false
+	}
+	return true
+}
+
+// writeAPIError centralises the error render. It also unwraps
+// generic errors to a 500 envelope so the handler never panics.
+func (h *Handler) writeAPIError(c *gin.Context, err error) {
+	if err == nil {
+		return
+	}
+	var ae *contracts.APIError
+	if !errors.As(err, &ae) {
+		ae = &contracts.APIError{Code: contracts.CodeInternal, Message: err.Error(), Cause: err}
+	}
+	handler.WriteError(c.Writer, ae)
+}
+
+// readPagination parses the standard page/page_size query params
+// with safe defaults. The page_size cap is enforced by
+// contracts.NewPagination.
+func readPagination(c *gin.Context) (int, int) {
+	page := 1
+	pageSize := 20
+	if v := c.Query("page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			page = n
+		}
+	}
+	if v := c.Query("page_size"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			pageSize = n
+		}
+	}
+	return page, pageSize
+}
+
+// ptr is a tiny helper that returns the address of a string. It
+// exists so the handler can build the Filter struct without
+// declaring a temporary variable on every call.
+func ptr(s string) *string { return &s }
