@@ -1,0 +1,15 @@
+# deploy/prometheus/prometheus.yml — minimal scrape config.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: devops-toolkit
+    static_configs:
+      - targets: ["devops-toolkit:3000"]
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -1,0 +1,33 @@
+# deploy/containerlab/topology.yml — minimal containerlab topology.
+#
+# The full spec calls for 8 nodes (4 per DC). This minimal file implements
+# the spec's Tier 3 contract — 2 simulated physical hosts using alpine + sshd
+# — for end-to-end probe testing. See docs/TEST-ENVIRONMENT.md §2.1 for the
+# full 8-node variant; expand by adding dc1-core-switch etc.
+name: devops-toolkit-clab
+prefix: clab
+mgmt:
+  network: devops-mgmt
+  ipv4-subnet: 172.30.30.0/24
+
+topology:
+  kinds:
+    linux:
+      cmd: /bin/bash
+  nodes:
+    dc1-physical-01:
+      kind: linux
+      image: linuxserver/openssh-server:latest
+      labels:
+        role: physical_host
+        dc: dc1
+        env: test
+    dc2-physical-01:
+      kind: linux
+      image: linuxserver/openssh-server:latest
+      labels:
+        role: physical_host
+        dc: dc2
+        env: test
+  links:
+    - endpoints: ["dc1-physical-01:eth1", "dc2-physical-01:eth1"]

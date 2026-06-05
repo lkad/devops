@@ -1,4 +1,4 @@
-.PHONY: build test test-race test-cover vet lint run clean deps help
+.PHONY: build test test-race test-cover vet lint run clean deps help ci-test ci-lint ci-build
 
 GO        ?= /usr/local/go/bin/go
 PKG       := ./...
@@ -44,3 +44,17 @@ run: build ## Build and run the server (default port 18080; override with APP__P
 
 clean: ## Remove build artifacts
 	rm -rf bin coverage.out coverage.html
+
+# ===== CI targets (consumed by .github/workflows/ci.yml) =====
+#
+# Each target delegates to the corresponding scripts/ci-*.sh entry so the
+# standard interface (deploy|status|logs|teardown|help) is exercised in CI
+# exactly as it is on a developer laptop.
+ci-test: ## Run go test -race + 75% coverage gate (scripts/ci-test.sh deploy)
+	bash scripts/ci-test.sh deploy
+
+ci-lint: ## Run go vet + gofmt -l (scripts/ci-lint.sh deploy)
+	bash scripts/ci-lint.sh deploy
+
+ci-build: ## Build binary and assert < 50MB (scripts/ci-build.sh deploy)
+	bash scripts/ci-build.sh deploy

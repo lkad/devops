@@ -1,0 +1,41 @@
+# tests/fixtures/projects/tree.yaml
+#
+# Sample project tree for export. Each business_line -> systems -> projects
+# chain is captured here so the export feature has a stable test fixture.
+# The shape mirrors what the API returns from /api/v1/projects/tree.
+business_lines:
+  - id: bl-ecommerce
+    name: E-Commerce
+    weight: 0.6
+    systems:
+      - id: sys-order
+        name: Order System
+        projects:
+          - id: proj-order-backend
+            name: order-backend
+            type_id: pt-platform
+          - id: proj-order-frontend
+            name: order-frontend
+            type_id: pt-product
+      - id: sys-payment
+        name: Payment System
+        projects:
+          - id: proj-payment-gateway
+            name: payment-gateway
+            type_id: pt-platform
+  - id: bl-platform
+    name: Platform
+    weight: 0.4
+    systems:
+      - id: sys-mq
+        name: Message Queue
+        projects:
+          - id: proj-mq-kafka
+            name: mq-kafka
+            type_id: pt-platform
+      - id: sys-k8s
+        name: K8s Platform
+        projects:
+          - id: proj-k8s-prod
+            name: k8s-prod
+            type_id: pt-platform

@@ -1,0 +1,49 @@
+# tests/fixtures/ldap/00-users.ldif
+#
+# Seed data for the test environment. Per spec Requirement: LDAP Seed Data,
+# this file is loaded by scripts/ldap-seed.sh via `ldapadd`. Four roles,
+# four users — keeps the minimum viable set for E2E auth checks.
+#
+# Passwords are simple plaintext on purpose: this fixture is for tests, not
+# production. The bitnami/openldap image accepts userPassword: <plain> in
+# the LDIF.
+
+dn: ou=users,dc=example,dc=com
+objectClass: organizationalUnit
+ou: users
+
+dn: ou=groups,dc=example,dc=com
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=superadmin,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+uid: superadmin
+cn: Super Admin
+sn: Admin
+mail: superadmin@example.com
+userPassword: superadmin123
+
+dn: uid=operator,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+uid: operator
+cn: Site Operator
+sn: Operator
+mail: operator@example.com
+userPassword: operator123
+
+dn: uid=developer,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+uid: developer
+cn: Dev User
+sn: Developer
+mail: developer@example.com
+userPassword: developer123
+
+dn: uid=auditor,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+uid: auditor
+cn: Read Only
+sn: Auditor
+mail: auditor@example.com
+userPassword: auditor123

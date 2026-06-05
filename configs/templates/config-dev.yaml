@@ -1,4 +1,17 @@
 # Dev environment config
+#
+# Environment variables (all optional in dev; defaults shown below):
+#   APP__PORT           listen port (default 8080)
+#   APP__HOST           listen address (default 0.0.0.0)
+#   APP__LOG_LEVEL      debug|info|warn|error (default debug)
+#   DATABASE__DSN       sqlite path (default tests/fixtures/db/dev.db)
+#   LOGS__BACKEND       local|elasticsearch|loki (default local)
+#   LOGS__LOCAL__PATH   log dir for the local backend (default tests/fixtures/logs)
+#   LDAP__DEV_BYPASS    true|false (default true; never set false in dev)
+#
+# Override any value with the env var of the dotted-path uppercased with
+# double underscores, e.g. APP__PORT=9090 ./bin/devops-toolkit.
+
 app:
   name: devops-toolkit
   env: dev

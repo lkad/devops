@@ -1,0 +1,16 @@
+{
+  "id": "dev-edge-router-01",
+  "name": "edge-router-01",
+  "type": "network_device",
+  "ip": "172.30.30.1",
+  "dc": "dc1",
+  "snmp_community": "devops-test",
+  "snmp_port": 161,
+  "vendor": "juniper",
+  "model": "mx204",
+  "interfaces": [
+    {"name": "ge-0/0/0", "type": "1g", "admin_up": true},
+    {"name": "ge-0/0/1", "type": "1g", "admin_up": true},
+    {"name": "xe-0/1/0", "type": "10g", "admin_up": true}
+  ]
+}
