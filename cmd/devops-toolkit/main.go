@@ -347,11 +347,12 @@ func registerPhysicalHostRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) 
 		Repo:    repo,
 		Auditor: logAuditEmitter{log: log},
 	})
+	v1 := r.Group("/api/v1")
 	physicalhost.NewHandler(physicalhost.HandlerConfig{
 		Repo:        repo,
 		Monitor:     monitor,
 		Maintenance: maint,
-	}).Register(&r.RouterGroup)
+	}).Register(v1)
 	log.Info("physicalhost routes registered")
 }
 
@@ -389,7 +390,8 @@ func registerDiscoveryRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	repo := discovery.NewRepository(db)
 	devs := devicepkg.NewRepository(db)
 	svc := discovery.NewService(repo, devs, discovery.NewFakeScanner(nil, nil), discovery.NewFakeProber(nil, nil))
-	discovery.NewHandler(svc).Register(&r.RouterGroup)
+	v1 := r.Group("/api/v1")
+	discovery.NewHandler(svc).Register(v1)
 	log.Info("discovery routes registered")
 }
 
@@ -410,7 +412,8 @@ func registerK8sClusterRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	}
 	repo := k8s.NewRepository(db)
 	svc := k8s.NewService(repo, &k8s.FakeClient{}, key)
-	k8s.NewHandler(svc).Register(&r.RouterGroup)
+	v1 := r.Group("/api/v1")
+	k8s.NewHandler(svc).Register(v1)
 	log.Info("k8s cluster routes registered")
 }
 
@@ -426,7 +429,8 @@ func registerHostProjectLinkRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logge
 	projectRepo := projectpkg.NewRepository(db)
 	projectSvc := projectpkg.NewService(projectRepo)
 	svc := hostproject.NewService(repo, projectSvc)
-	hostproject.NewHandler(svc).Register(&r.RouterGroup)
+	v1 := r.Group("/api/v1")
+	hostproject.NewHandler(svc).Register(v1)
 	log.Info("hostproject routes registered")
 }
 
@@ -441,7 +445,8 @@ func registerPipelineRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	repo := pipeline.NewRepository(db)
 	exec := pipeline.NewLocal(pipeline.WithMaxOutputBytes(1 << 20))
 	svc := pipeline.NewService(repo, exec)
-	pipeline.NewHandler(svc).Register(&r.RouterGroup)
+	v1 := r.Group("/api/v1")
+	pipeline.NewHandler(svc).Register(v1)
 	log.Info("pipeline routes registered")
 }
 
@@ -456,7 +461,8 @@ func registerLogsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 		Dir: envOr("LOG_STORAGE_DIR", "tests/fixtures/logs"),
 	})
 	svc := logs.NewService(backend, logs.ServiceConfig{})
-	logs.NewHandler(svc, backend).Register(&r.RouterGroup)
+	v1 := r.Group("/api/v1")
+	logs.NewHandler(svc, backend).Register(v1)
 	log.Info("logs routes registered", "backend", "local")
 }
 
@@ -472,7 +478,8 @@ func registerMetricsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	}
 	repo := metrics.NewRepository(db)
 	svc := metrics.NewService(repo, metrics.NewFakeScraper())
-	metrics.NewHandler(svc).Register(&r.RouterGroup)
+	v1 := r.Group("/api/v1")
+	metrics.NewHandler(svc).Register(v1)
 	log.Info("metrics routes registered")
 }
 
@@ -492,7 +499,8 @@ func registerAlertsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 		Suppression: alerts.NewFakeSuppressionChecker(),
 		Logger:      log.Logger,
 	})
-	alerts.NewHandler(svc).Register(&r.RouterGroup)
+	v1 := r.Group("/api/v1")
+	alerts.NewHandler(svc).Register(v1)
 	log.Info("alerts routes registered")
 }
 
@@ -532,7 +540,8 @@ func registerLogStreamRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	streamer := logstream.NewKubeStreamer(client)
 	pub := &logstreamRealtimeAdapter{} // bridges the local interface to the realtime package
 	svc := logstream.NewService(streamer, client, pub)
-	logstream.NewHandler(svc, logstream.HandlerConfig{}).Register(&r.RouterGroup)
+	v1 := r.Group("/api/v1")
+	logstream.NewHandler(svc, logstream.HandlerConfig{}).Register(v1)
 	log.Info("k8s pod log stream routes registered")
 }
 
@@ -568,6 +577,7 @@ func registerAuditRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 		Repo:    repo,
 		Emitter: emitter,
 	})
-	audit.NewHandler(svc).Register(&r.RouterGroup)
+	v1 := r.Group("/api/v1")
+	audit.NewHandler(svc).Register(v1)
 	log.Info("audit routes registered")
 }
