@@ -22,6 +22,10 @@ export interface User {
 
 interface AuthState {
   user: User | null;
+  /** hydrated flips true after restore() reads the JWT from
+   *  localStorage. Until then, callers must NOT redirect to /login
+   *  because the JWT may be about to populate. */
+  hydrated: boolean;
   loading: boolean;
   error: string | null;
   login: (username: string, password: string) => Promise<void>;
@@ -47,6 +51,7 @@ function decodeJwt(token: string): { exp: number; sub: string; usr: string; role
 
 export const useAuth = create<AuthState>((set) => ({
   user: null,
+  hydrated: false,
   loading: false,
   error: null,
 
@@ -70,10 +75,10 @@ export const useAuth = create<AuthState>((set) => ({
 
   restore: () => {
     const tok = getToken();
-    if (!tok) return;
+    if (!tok) { set({ hydrated: true }); return; }
     const claims = decodeJwt(tok);
-    if (!claims) { setToken(null); return; }
-    if (claims.exp * 1000 < Date.now()) { setToken(null); return; }
-    set({ user: { username: claims.usr, role: claims.role, expiresAt: claims.exp } });
+    if (!claims) { setToken(null); set({ hydrated: true }); return; }
+    if (claims.exp * 1000 < Date.now()) { setToken(null); set({ hydrated: true }); return; }
+    set({ user: { username: claims.usr, role: claims.role, expiresAt: claims.exp }, hydrated: true });
   },
 }));

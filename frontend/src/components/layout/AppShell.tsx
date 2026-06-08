@@ -7,14 +7,19 @@ import { useAuth } from '../../stores/auth';
 
 export function AppShell() {
   const user = useAuth((s) => s.user);
+  const hydrated = useAuth((s) => s.hydrated);
   const restore = useAuth((s) => s.restore);
   const nav = useNavigate();
 
   useEffect(() => { restore(); }, [restore]);
 
+  // Only redirect to /login AFTER restore has read the JWT. The
+  // restore is asynchronous (zustand setState is async), so without
+  // the hydrated gate a full page reload bounces to /login even when
+  // a valid JWT is in localStorage.
   useEffect(() => {
-    if (!user) nav('/login', { replace: true });
-  }, [user, nav]);
+    if (hydrated && !user) nav('/login', { replace: true });
+  }, [hydrated, user, nav]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
