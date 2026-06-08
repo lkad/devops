@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	devicepkg "github.com/devops-toolkit/backend/internal/device"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -41,7 +42,7 @@ func openDB(t *testing.T) *gorm.DB {
 		t.Fatalf("db.DB: %v", err)
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(AllModels()...); err != nil {
+	if err := db.AutoMigrate(append(AllModels(), devicepkg.AllModels()...)...); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
 	t.Cleanup(func() {

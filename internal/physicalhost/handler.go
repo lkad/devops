@@ -156,7 +156,7 @@ func (h *Handler) List(c *gin.Context) {
 		filter.Offset = n
 	}
 
-	rows, total, err := h.repo.List(filter)
+	rows, total, err := h.repo.ListWithDevice(filter)
 	if err != nil {
 		writeAPIError(c.Writer, err)
 		return

@@ -35,6 +35,16 @@ type ListFilter struct {
 	Offset int
 }
 
+// HostListItem augments a PhysicalHost with the joined device row.
+// The frontend renders the device_name as the "Device" column;
+// the underlying PhysicalHost already carries ip_address /
+// state / etc. The Joined DTO is the API boundary's denormalised
+// shape — the model itself stays normalised.
+type HostListItem struct {
+	PhysicalHost
+	DeviceName string `gorm:"column:device_name" json:"device_name"`
+}
+
 // Repository is the GORM-only data-access layer. Per the layering
 // rules it knows nothing about Gin, contracts, or business
 // validation — it just translates method calls into queries.
@@ -99,6 +109,41 @@ func (r *Repository) List(f ListFilter) ([]PhysicalHost, int64, error) {
 	}
 	if err := q.Order("created_at DESC, id ASC").Find(&rows).Error; err != nil {
 		return nil, 0, fmt.Errorf("physicalhost.List find: %w", err)
+	}
+	return rows, total, nil
+}
+
+// ListWithDevice returns a page of HostListItem (PhysicalHost +
+// the joined device name) plus the unfiltered total. The query
+// is a LEFT JOIN so soft-deleted devices (deleted_at IS NOT NULL)
+// or devices that have been reaped show up with device_name="".
+// This is the DTO the list endpoint returns; the plain List above
+// is kept for internal callers that only need the host row.
+func (r *Repository) ListWithDevice(f ListFilter) ([]HostListItem, int64, error) {
+	q := r.db.Table("physical_hosts ph").
+		Select("ph.*, COALESCE(d.name, '') AS device_name").
+		Joins("LEFT JOIN devices d ON d.id = ph.device_id AND d.deleted_at IS NULL")
+	if f.State != "" {
+		q = q.Where("ph.state = ?", f.State)
+	}
+	if f.DeviceID != "" {
+		q = q.Where("ph.device_id = ?", f.DeviceID)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("physicalhost.ListWithDevice count: %w", err)
+	}
+
+	rows := []HostListItem{}
+	if f.Limit > 0 {
+		q = q.Limit(f.Limit)
+	}
+	if f.Offset > 0 {
+		q = q.Offset(f.Offset)
+	}
+	if err := q.Order("ph.created_at DESC, ph.id ASC").Find(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("physicalhost.ListWithDevice find: %w", err)
 	}
 	return rows, total, nil
 }
