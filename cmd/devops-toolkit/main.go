@@ -124,6 +124,35 @@ func buildRouter(log *logger.Logger) http.Handler {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	// Root index lists the known route groups so a browser hitting
+	// / sees something useful instead of a 404 envelope.
+	r.GET("/", func(c *gin.Context) {
+		handler.WriteJSON(c.Writer, http.StatusOK, gin.H{
+			"name":     "devops-toolkit",
+			"phase":    1,
+			"build":    "foundation",
+			"endpoints": []string{
+				"GET  /health",
+				"GET  /api/v1/capabilities",
+				"POST /api/v1/auth/login",
+				"GET  /api/v1/auth/ldap/health",
+				"WS   /api/v1/ws",
+				"GET  /api/v1/projects",
+				"GET  /api/v1/devices",
+				"GET  /api/v1/physical-hosts",
+				"GET  /api/v1/k8s/clusters",
+				"GET  /api/v1/discovery/runs",
+				"GET  /api/v1/pipelines",
+				"GET  /api/v1/host-projects",
+				"GET  /api/v1/logs/capabilities",
+				"GET  /api/v1/logs/query",
+				"GET  /api/v1/metrics",
+				"GET  /api/v1/alerts",
+				"GET  /api/v1/audit",
+			},
+		})
+	})
+
 	r.GET("/health", func(c *gin.Context) {
 		handler.WriteJSON(c.Writer, http.StatusOK, gin.H{"status": "ok", "time": time.Now().UTC()})
 	})
@@ -132,7 +161,7 @@ func buildRouter(log *logger.Logger) http.Handler {
 	r.NoRoute(func(c *gin.Context) {
 		handler.WriteError(c.Writer, &contracts.APIError{
 			Code:    contracts.CodeNotFound,
-			Message: fmt.Sprintf("route %s %s not found", c.Request.Method, c.Request.URL.Path),
+			Message: fmt.Sprintf("route %s %s not found; see GET / for the route list", c.Request.Method, c.Request.URL.Path),
 		})
 	})
 
