@@ -4,18 +4,20 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './styles/global.css';
 import { AppShell } from './components/layout/AppShell';
 import { ToastProvider } from './components/common/Toast';
-import { Login } from './pages/Login';
-import { Dashboard } from './pages/Dashboard';
-import { Projects } from './pages/Projects';
-import { Devices } from './pages/Devices';
-import { PhysicalHosts } from './pages/PhysicalHosts';
-import { K8sClusters } from './pages/K8sClusters';
-import { Discovery } from './pages/Discovery';
-import { Pipelines } from './pages/Pipelines';
 import { Logs } from './pages/Logs';
 import { Metrics } from './pages/Metrics';
 import { Alerts } from './pages/Alerts';
 import { Audit } from './pages/Audit';
+
+// Stubs — owned by other agents. Will be replaced when those branches merge.
+const Login = () => <div>TODO: Login</div>;
+const Dashboard = () => <div>TODO: Dashboard</div>;
+const Projects = () => <div>TODO: Projects</div>;
+const Devices = () => <div>TODO: Devices</div>;
+const PhysicalHosts = () => <div>TODO: Physical Hosts</div>;
+const K8sClusters = () => <div>TODO: K8s Clusters</div>;
+const Discovery = () => <div>TODO: Discovery</div>;
+const Pipelines = () => <div>TODO: Pipelines</div>;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
