@@ -1,0 +1,72 @@
+/* DevOps Toolkit — design tokens (mirrors DESIGN.md).
+   All colors / spacing / typography values are CSS variables
+   so modules and themes can override them in one place. */
+
+:root {
+  /* Brand */
+  --color-primary: #22d3ee;
+  --color-primary-hover: #06b6d4;
+  --color-primary-muted: rgba(34, 211, 238, 0.15);
+
+  /* Surfaces */
+  --color-bg: #0c1220;
+  --color-surface: #151d2e;
+  --color-surface-elevated: #1c2940;
+  --color-border: #2a3a54;
+  --color-border-subtle: #1e2d42;
+
+  /* Text */
+  --color-text: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
+
+  /* Semantic */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-info: #3b82f6;
+  --color-muted: #a855f7; /* also "maintenance" */
+
+  /* Environment tags (K8s) */
+  --color-env-dev: rgba(59, 130, 246, 0.15);
+  --color-env-dev-border: #3b82f6;
+  --color-env-test: rgba(245, 158, 11, 0.15);
+  --color-env-test-border: #f59e0b;
+  --color-env-uat: rgba(168, 85, 247, 0.15);
+  --color-env-uat-border: #a855f7;
+  --color-env-prod: rgba(239, 68, 68, 0.15);
+  --color-env-prod-border: #ef4444;
+
+  /* Spacing — 8px base */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 48px;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Type */
+  --font-ui: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+
+  --fs-h1: 2rem;
+  --fs-h2: 1.5rem;
+  --fs-h3: 1.1rem;
+  --fs-body: 1rem;
+  --fs-small: 0.875rem;
+  --fs-caption: 0.8rem;
+  --fs-mono: 0.85rem;
+
+  /* Layout */
+  --header-h: 56px;
+  --sidenav-w: 240px;
+  --main-max: 1400px;
+}
