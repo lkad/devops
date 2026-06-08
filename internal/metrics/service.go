@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -202,6 +203,15 @@ func validateIngest(in IngestInput) error {
 		return &contracts.APIError{
 			Code:    contracts.CodeValidation,
 			Message: "target_id is required",
+		}
+	}
+	// NaN and ±Inf are not valid JSON values; standard parsers
+	// reject them and they would corrupt the sparkline + aggregate
+	// math. Reject at the service boundary.
+	if math.IsNaN(in.Value) || math.IsInf(in.Value, 0) {
+		return &contracts.APIError{
+			Code:    contracts.CodeValidation,
+			Message: "value must be a finite number (NaN and Inf are rejected)",
 		}
 	}
 	return nil
