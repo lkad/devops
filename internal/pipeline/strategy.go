@@ -13,11 +13,9 @@
 package pipeline
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math"
-	"sync"
 )
 
 // StrategyType is the strategy enum persisted on the
@@ -230,38 +228,4 @@ func PlanForPipeline(p *Pipeline) ([]Phase, error) {
 	default:
 		return nil, fmt.Errorf("unknown strategy %q", p.Strategy)
 	}
-}
-
-// =============================================================================
-// Async run helpers — kept here so the existing
-// service.executeRun goroutine wiring can compose strategy
-// planning + step execution without an extra package.
-// =============================================================================
-
-// StrategyRunner is the service-layer seam for running
-// a planned strategy to completion. It owns the goroutine
-// that drives a strategy's phases through the existing
-// executor and records step runs. Production calls Start
-// once; the Cancel method flips the run to cancelled.
-type StrategyRunner struct {
-	svc     *Service
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
-}
-
-// NewStrategyRunner builds a runner bound to a service.
-func NewStrategyRunner(svc *Service) *StrategyRunner {
-	return &StrategyRunner{svc: svc, cancels: make(map[string]context.CancelFunc)}
-}
-
-// Start runs the planned phases asynchronously. The
-// returned function is the cancel hook; callers keep it
-// for the cancel endpoint.
-func (r *StrategyRunner) Start(_ context.Context, run *PipelineRun, phases []Phase) context.CancelFunc {
-	_ = phases
-	cancel := func() {}
-	r.mu.Lock()
-	r.cancels[run.ID] = cancel
-	r.mu.Unlock()
-	return cancel
 }
