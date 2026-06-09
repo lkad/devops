@@ -33,13 +33,18 @@ import (
 	"github.com/devops-toolkit/backend/internal/k8s/logstream"
 	"github.com/devops-toolkit/backend/internal/logs"
 	"github.com/devops-toolkit/backend/internal/metrics"
+	"github.com/devops-toolkit/backend/internal/observability"
 	"github.com/devops-toolkit/backend/internal/physicalhost"
+	"github.com/devops-toolkit/backend/internal/physicalhost/prober"
 	"github.com/devops-toolkit/backend/internal/pipeline"
 	projectpkg "github.com/devops-toolkit/backend/internal/project"
+	internalServer "github.com/devops-toolkit/backend/internal/server"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 	"github.com/devops-toolkit/backend/pkg/logger"
 	"github.com/devops-toolkit/backend/internal/ws/hub"
+	"github.com/devops-toolkit/backend/internal/ws/realtime"
 	"github.com/gorilla/websocket"
+	"golang.org/x/crypto/ssh"
 )
 
 func main() {
@@ -76,16 +81,23 @@ func run() error {
 		registerAuthRoutes(eng, cfg, log)
 		registerProjectRoutes(eng, db, log)
 		registerDeviceRoutes(eng, db, log)
-		registerPhysicalHostRoutes(eng, db, log)
+		wsHub := registerWsHubRoutes(eng, cfg, log)
+		// Audit must be registered before physicalhost so the
+		// physical-host module can share the same audit svc +
+		// repo (one DB table, one emitter, no double writes).
+		auditSvc, auditRepo := registerAuditRoutes(eng, db, log)
+		var hubPublisher realtime.Publisher
+		if wsHub != nil {
+			hubPublisher = realtime.NewHubPublisher(wsHubAdapter{wsHub})
+		}
+		phMaintenance := registerPhysicalHostRoutes(eng, db, log, hubPublisher, auditSvc, auditRepo)
+		registerAlertsRoutes(eng, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance})
 		registerDiscoveryRoutes(eng, db, log)
 		registerK8sClusterRoutes(eng, db, log)
 		registerHostProjectLinkRoutes(eng, db, log)
 		registerPipelineRoutes(eng, db, log)
 		registerLogsRoutes(eng, db, log)
 		registerMetricsRoutes(eng, db, log)
-		registerAlertsRoutes(eng, db, log)
-		registerAuditRoutes(eng, db, log)
-		registerWsHubRoutes(eng, cfg, log)
 		registerLogStreamRoutes(eng, db, log)
 	} else {
 		log.Warn("router is not a *gin.Engine; auth routes not registered")
@@ -96,14 +108,38 @@ func run() error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	// mTLS: when TLS_CERT_FILE is set, listen with HTTPS +
+	// client cert verification. Production must set both
+	// TLS_CERT_FILE and TLS_CA_FILE; dev can leave either
+	// empty to fall through to plain HTTP.
+	if certFile := os.Getenv("TLS_CERT_FILE"); certFile != "" {
+		tlsCfg, err := internalServer.LoadServerTLS(internalServer.TLSConfig{
+			CertFile: certFile,
+			KeyFile:  os.Getenv("TLS_KEY_FILE"),
+			CAFile:   os.Getenv("TLS_CA_FILE"),
+		})
+		if err != nil {
+			return fmt.Errorf("load TLS config: %w", err)
+		}
+		srv.TLSConfig = tlsCfg
+		log.Info("mTLS enabled", "cert", certFile, "ca", os.Getenv("TLS_CA_FILE"))
+	}
+
 	// Graceful shutdown on SIGINT/SIGTERM.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("http server listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
+		if srv.TLSConfig != nil {
+			log.Info("https server listening (mTLS)", "addr", srv.Addr)
+			if err := srv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- err
+			}
+		} else {
+			log.Info("http server listening", "addr", srv.Addr)
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- err
+			}
 		}
 	}()
 	select {
@@ -124,6 +160,16 @@ func buildRouter(log *logger.Logger) http.Handler {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	// Prometheus instrumentation. The middleware counts every
+	// request by route template + status; the /metrics endpoint
+	// itself is mounted as a plain handler so it doesn't show up
+	// in the request counter (a self-counting scraper would
+	// inflate its own numbers). Prometheus 9090 is expected to
+	// scrape GET /metrics every 15s (see deploy/prometheus).
+	obs := observability.New()
+	r.Use(obs.Middleware())
+	r.GET("/metrics", gin.WrapH(obs.Handler()))
+
 	// Root index lists the known route groups so a browser hitting
 	// / sees something useful instead of a 404 envelope.
 	r.GET("/", func(c *gin.Context) {
@@ -133,6 +179,7 @@ func buildRouter(log *logger.Logger) http.Handler {
 			"build":    "foundation",
 			"endpoints": []string{
 				"GET  /health",
+				"GET  /metrics",
 				"GET  /api/v1/capabilities",
 				"POST /api/v1/auth/login",
 				"GET  /api/v1/auth/ldap/health",
@@ -203,6 +250,46 @@ func toDBConfig(c config.DatabaseConfig) dbpkg.ConnectionConfig {
 // itself lives on (*config.Config).String.
 func renderConfig(c *config.Config) string {
 	return c.String()
+}
+
+// newProber picks the prober implementation from env. The
+// default is TCP reachability (cheap, no creds); PROBER_SSH_KEY
+// flips to the real SSHProber using the given key file, which
+// is the production path. PROBER_FAKE=1 picks the in-test fake
+// for unit-test parity.
+func newProber(log *logger.Logger) physicalhost.Prober {
+	if envOr("PROBER_FAKE", "") == "1" {
+		log.Info("prober selected", "type", "fake", "reason", "PROBER_FAKE=1")
+		return physicalhost.NewFake()
+	}
+	if keyPath := os.Getenv("PROBER_SSH_KEY"); keyPath != "" {
+		raw, err := os.ReadFile(keyPath)
+		if err != nil {
+			log.Warn("prober: read SSH key failed, falling back to TCP", "err", err)
+		} else {
+			signer, err := ssh.ParsePrivateKey(raw)
+			if err != nil {
+				log.Warn("prober: parse SSH key failed, falling back to TCP", "err", err)
+			} else {
+				timeout := 10 * time.Second
+				if v := os.Getenv("PROBER_SSH_TIMEOUT"); v != "" {
+					if d, err := time.ParseDuration(v); err == nil && d > 0 {
+						timeout = d
+					}
+				}
+				log.Info("prober selected", "type", "ssh", "key", keyPath, "timeout", timeout.String())
+				return prober.NewSSHProber(prober.SSHProberConfig{Signer: signer, Timeout: timeout})
+			}
+		}
+	}
+	timeout := 2 * time.Second
+	if v := os.Getenv("PROBER_TCP_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			timeout = d
+		}
+	}
+	log.Info("prober selected", "type", "tcp", "timeout", timeout.String())
+	return prober.TCP(timeout)
 }
 
 func envOr(key, fallback string) string {
@@ -357,36 +444,96 @@ func registerDeviceRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 
 // registerPhysicalHostRoutes wires the physical-host monitoring module.
 // The 4-state machine (online/monitoring_issue/offline/maintenance) and
-// the maintenance mode with audit emission live here. Audit events are
-// logged via a no-op emitter (Phase 7 will replace it with the
-// audit-logging service).
-func registerPhysicalHostRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
-	if err := dbpkg.AutoMigrate(db, physicalhost.AllModels()...); err != nil {
+// the maintenance mode with audit emission live here. The monitor
+// publishes device_event on the realtime hub for state transitions;
+// maintenance transitions persist durable rows in the audit table.
+// Every successful Check also enqueues a fresh Metrics snapshot
+// into the AsyncInfluxWriter for long-term storage. Returns the
+// *MaintenanceService so callers (e.g. the alert module) can
+// consult IsInMaintenance via a small adapter.
+func registerPhysicalHostRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, pub realtime.Publisher, auditSvc *audit.Service, auditRepo *audit.Repository) *physicalhost.MaintenanceService {
+	if err := dbpkg.AutoMigrate(db, append(physicalhost.AllModels(), audit.AllModels()...)...); err != nil {
 		log.Error("physicalhost AutoMigrate failed", "err", err)
-		return
+		return nil
 	}
 	repo := physicalhost.NewRepository(db)
 	monitor := physicalhost.NewMonitorService(physicalhost.MonitorConfig{
 		Repo:                repo,
-		Prober:              physicalhost.NewFake(),
+		Prober:              newProber(log),
 		ConsecutiveFailures: 3,
 		CheckInterval:       time.Minute,
 	})
+	if pub != nil {
+		monitor.SetPublisher(pub)
+	}
 	maint := physicalhost.NewMaintenanceService(physicalhost.MaintenanceConfig{
 		Repo:    repo,
-		Auditor: logAuditEmitter{log: log},
+		Auditor: physicalhost.NewAuditEmitterAdapter(auditSvc),
 	})
+	monitor.SetMaintenance(maint)
+
+	// Async InfluxDB writer: every Check produces a fresh
+	// metrics snapshot which the writer ships to InfluxDB v2.
+	// URL/Token/Org/Bucket are env-driven so the same binary
+	// runs in dev (no InfluxDB) and prod (with InfluxDB).
+	influxURL := os.Getenv("INFLUX_URL")
+	var metricsSink physicalhost.MetricsSink
+	if influxURL != "" {
+		inner := physicalhost.NewInfluxWriter(physicalhost.InfluxWriterConfig{
+			URL:    influxURL,
+			Token:  os.Getenv("INFLUX_TOKEN"),
+			Org:    os.Getenv("INFLUX_ORG"),
+			Bucket: os.Getenv("INFLUX_BUCKET"),
+		})
+		// Swap the no-op default for the real http.Client
+		// backed client. SetClient is the seam left in
+		// influx_writer.go for exactly this wiring.
+		inner.SetClient(physicalhost.NewHTTPClientPost(5 * time.Second))
+		async := physicalhost.NewAsyncInfluxWriter(physicalhost.AsyncInfluxWriterConfig{
+			Inner:      inner,
+			BufferSize: 1024,
+			Workers:    2,
+		})
+		async.Start(context.Background())
+		metricsSink = async
+		log.Info("influx writer enabled", "url", influxURL)
+	}
+	monitor.SetMetricsSink(metricsSink)
+
+	// Collector needs the prober; reuse the same instance.
+	collector := physicalhost.NewMetricsCollector(physicalhost.MetricsCollectorConfig{Prober: newProber(log), Timeout: 5 * time.Second})
+	monitor.SetCollector(collector)
+
+	// Background loop: drives periodic Check for every host.
+	// Starts on a 1-minute tick; the loop is best-effort and
+	// never blocks shutdown (ctx cancellation is honoured).
+	loop := physicalhost.NewMonitorLoop(monitor, physicalhost.MonitorLoopConfig{
+		Tick:   1 * time.Minute,
+		Jitter: 5 * time.Second,
+		Logger: log.Logger,
+	})
+	go loop.Run(context.Background(), nil)
+	log.Info("monitor loop started", "tick", "1m", "jitter", "5s")
+
 	v1 := r.Group("/api/v1")
 	physicalhost.NewHandler(physicalhost.HandlerConfig{
 		Repo:        repo,
 		Monitor:     monitor,
 		Maintenance: maint,
+		Metrics:     physicalhost.NewMetricsCache(physicalhost.MetricsCacheConfig{Collector: collector, TTL: 30 * time.Second, MaxEntries: 1024}),
+		Audit:       auditSvc,
+		AuditRepo:   auditRepo,
 	}).Register(v1)
 	log.Info("physicalhost routes registered")
+	return maint
 }
 
-// logAuditEmitter is a no-op AuditEmitter that just logs the event.
-// Phase 7 (audit-logging) will replace this with a real emitter.
+// logAuditEmitter is kept as a no-op adapter for code paths
+// that still want a real AuditEmitter without the audit
+// service being wired (e.g. unit tests). Production now uses
+// physicalhost.NewAuditEmitterAdapter(auditSvc) so the
+// logAuditEmitter is no longer wired in main; left in place
+// for the maintenance_test.go shim and dev fallbacks.
 type logAuditEmitter struct{ log *logger.Logger }
 
 func (a logAuditEmitter) EmitMaintenanceEnter(_ context.Context, ev physicalhost.AuditEvent) {
@@ -406,6 +553,39 @@ func (a logAuditEmitter) EmitMaintenanceExit(_ context.Context, ev physicalhost.
 		"user_id", ev.UserID,
 		"at", ev.At,
 	)
+}
+
+// wsHubAdapter bridges the websocket-hub's bool-returning
+// Publish to the realtime.Hub interface (which wants an
+// error return). The hub returns false only when the payload
+// is too large; we surface that as a real error so the
+// publisher can log and move on.
+type wsHubAdapter struct{ h *hub.Hub }
+
+func (a wsHubAdapter) Publish(channel string, payload []byte) error {
+	if a.h.Publish(channel, payload) {
+		return nil
+	}
+	return errors.New("ws hub: payload exceeds MaxPayloadBytes")
+}
+
+// physicalhostMaintenanceProbe is the type alias the alert
+// suppression checker depends on. We use the alert's
+// PhysicalHostMaintenanceProbe interface directly so the
+// dependency direction stays clean (alerts depends on its
+// own interface; main.go adapts the physicalhost service).
+type physicalhostMaintenanceProbe = alerts.PhysicalHostMaintenanceProbe
+
+// physicalhostMaintenanceAdapter wraps a *physicalhost.MaintenanceService
+// so it satisfies the alert-side probe interface. Lives here
+// because main.go is the only place that knows about both
+// packages.
+type physicalhostMaintenanceAdapter struct {
+	svc *physicalhost.MaintenanceService
+}
+
+func (a *physicalhostMaintenanceAdapter) IsInMaintenance(ctx context.Context, hostID string) bool {
+	return a.svc.IsInMaintenance(ctx, hostID)
 }
 
 // registerDiscoveryRoutes wires the network-discovery module. Scanner
@@ -513,10 +693,11 @@ func registerMetricsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 }
 
 // registerAlertsRoutes wires the alert-notification module. The
-// dispatcher is the LogDispatcher (writes to slog); the suppression
-// checker is a no-op (returns false) in dev. Production wires the
-// real physicalhost service into a DefaultSuppressionChecker.
-func registerAlertsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+// dispatcher is the LogDispatcher (writes to slog); the
+// suppression checker is the real DefaultSuppressionChecker
+// driven by a tiny adapter that consults the physicalhost
+// service's InMaintenance predicate.
+func registerAlertsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, phMaintenance physicalhostMaintenanceProbe) {
 	if err := dbpkg.AutoMigrate(db, alerts.AllModels()...); err != nil {
 		log.Error("alerts AutoMigrate failed", "err", err)
 		return
@@ -525,19 +706,21 @@ func registerAlertsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	svc := alerts.NewService(alerts.ServiceConfig{
 		Repo:        repo,
 		Dispatcher:  alerts.NewLogDispatcher(log.Logger),
-		Suppression: alerts.NewFakeSuppressionChecker(),
+		Suppression: alerts.NewDefaultSuppressionChecker(phMaintenance),
 		Logger:      log.Logger,
 	})
 	v1 := r.Group("/api/v1")
 	alerts.NewHandler(svc).Register(v1)
-	log.Info("alerts routes registered")
+	log.Info("alerts routes registered", "real_suppression", true)
 }
 
 // registerWsHubRoutes wires the websocket-hub module: starts the
 // hub's Run loop on the application context and registers /ws.
 // JWT signer is reconstructed from the same secret as the auth
-// routes so the upgrade path can verify the token.
-func registerWsHubRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) {
+// routes so the upgrade path can verify the token. The hub
+// itself is returned so the caller can wire a realtime.Publisher
+// for domain events (device_event, alert_fired, etc).
+func registerWsHubRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) *hub.Hub {
 	secret := os.Getenv("APP_JWT_SECRET")
 	if secret == "" {
 		secret = "dev-secret-do-not-use-in-prod"
@@ -545,7 +728,7 @@ func registerWsHubRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) 
 	signer, err := auth.NewSigner(secret, time.Hour)
 	if err != nil {
 		log.Error("ws hub: signer init failed", "err", err)
-		return
+		return nil
 	}
 	h := hub.NewHub(hub.HubConfig{Limits: hub.DefaultLimits()})
 	go h.Run(context.Background())
@@ -554,8 +737,10 @@ func registerWsHubRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) 
 		WriteBufferSize: 1024,
 		CheckOrigin:     func(*http.Request) bool { return true },
 	}
-	hub.RegisterRoutes(r, h, signer, upgrader)
+	v1 := r.Group("/api/v1")
+	hub.RegisterRoutes(v1, h, signer, upgrader)
 	log.Info("websocket hub routes registered")
+	return h
 }
 
 // registerLogStreamRoutes wires the k8s-pod-log-streaming module.
@@ -591,11 +776,14 @@ func (logstreamRealtimeAdapter) Publish(channel string, payload any) {
 // registerAuditRoutes wires the audit-logging module. The emitter
 // is a BufferedEmitter wrapping a DBEmitter so the audit path is
 // non-blocking under load; overflow drops with a slog.Warn. The
-// service exposes /api/v1/audit and /api/v1/audit/:id.
-func registerAuditRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+// service exposes /api/v1/audit and /api/v1/audit/:id. It also
+// returns the underlying svc + repo so the physicalhost wiring
+// can re-use the same audit stack instead of building a second
+// one (which would double-write every event).
+func registerAuditRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) (*audit.Service, *audit.Repository) {
 	if err := dbpkg.AutoMigrate(db, audit.AllModels()...); err != nil {
 		log.Error("audit AutoMigrate failed", "err", err)
-		return
+		return nil, nil
 	}
 	repo := audit.NewRepository(db)
 	emitter := audit.NewBufferedEmitter(audit.NewDBEmitter(repo), audit.BufferedEmitterConfig{
@@ -609,4 +797,5 @@ func registerAuditRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	v1 := r.Group("/api/v1")
 	audit.NewHandler(svc).Register(v1)
 	log.Info("audit routes registered")
+	return svc, repo
 }
