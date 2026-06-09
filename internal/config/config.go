@@ -206,6 +206,18 @@ func (c *Config) Validate() error {
 	if c.PhysicalHost.MonitoringInterval < 0 {
 		return fmt.Errorf("physicalhost.monitoring_interval must be >= 0")
 	}
+
+	// Production-mode rules. Per the spec's
+	// "Required vs Optional Values" scenario + the README's
+	// "production must not have hardcoded passwords" rule.
+	if c.App.Env == "production" {
+		if c.LDAP.URL == "" {
+			return fmt.Errorf("production requires ldap.url to be set")
+		}
+		if c.Database.Password == "devops" || c.Database.Password == "" {
+			return fmt.Errorf("production requires a non-default database.password (got %q)", c.Database.Password)
+		}
+	}
 	return nil
 }
 

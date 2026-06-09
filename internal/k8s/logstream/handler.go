@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -341,4 +342,45 @@ func writeAPIError(w http.ResponseWriter, err error) {
 		Code:    contracts.CodeInternal,
 		Message: err.Error(),
 	})
+}
+
+// =============================================================================
+// Log level inference. The k8s log stream is raw text — the
+// kubelet doesn't tag lines with levels. The spec mandates
+// that the streaming layer infer a level from the line's
+// content so the downstream log-aggregation surface can
+// filter by it.
+//
+// The heuristics are intentionally simple and case-
+// insensitive: "ERROR", "FATAL" → error/fatal, "WARN" →
+// warn, anything else → info. We substring-match (not
+// regex) so the cost is trivial on a hot path.
+// =============================================================================
+
+// Level names match the spec's downstream contract (the
+// /logs/query level filter).
+const (
+	LevelInfo  = "info"
+	LevelWarn  = "warn"
+	LevelError = "error"
+	LevelFatal = "fatal"
+)
+
+// InferLevel walks the line looking for a level token. The
+// order is fatal > error > warn so a "FATAL: ERROR …" line
+// is classified as fatal (the most severe). The function is
+// pure so callers can use it on hot paths.
+func InferLevel(line string) string {
+	upper := strings.ToUpper(line)
+	if strings.Contains(upper, "FATAL") {
+		return LevelFatal
+	}
+	if strings.Contains(upper, "ERROR") || strings.Contains(upper, "ERR ") ||
+		strings.Contains(upper, "FAIL") {
+		return LevelError
+	}
+	if strings.Contains(upper, "WARN") {
+		return LevelWarn
+	}
+	return LevelInfo
 }

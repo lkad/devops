@@ -15,6 +15,7 @@ package discovery
 import (
 	"context"
 	"net"
+	"time"
 )
 
 // Host is the smallest addressable unit a scanner returns.
@@ -37,6 +38,36 @@ type Host struct {
 // the service layer is responsible for filtering.
 type Scanner interface {
 	Scan(ctx context.Context, cidr string) ([]Host, error)
+}
+
+// ScannerConfig is the optional configuration block for the
+// real network scanner. The spec's "Scan with timeout"
+// scenario mandates a per-host ceiling; the default is 5s
+// when Timeout is left zero. Concurrency caps the number of
+// in-flight probes (default 64) so a /16 doesn't fan out
+// to 65k goroutines.
+type ScannerConfig struct {
+	Timeout     time.Duration
+	Concurrency int
+}
+
+// TimeoutOrDefault returns the configured Timeout or 5s.
+// A zero value means "use the default"; a negative value
+// is treated as zero (so callers can pass env-driven values
+// without a nil check).
+func (c ScannerConfig) TimeoutOrDefault() time.Duration {
+	if c.Timeout <= 0 {
+		return 5 * time.Second
+	}
+	return c.Timeout
+}
+
+// ConcurrencyOrDefault returns the configured Concurrency or 64.
+func (c ScannerConfig) ConcurrencyOrDefault() int {
+	if c.Concurrency <= 0 {
+		return 64
+	}
+	return c.Concurrency
 }
 
 // CIDRRange is a small helper used by both the real scanner
