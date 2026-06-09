@@ -2,9 +2,9 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // DevOps Toolkit frontend — Vite config.
-// Backend is expected on :18080 (dev tier). The dev server proxies
-// /api -> :18080 so the frontend can use relative paths everywhere
-// (per the api-contract spec: "all API paths use relative paths").
+// Backend is expected on :3000 (dev tier) or :3443 (mTLS). The
+// dev server proxies /api and /ws to whichever port VITE_API_TARGET
+// points at (env-driven, default :3000).
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -12,11 +12,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:18080',
+        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:3000',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://127.0.0.1:18080',
+        target: (process.env.VITE_API_TARGET || 'http://127.0.0.1:3000').replace(/^http/, 'ws'),
         ws: true,
         changeOrigin: true,
       },

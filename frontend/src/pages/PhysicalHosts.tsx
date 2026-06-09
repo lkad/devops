@@ -1,5 +1,8 @@
 // PhysicalHosts page — list of physical hosts with state filter,
 // inline detail modal, and per-host probe + maintenance actions.
+// The page subscribes to the device_event channel so a state
+// change on the server refreshes the list (and the open detail
+// Modal's metrics panel) without a manual reload.
 import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/common/PageHeader';
 import { DataTable, Column } from '../components/common/DataTable';
@@ -7,8 +10,10 @@ import { Badge, toneForDeviceState } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { FormField } from '../components/common/FormField';
+import { MetricsPanel } from '../components/common/MetricsPanel';
 import { useToast } from '../components/common/Toast';
 import { useApi } from '../hooks/useApi';
+import { useWebSocket } from '../hooks/useWebSocket';
 import { apiPost, ListResponse } from '../api/client';
 
 interface PhysicalHost {
@@ -93,6 +98,18 @@ export function PhysicalHosts() {
     const id = setInterval(() => { /* re-render */ }, 30000);
     return () => clearInterval(id);
   }, []);
+
+  // WebSocket: when ANY physical_host.state_change event arrives,
+  // refresh the list so the row colour and Last Check update.
+  // The MetricsPanel reads its own refreshKey from the WS
+  // arrival count below.
+  const [wsTick, setWsTick] = useState(0);
+  useWebSocket(['physical_host.state_change'], (e) => {
+    if (e?.type === 'physical_host.state_change') {
+      setWsTick((n) => n + 1);
+      reload();
+    }
+  });
 
   const probe = async (h: PhysicalHost) => {
     setBusy(true);
@@ -274,6 +291,7 @@ export function PhysicalHosts() {
               <Detail label="Last Check" value={relativeTime(selected.last_check_at)} />
               <Detail label="Consecutive Fails" value={<span className="mono">{selected.consecutive_fails ?? 0}</span>} />
             </div>
+            <MetricsPanel hostId={selected.id} refreshKey={wsTick} />
           </div>
         )}
       </Modal>

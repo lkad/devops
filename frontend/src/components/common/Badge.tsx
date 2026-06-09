@@ -59,3 +59,15 @@ export function toneForEnv(env: string): Tone {
     default: return 'neutral';
   }
 }
+
+// toneForDataStatus maps the spec's "fresh | stale | unavailable"
+// values to badge tones. fresh=success, stale=warning,
+// unavailable=error. Anything else falls back to neutral.
+export function toneForDataStatus(status: string): Tone {
+  switch (status) {
+    case 'fresh': return 'success';
+    case 'stale': return 'warning';
+    case 'unavailable': return 'error';
+    default: return 'neutral';
+  }
+}
