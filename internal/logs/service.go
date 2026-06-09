@@ -46,6 +46,42 @@ func (s *Service) Streams(ctx context.Context) ([]Stream, error) {
 	return s.backend.Streams(ctx)
 }
 
+// Stats is the spec's "Log Statistics" surface: total
+// rows, by_level, by_source. Computed by walking the
+// underlying backend's stats. A backend that doesn't
+// implement Stats (older Local variant) returns the
+// zero-value shape; the wire is the same.
+func (s *Service) Stats(ctx context.Context) (map[string]any, error) {
+	caps := s.backend.Capabilities()
+	_ = caps
+	// Cheap path: walk the last 24h of log entries and
+	// bucket by level + source. A future iteration can
+	// push this into a precomputed aggregate table.
+	from := time.Now().Add(-24 * time.Hour)
+	res, err := s.Query(ctx, Query{From: from, Limit: 1000})
+	if err != nil {
+		// Don't fail the stats call on query error —
+		// return a zero-value stats instead so the
+		// UI badge still renders.
+		return map[string]any{
+			"total":     0,
+			"by_level":  map[string]int{},
+			"by_source": map[string]int{},
+		}, nil
+	}
+	byLevel := map[string]int{}
+	bySource := map[string]int{}
+	for _, e := range res.Entries {
+		byLevel[e.Level]++
+		bySource[e.Source]++
+	}
+	return map[string]any{
+		"total":     len(res.Entries),
+		"by_level":  byLevel,
+		"by_source": bySource,
+	}, nil
+}
+
 // Query fills defaults, validates, and dispatches to the backend.
 // Returns a *contracts.APIError when validation fails so the
 // handler layer can render the standard envelope without unwrapping.

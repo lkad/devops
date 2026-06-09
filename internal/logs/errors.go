@@ -1,8 +1,16 @@
 package logs
 
 import (
+	"errors"
+
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
+
+// ErrNotFound is the typed sentinel the extra repository
+// returns when a row is missing. The handler maps this to
+// a 404 NOT_FOUND; the rest of the package treats it as
+// a "row already gone, that's fine" signal (e.g. DELETE).
+var ErrNotFound = errors.New("logs: not found")
 
 // ErrBackendUnavailable is the spec-mandated 503 for "ES or Loki
 // unreachable". The cause is wrapped so log lines retain the

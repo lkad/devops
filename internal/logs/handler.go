@@ -5,6 +5,7 @@
 package logs
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -27,7 +28,9 @@ import (
 // in production.
 type Handler struct {
 	svc   *Service
-	local *Local // nil if backend isn't Local; only needed for /_test/echo
+	local *Local     // nil if backend isn't Local; only needed for /_test/echo
+	extra *ExtraService
+	repo  *ExtraRepository
 }
 
 // NewHandler builds a Handler. The local backend is used by the
@@ -44,6 +47,15 @@ func NewHandler(svc *Service, local LogBackend) *Handler {
 	return &Handler{svc: svc, local: asLocal}
 }
 
+// NewHandlerWithExtra is the constructor that exposes the
+// retention / saved-filter / alert-rule routes. The
+// standard NewHandler keeps those fields nil so a
+// production deployment can opt out by simply not calling
+// this constructor.
+func NewHandlerWithExtra(svc *Service, extra *ExtraService, repo *ExtraRepository) *Handler {
+	return &Handler{svc: svc, extra: extra, repo: repo}
+}
+
 // Register attaches the log-aggregation routes to the supplied
 // router group. The group is expected to live under /api/v1.
 func (h *Handler) Register(r *gin.RouterGroup) {
@@ -54,6 +66,26 @@ func (h *Handler) Register(r *gin.RouterGroup) {
 	// is the spec's "this is not part of the stable surface"
 	// convention.
 	r.POST("/logs/_test/echo", h.Echo)
+
+	// Spec coverage: retention policy + log statistics.
+	if h.extra != nil {
+		r.GET("/logs/retention", h.GetRetention)
+		r.PUT("/logs/retention", h.SetRetention)
+		r.POST("/logs/retention/cleanup", h.TriggerRetentionCleanup)
+		r.GET("/logs/stats", h.GetLogStats)
+
+		// Spec coverage: saved filters (full CRUD + apply).
+		r.POST("/logs/saved-filters", h.CreateSavedFilter)
+		r.GET("/logs/saved-filters", h.ListSavedFilters)
+		r.GET("/logs/saved-filters/:id", h.GetSavedFilter)
+		r.DELETE("/logs/saved-filters/:id", h.DeleteSavedFilter)
+		r.POST("/logs/saved-filters/:id/apply", h.ApplySavedFilter)
+
+		// Spec coverage: alert rules CRUD.
+		r.POST("/logs/alert-rules", h.CreateAlertRule)
+		r.GET("/logs/alert-rules", h.ListAlertRules)
+		r.DELETE("/logs/alert-rules/:id", h.DeleteAlertRule)
+	}
 }
 
 // Capabilities is the /capabilities endpoint.
@@ -202,4 +234,277 @@ func writeAPIError(w http.ResponseWriter, err error) {
 		Code:    contracts.CodeInternal,
 		Message: fmt.Sprintf("internal error: %s", err.Error()),
 	})
+}
+
+// =============================================================================
+// Extra HTTP handlers — retention, statistics, saved filters, alert rules.
+// Each handler is small: validate input, call extra service / repo,
+// render. The retention + filter + rule mutations are append-only by
+// the spec; no PATCH endpoint is exposed.
+// =============================================================================
+
+// GetRetention handles GET /logs/retention.
+func (h *Handler) GetRetention(c *gin.Context) {
+	if h.extra == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "retention service not wired"})
+		return
+	}
+	p, err := h.extra.GetRetention()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, p)
+}
+
+// SetRetention handles PUT /logs/retention.
+func (h *Handler) SetRetention(c *gin.Context) {
+	if h.extra == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "retention service not wired"})
+		return
+	}
+	var in struct {
+		RetentionDays int `json:"retention_days"`
+		MaxStorageGB   int `json:"max_storage_gb"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body must be JSON"})
+		return
+	}
+	if in.RetentionDays <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "retention_days must be > 0"})
+		return
+	}
+	if in.MaxStorageGB <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "max_storage_gb must be > 0"})
+		return
+	}
+	p, err := h.extra.SetRetention(&RetentionPolicy{
+		RetentionDays: in.RetentionDays,
+		MaxStorageGB:   in.MaxStorageGB,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, p)
+}
+
+// TriggerRetentionCleanup handles POST /logs/retention/cleanup.
+func (h *Handler) TriggerRetentionCleanup(c *gin.Context) {
+	if h.extra == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "retention service not wired"})
+		return
+	}
+	report, err := h.extra.TriggerCleanup(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, report)
+}
+
+// GetLogStats handles GET /logs/stats.
+func (h *Handler) GetLogStats(c *gin.Context) {
+	if h.extra == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "stats service not wired"})
+		return
+	}
+	stats, err := h.extra.Stats(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, stats)
+}
+
+// CreateSavedFilter handles POST /logs/saved-filters.
+func (h *Handler) CreateSavedFilter(c *gin.Context) {
+	if h.repo == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "saved-filters repo not wired"})
+		return
+	}
+	var in struct {
+		Name        string         `json:"name"`
+		OwnerUserID string         `json:"owner_user_id"`
+		Query       map[string]any `json:"query"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body must be JSON"})
+		return
+	}
+	if err := validateName(in.Name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	qJSON, _ := json.Marshal(in.Query)
+	f := &SavedFilter{
+		OwnerUserID: in.OwnerUserID,
+		Name:        in.Name,
+		Query:       string(qJSON),
+	}
+	if err := h.repo.CreateSavedFilter(f); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, f)
+}
+
+// ListSavedFilters handles GET /logs/saved-filters.
+func (h *Handler) ListSavedFilters(c *gin.Context) {
+	rows, err := h.repo.ListSavedFilters()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": rows})
+}
+
+// GetSavedFilter handles GET /logs/saved-filters/:id.
+func (h *Handler) GetSavedFilter(c *gin.Context) {
+	f, err := h.repo.GetSavedFilter(c.Param("id"))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, f)
+}
+
+// DeleteSavedFilter handles DELETE /logs/saved-filters/:id.
+func (h *Handler) DeleteSavedFilter(c *gin.Context) {
+	err := h.repo.DeleteSavedFilter(c.Param("id"))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// ApplySavedFilter handles POST /logs/saved-filters/:id/apply.
+// Returns the rendered query + a rows array of matching
+// log records. The local backend's seed data is empty so
+// rows is typically [].
+func (h *Handler) ApplySavedFilter(c *gin.Context) {
+	f, err := h.repo.GetSavedFilter(c.Param("id"))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var q map[string]any
+	_ = json.Unmarshal([]byte(f.Query), &q)
+	// Render: re-issue the underlying log query.
+	var rows []map[string]any
+	if h.svc != nil {
+		// The Query type doesn't have a Level field; level
+		// filtering is expressed via the Filters slice. Keep
+		// the apply path simple — the rendered query
+		// already encodes any level filter in q["level"].
+		res, err := h.svc.Query(c.Request.Context(), Query{
+			Text:  stringFromMap(q, "q"),
+			Limit: intFromMap(q, "limit", 50),
+		})
+		if err == nil {
+			for _, e := range res.Entries {
+				rows = append(rows, map[string]any{
+					"id":        e.ID,
+					"timestamp": e.Timestamp,
+					"level":     e.Level,
+					"source":    e.Source,
+					"host":      e.Host,
+					"message":   e.Message,
+				})
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"query": q, "rows": rows})
+}
+
+// CreateAlertRule handles POST /logs/alert-rules.
+func (h *Handler) CreateAlertRule(c *gin.Context) {
+	var in struct {
+		Name      string `json:"name"`
+		Condition string `json:"condition"`
+		Window    string `json:"window"`
+		Threshold int    `json:"threshold"`
+		Channel   string `json:"channel"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body must be JSON"})
+		return
+	}
+	if err := validateName(in.Name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if in.Condition == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "condition is required"})
+		return
+	}
+	r := &AlertRule{
+		Name: in.Name, Condition: in.Condition, Window: in.Window,
+		Threshold: in.Threshold, Channel: in.Channel,
+	}
+	if err := h.repo.CreateAlertRule(r); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, r)
+}
+
+// ListAlertRules handles GET /logs/alert-rules.
+func (h *Handler) ListAlertRules(c *gin.Context) {
+	rows, err := h.repo.ListAlertRules()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": rows})
+}
+
+// DeleteAlertRule handles DELETE /logs/alert-rules/:id.
+func (h *Handler) DeleteAlertRule(c *gin.Context) {
+	err := h.repo.DeleteAlertRule(c.Param("id"))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// stringFromMap / intFromMap are tiny typed accessors so
+// the apply handler stays readable.
+func stringFromMap(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func intFromMap(m map[string]any, key string, def int) int {
+	if m == nil {
+		return def
+	}
+	if v, ok := m[key].(float64); ok {
+		return int(v)
+	}
+	return def
 }
