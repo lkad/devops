@@ -26,6 +26,18 @@ const (
 	// production-environment restriction for Operators is enforced
 	// by the service layer, not by the matrix.
 	PermissionRemoteRestart Permission = "devices.restart"
+
+	// Physical-host module permissions. Read mirrors
+	// PermissionViewDevices; write covers create / update / delete;
+	// probe covers manual SSH check triggers; maintenance covers
+	// enter / exit maintenance windows. Operators get probe +
+	// maintenance; only SuperAdmin gets write on prod-class
+	// hosts (gated in the service layer).
+	PermissionViewPhysicalHosts    Permission = "physicalhost.view"
+	PermissionWritePhysicalHosts   Permission = "physicalhost.write"
+	PermissionProbePhysicalHost    Permission = "physicalhost.probe"
+	PermissionMaintenancePhysical  Permission = "physicalhost.maintenance"
+	PermissionViewAuditLog         Permission = "audit.view"
 )
 
 // allPermissions is the canonical ordered list of permissions. The
@@ -36,6 +48,11 @@ var allPermissions = []Permission{
 	PermissionModifyConfig,
 	PermissionExecuteCommands,
 	PermissionRemoteRestart,
+	PermissionViewPhysicalHosts,
+	PermissionWritePhysicalHosts,
+	PermissionProbePhysicalHost,
+	PermissionMaintenancePhysical,
+	PermissionViewAuditLog,
 }
 
 // AllPermissions returns a copy of the permission catalog. Callers
@@ -63,6 +80,11 @@ var RolePermissions = map[contracts.Role][]Permission{
 		PermissionModifyConfig,
 		PermissionExecuteCommands,
 		PermissionRemoteRestart,
+		PermissionViewPhysicalHosts,
+		PermissionWritePhysicalHosts,
+		PermissionProbePhysicalHost,
+		PermissionMaintenancePhysical,
+		PermissionViewAuditLog,
 	},
 	contracts.RoleOperator: {
 		PermissionViewDevices,
@@ -70,12 +92,20 @@ var RolePermissions = map[contracts.Role][]Permission{
 		PermissionExecuteCommands,
 		// PermissionRemoteRestart is denied: production-restart
 		// gating happens in the service layer.
+		PermissionViewPhysicalHosts,
+		PermissionWritePhysicalHosts,
+		PermissionProbePhysicalHost,
+		PermissionMaintenancePhysical,
+		PermissionViewAuditLog,
 	},
 	contracts.RoleDeveloper: {
 		PermissionViewDevices,
+		PermissionViewPhysicalHosts,
 	},
 	contracts.RoleAuditor: {
 		PermissionViewDevices,
+		PermissionViewPhysicalHosts,
+		PermissionViewAuditLog,
 	},
 }
 
