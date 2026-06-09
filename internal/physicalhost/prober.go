@@ -3,47 +3,23 @@ package physicalhost
 import (
 	"context"
 	"sync"
-	"time"
+
+	"github.com/devops-toolkit/backend/internal/physicalhost/prober"
 )
 
-// Host is the input to the Prober. It is a value type (no
-// pointers) so the prober cannot mutate the persisted record
-// during a probe. Fields are limited to what the prober needs;
-// everything else (state, maintenance columns, etc.) lives on
-// the PhysicalHost row and is not exposed here.
-type Host struct {
-	IPAddress string
-	SSHPort   int
-	SSHUser   string
-}
+// Prober is the seam the monitor talks to. Re-exported from the
+// prober subpackage so service-layer code can keep using
+// physicalhost.Prober without a transitive import. The concrete
+// implementations (TCP, SSH, Fake) all live in the prober
+// subpackage; this file is the in-package test fake.
+type Prober = prober.Prober
+
+// Host is the value the prober accepts. Re-exported for the
+// same reason as Prober.
+type Host = prober.Host
 
 // PingResult is the structured outcome of a reachability probe.
-// Reachable=true means the host answered the TCP/ICMP probe;
-// LatencyMs is the round-trip time in milliseconds. The Err
-// field is populated on connection refused / timeout so the
-// monitor can branch on error vs. clean negative.
-type PingResult struct {
-	Reachable bool
-	LatencyMs int64
-	Err       error
-}
-
-// Prober is the seam the monitor talks to. The interface is
-// deliberately small so the Fake implementation is trivial and
-// the real SSH/TCP client (a future phase) does not have to be
-// mocked at a method-by-method level.
-//
-// All methods take a context so the monitor can apply a per-host
-// timeout without exposing it through the interface.
-type Prober interface {
-	// Ping returns whether the host is reachable. Implementations
-	// are expected to honour ctx.Deadline().
-	Ping(ctx context.Context, host Host) (PingResult, error)
-
-	// SSHExec runs a single command on the host and returns its
-	// stdout. Implementations are expected to honour ctx.Deadline().
-	SSHExec(ctx context.Context, host Host, cmd string) ([]byte, error)
-}
+type PingResult = prober.PingResult
 
 // Fake is the in-test Prober. It does not open any sockets, run
 // any commands, or depend on the network. Tests script the
@@ -64,8 +40,8 @@ type Fake struct {
 	sshScripted map[string]sshScriptedResult
 
 	// counters: keyed by host (ping) or host|cmd (ssh).
-	pingCounts  map[string]int
-	sshCounts   map[string]int
+	pingCounts map[string]int
+	sshCounts  map[string]int
 }
 
 type sshScriptedResult struct {
@@ -146,7 +122,3 @@ func (f *Fake) SSHExec(ctx context.Context, host Host, cmd string) ([]byte, erro
 
 // Compile-time check that *Fake implements Prober.
 var _ Prober = (*Fake)(nil)
-
-// _ = time.Now is referenced so the import survives even if a
-// future refactor removes every direct usage of time.Time below.
-var _ = time.Now

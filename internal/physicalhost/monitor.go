@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/ws/realtime"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -16,6 +17,16 @@ type MonitorConfig struct {
 	Prober              Prober
 	ConsecutiveFailures int
 	CheckInterval       time.Duration
+}
+
+// MetricsSink is the seam the monitor uses to push a fresh
+// metrics snapshot after every Check. Production wires the
+// AsyncInfluxWriter; tests inject a fake that just records.
+// The signature is the minimum needed — the hostID and the
+// snapshot — so other sinks (e.g. Prometheus pushgateway) can
+// be added without touching the monitor.
+type MetricsSink interface {
+	Enqueue(hostID string, m Metrics)
 }
 
 // MonitorService owns the periodic health-check loop and the
@@ -40,6 +51,9 @@ type MonitorService struct {
 	interval    time.Duration
 	now         func() time.Time
 	maintenance *MaintenanceService
+	publisher   realtime.Publisher
+	metricsSink MetricsSink
+	collector   MetricsSource
 }
 
 // NewMonitorService builds a MonitorService with sane defaults
@@ -69,6 +83,26 @@ func NewMonitorService(cfg MonitorConfig) *MonitorService {
 func (m *MonitorService) SetMaintenance(s *MaintenanceService) {
 	m.maintenance = s
 }
+
+// SetPublisher wires the realtime hub publisher used to
+// broadcast device_event on state transitions. A nil publisher
+// turns this into a no-op so existing tests / non-realtime
+// deployments can opt out.
+func (m *MonitorService) SetPublisher(p realtime.Publisher) {
+	m.publisher = p
+}
+
+// SetMetricsSink wires the optional async metrics writer
+// (typically AsyncInfluxWriter). A nil sink disables the
+// "push every Check" path; the metrics endpoint / cache
+// continues to work via the cache's own GetOrCollect.
+func (m *MonitorService) SetMetricsSink(s MetricsSink) { m.metricsSink = s }
+
+// SetCollector wires the optional metrics collector so the
+// monitor can produce a fresh snapshot during each Check.
+// nil disables the "push every Check" path even if a sink is
+// set (the sink has nothing to write).
+func (m *MonitorService) SetCollector(c MetricsSource) { m.collector = c }
 
 // Check runs one probe against the given host. The public entry
 // point is the method the monitoring loop calls; tests call it
@@ -127,6 +161,7 @@ func (m *MonitorService) Check(ctx context.Context, hostID string) error {
 	// branches on. We deliberately do not return the error
 	// here — it has been recorded in LastCheckAt.
 
+	prevState := p.State
 	if res.Reachable {
 		p.State = StateOnline
 		p.ConsecutiveFails = 0
@@ -152,7 +187,42 @@ func (m *MonitorService) Check(ctx context.Context, hostID string) error {
 			Cause:   err,
 		}
 	}
+
+	// Broadcast a device_event when (and only when) the state
+	// actually changed. The channel name is the canonical
+	// "device_event" so the frontend can subscribe to every
+	// device domain in one place.
+	if prevState != p.State {
+		m.emitStateChange(ctx, p.ID, string(prevState), string(p.State))
+	}
+
+	// Best-effort: push a fresh metrics snapshot to the
+	// async writer. We run the collector synchronously here
+	// (in the monitor's goroutine) so the sink sees the same
+	// data the cache would. A nil collector or sink is a no-op.
+	if m.collector != nil && m.metricsSink != nil {
+		if snap, err := m.collector.Collect(ctx, Host{
+			IPAddress: p.IPAddress, SSHPort: p.SSHPort, SSHUser: p.SSHUser,
+		}); err == nil && snap.DataStatus != DataStatusUnavailable {
+			m.metricsSink.Enqueue(p.ID, snap)
+		}
+	}
 	return nil
+}
+
+// emitStateChange publishes a realtime event to the device_event
+// channel. A nil publisher is a no-op so test fixtures and
+// non-realtime deployments can opt out.
+func (m *MonitorService) emitStateChange(ctx context.Context, hostID, prev, next string) {
+	if m.publisher == nil {
+		return
+	}
+	evt := realtime.NewEvent("physical_host.state_change", hostID, m.now().UTC(), map[string]any{
+		"host_id":        hostID,
+		"previous_state": prev,
+		"new_state":      next,
+	})
+	_ = m.publisher.Publish(ctx, evt)
 }
 
 // EnterMaintenanceForTest is a thin wrapper exposed to the test

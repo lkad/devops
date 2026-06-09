@@ -9,8 +9,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
+)
+
+// Type aliases for the cross-module audit types so the
+// handler / service signatures read as physicalhost-typed
+// without an audit import scattered across the file.
+type (
+	AuditService    = audit.Service
+	AuditRepo       = audit.Repository
+	AuditFilter     = audit.AuditFilter
+	AuditResourceType = audit.AuditResourceType
+)
+
+const (
+	AuditResourcePhysicalHost = audit.ResourcePhysicalHost
 )
 
 // HandlerConfig bundles the dependencies of Handler. The handler
@@ -20,6 +35,9 @@ type HandlerConfig struct {
 	Repo        *Repository
 	Monitor     *MonitorService
 	Maintenance *MaintenanceService
+	Metrics     *MetricsCache
+	Audit       *AuditService
+	AuditRepo   *AuditRepo
 }
 
 // Handler is the HTTP layer for the physical-host monitoring
@@ -30,14 +48,23 @@ type Handler struct {
 	repo        *Repository
 	monitor     *MonitorService
 	maintenance *MaintenanceService
+	metrics     *MetricsCache
+	audit       *AuditService
+	auditRepo   *AuditRepo
 }
 
-// NewHandler builds a Handler.
+// NewHandler builds a Handler. A nil Metrics cache is tolerated;
+// the metrics route returns 503 in that case so misconfigured
+// deployments fail loudly. Audit fields are similarly
+// optional — only the maintenance-history route needs them.
 func NewHandler(cfg HandlerConfig) *Handler {
 	return &Handler{
 		repo:        cfg.Repo,
 		monitor:     cfg.Monitor,
 		maintenance: cfg.Maintenance,
+		metrics:     cfg.Metrics,
+		audit:       cfg.Audit,
+		auditRepo:   cfg.AuditRepo,
 	}
 }
 
@@ -51,8 +78,10 @@ func (h *Handler) Register(r *gin.RouterGroup) {
 	r.PUT("/physical-hosts/:id", h.Replace)
 	r.DELETE("/physical-hosts/:id", h.Delete)
 	r.POST("/physical-hosts/:id/probe", h.Probe)
+	r.GET("/physical-hosts/:id/metrics", h.Metrics)
 	r.POST("/physical-hosts/:id/maintenance", h.EnterMaintenance)
 	r.POST("/physical-hosts/:id/maintenance/exit", h.ExitMaintenance)
+	r.GET("/physical-hosts/:id/maintenance-history", h.MaintenanceHistory)
 }
 
 // hostRequest is the wire shape for POST/PUT /physical-hosts.
@@ -329,6 +358,69 @@ func (h *Handler) ExitMaintenance(c *gin.Context) {
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, host)
+}
+
+// Metrics handles GET /physical-hosts/:id/metrics. The cache
+// provides the stale / unavailable semantics; the handler
+// just resolves the host row, calls the cache, and renders.
+func (h *Handler) Metrics(c *gin.Context) {
+	id := c.Param("id")
+	host, err := h.repo.Get(id)
+	if err != nil {
+		writeAPIError(c.Writer, mapRepoError(err, id))
+		return
+	}
+	if h.metrics == nil {
+		handler.WriteError(c.Writer, &contracts.APIError{
+			Code:    contracts.CodeInternal,
+			Message: "metrics cache not configured",
+		})
+		return
+	}
+	m, _ := h.metrics.GetOrCollect(c.Request.Context(), host.ID, Host{
+		IPAddress: host.IPAddress,
+		SSHPort:   host.SSHPort,
+		SSHUser:   host.SSHUser,
+	})
+	handler.WriteJSON(c.Writer, http.StatusOK, m)
+}
+
+// MaintenanceHistory handles GET
+// /physical-hosts/:id/maintenance-history. It returns every
+// maintenance_enter / maintenance_exit audit row for the host
+// in descending occurred_at order, so the UI can render the
+// "last 5 maintenance windows" timeline.
+func (h *Handler) MaintenanceHistory(c *gin.Context) {
+	id := c.Param("id")
+	if h.auditRepo == nil {
+		handler.WriteError(c.Writer, &contracts.APIError{
+			Code:    contracts.CodeInternal,
+			Message: "audit repository not configured",
+		})
+		return
+	}
+	limit := 50
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	rows, _, err := h.auditRepo.List(AuditFilter{
+		ResourceType: AuditResourcePhysicalHost,
+		ResourceID:   id,
+		Limit:        limit,
+	})
+	if err != nil {
+		writeAPIError(c.Writer, err)
+		return
+	}
+	page := contracts.Pagination{
+		Total:   int64(len(rows)),
+		Limit:   limit,
+		Offset:  0,
+		HasMore: false,
+	}
+	handler.WriteList(c.Writer, rows, &page)
 }
 
 // contextFor returns the request's context. Wrapped in a

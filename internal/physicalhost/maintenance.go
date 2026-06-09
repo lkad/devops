@@ -65,6 +65,21 @@ func NewMaintenanceService(cfg MaintenanceConfig) *MaintenanceService {
 	}
 }
 
+// IsInMaintenance is the read-only predicate the alert
+// suppression checker calls. It returns true when the host
+// is currently in a maintenance window. The implementation
+// goes through the repository (single Get) so it stays
+// consistent with the rest of the maintenance flow (and
+// picks up maintenance-set-by-other-process changes
+// immediately).
+func (s *MaintenanceService) IsInMaintenance(ctx context.Context, hostID string) bool {
+	p, err := s.repo.Get(hostID)
+	if err != nil {
+		return false
+	}
+	return p.InMaintenance()
+}
+
 // EnterMaintenance flips the host into the maintenance state.
 // The audit event is emitted AFTER the DB write succeeds so a
 // failed write does not produce a phantom audit row.
