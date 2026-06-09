@@ -294,6 +294,16 @@ func (s *Service) executeRun(ctx context.Context, p *Pipeline, run *PipelineRun)
 		return
 	}
 
+	// Resolve the actual step list: if a strategy is
+	// configured, the planner's phases go BEFORE the
+	// user-supplied Steps so the linear steps only run
+	// after a successful strategy rollout.
+	steps := resolveSteps(p)
+	// Prime the step→order cache so ensureStepRun can
+	// record the right order even when a strategy
+	// re-ordered the steps away from p.Steps.
+	s.primeStepOrder(run.ID, steps)
+
 	// Build the emitter. The executor is the only writer
 	// for per-step status; we look up the step run ID by
 	// step name when a transition comes in.
@@ -301,7 +311,7 @@ func (s *Service) executeRun(ctx context.Context, p *Pipeline, run *PipelineRun)
 		return s.recordStepEvent(run.ID, e)
 	}
 
-	execErr := s.executor.Execute(ctx, *run, []PipelineStep(p.Steps), emitter)
+	execErr := s.executor.Execute(ctx, *run, steps, emitter)
 	finishedAt := time.Now().UTC()
 	durationMs := finishedAt.Sub(startedAt).Milliseconds()
 
@@ -312,6 +322,73 @@ func (s *Service) executeRun(ctx context.Context, p *Pipeline, run *PipelineRun)
 		_ = s.repo.UpdateRunFinished(run.ID, RunStatusFailed, durationMs, truncateMsg(execErr.Error()))
 	default:
 		_ = s.repo.UpdateRunFinished(run.ID, RunStatusSucceeded, durationMs, "")
+	}
+}
+
+// primeStepOrder pre-populates the step-order cache with
+// the (name, order) pairs from the resolved steps. The
+// cache is what ensureStepRun consults to record the
+// right Order; without this prime pass a strategy-
+// managed step would land at order=0.
+func (s *Service) primeStepOrder(runID string, steps []PipelineStep) {
+	stepRunCacheMu.Lock()
+	defer stepRunCacheMu.Unlock()
+	for i, st := range steps {
+		// We store the (step name → order index) so
+		// ensureStepRun can find it without scanning the
+		// pipeline row again.
+		key := runID + "::order::" + st.Name
+		stepOrderCache[key] = i
+	}
+}
+
+// stepOrderCache is keyed by "<runID>::order::<stepName>".
+// A package-level map keeps the test surface narrow. The
+// RWMutex is RWMutex because the hot path (ensureStepRun)
+// only reads; primeStepOrder holds the write lock.
+var (
+	stepOrderCacheMu sync.RWMutex
+	stepOrderCache   = make(map[string]int)
+)
+
+// resolveSteps turns a pipeline into the actual step slice
+// the executor will run. A pipeline with a strategy set has
+// its planned phases prepended to the user-defined Steps
+// (strategy phases first, then linear steps). A pipeline
+// without a strategy runs the user-defined Steps verbatim.
+//
+// The strategy is a no-op when the planner returns no
+// phases (e.g. an empty config) — the linear steps still
+// run.
+func resolveSteps(p *Pipeline) []PipelineStep {
+	phases, err := PlanForPipeline(p)
+	if err != nil || len(phases) == 0 {
+		return []PipelineStep(p.Steps)
+	}
+	out := make([]PipelineStep, 0, len(phases)+len(p.Steps))
+	for _, ph := range phases {
+		out = append(out, phaseToStep(ph))
+	}
+	out = append(out, p.Steps...)
+	return out
+}
+
+// phaseToStep turns a strategy Phase into a PipelineStep
+// the existing executor can run. The "shell" step type
+// carries the rendered command in Config["cmd"]; the
+// env is a label so audit + UI can render the target
+// environment.
+func phaseToStep(ph Phase) PipelineStep {
+	cfg := StepConfig{
+		"cmd":     ph.Command,
+		"phase":   ph.Name,
+		"traffic": ph.TrafficPct,
+		"health":  ph.Healthcheck,
+	}
+	return PipelineStep{
+		Name:   ph.Name,
+		Type:   StepTypeShell,
+		Config: cfg,
 	}
 }
 
@@ -354,15 +431,27 @@ func (s *Service) ensureStepRun(runID, stepName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	p, err := s.repo.GetPipeline(run.PipelineID)
-	if err != nil {
-		return "", err
+	// The strategy service pre-populates the stepOrderCache
+	// (see primeStepOrder) so a strategy-managed step is
+	// not pinned to order=0. The cache is keyed by
+	// runID + step name; a fall-back to p.Steps handles
+	// non-strategy pipelines.
+	order := -1
+	stepOrderCacheMu.RLock()
+	if v, ok := stepOrderCache[runID+"::order::"+stepName]; ok {
+		order = v
 	}
-	order := 0
-	for i, st := range p.Steps {
-		if st.Name == stepName {
-			order = i
-			break
+	stepOrderCacheMu.RUnlock()
+	if order < 0 {
+		p, err := s.repo.GetPipeline(run.PipelineID)
+		if err != nil {
+			return "", err
+		}
+		for i, st := range p.Steps {
+			if st.Name == stepName {
+				order = i
+				break
+			}
 		}
 	}
 	step := &PipelineStepRun{
@@ -504,6 +593,79 @@ func (s *Service) ListAllRecentRuns(limit, offset int) ([]PipelineRun, int64, er
 		}
 	}
 	return rows, total, nil
+}
+
+// PipelineStats is the aggregated view of a pipeline's
+// execution history. The wire shape mirrors the spec's
+// "Get pipeline stats" scenario: total / successful / failed
+// counts, success rate, average duration, and the last 10
+// runs (newest first).
+type PipelineStats struct {
+	PipelineID         string         `json:"pipeline_id"`
+	TotalRuns          int            `json:"total_runs"`
+	SuccessfulRuns     int            `json:"successful_runs"`
+	FailedRuns         int            `json:"failed_runs"`
+	CancelledRuns      int            `json:"cancelled_runs"`
+	SuccessRate        float64        `json:"success_rate"`
+	AverageDurationMs  int64          `json:"average_duration_ms"`
+	RecentRuns         []PipelineRun  `json:"recent_runs"`
+}
+
+// Stats computes the aggregate statistics for one pipeline.
+// The implementation walks the underlying SQLite result set
+// in-process (no SQL aggregation functions) so it works on
+// every GORM driver the dev tier uses, including the
+// in-memory sqlite the tests rely on.
+func (s *Service) Stats(pipelineID string) (*PipelineStats, error) {
+	stats := &PipelineStats{PipelineID: pipelineID}
+
+	// Pull every run for the pipeline; for a "last 10" view
+	// the dataset is bounded by the user's retention policy
+	// and a full table scan is acceptable in v1. A future
+	// iteration can push the aggregation into SQL.
+	limit := 10000
+	rows, total, err := s.repo.ListRunsForPipeline(pipelineID, limit, 0)
+	if err != nil {
+		return nil, &contracts.APIError{
+			Code:    contracts.CodeInternal,
+			Message: "failed to load runs",
+			Cause:   err,
+		}
+	}
+	stats.TotalRuns = int(total)
+
+	var totalDuration int64
+	for _, r := range rows {
+		switch r.Status {
+		case RunStatusSucceeded:
+			stats.SuccessfulRuns++
+			totalDuration += r.DurationMs
+		case RunStatusFailed:
+			stats.FailedRuns++
+			totalDuration += r.DurationMs
+		case RunStatusCancelled:
+			stats.CancelledRuns++
+		}
+	}
+	if stats.TotalRuns > 0 {
+		stats.SuccessRate = float64(stats.SuccessfulRuns) / float64(stats.TotalRuns)
+	}
+	// Average over the runs that actually completed (succeeded
+	// or failed) — cancelled runs are not measured here
+	// because their DurationMs is usually 0.
+	completed := stats.SuccessfulRuns + stats.FailedRuns
+	if completed > 0 {
+		stats.AverageDurationMs = totalDuration / int64(completed)
+	}
+
+	// Last 10 runs in DESC started_at order. The repository
+	// already returns DESC; we just trim.
+	if len(rows) > 10 {
+		stats.RecentRuns = rows[:10]
+	} else {
+		stats.RecentRuns = rows
+	}
+	return stats, nil
 }
 
 // validateCreate is the small block of field-level rules

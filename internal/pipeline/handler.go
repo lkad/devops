@@ -36,6 +36,9 @@ func (h *Handler) Register(r *gin.RouterGroup) {
 	r.DELETE("/pipelines/:id", h.Delete)
 	r.POST("/pipelines/:id/trigger", h.Trigger)
 	r.GET("/pipelines/:id/runs", h.ListRuns)
+	r.GET("/pipelines/:id/stats", h.Stats)
+	r.GET("/pipelines/:id/phases", h.Phases)
+	r.GET("/runs", h.ListAllRuns)
 	r.GET("/runs/:run_id", h.GetRun)
 	r.POST("/runs/:run_id/cancel", h.CancelRun)
 }
@@ -220,6 +223,70 @@ func (h *Handler) ListRuns(c *gin.Context) {
 	id := c.Param("id")
 	limit, offset := parsePaging(c)
 	runs, total, svcErr := h.svc.ListRuns(id, limit, offset)
+	if svcErr != nil {
+		writeAPIError(c.Writer, svcErr)
+		return
+	}
+	page := contracts.Pagination{
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
+		HasMore: limit > 0 && offset+limit < int(total),
+	}
+	handler.WriteList(c.Writer, runs, &page)
+}
+
+// Stats handles GET /pipelines/:id/stats. The wire shape
+// matches the spec's "Pipeline Statistics" requirement:
+// success rate, average duration, last 10 runs.
+func (h *Handler) Stats(c *gin.Context) {
+	id := c.Param("id")
+	stats, svcErr := h.svc.Stats(id)
+	if svcErr != nil {
+		writeAPIError(c.Writer, svcErr)
+		return
+	}
+	handler.WriteJSON(c.Writer, http.StatusOK, stats)
+}
+
+// Phases handles GET /pipelines/:id/phases. The response
+// is the planned phase list the strategy planner emits for
+// the pipeline (empty slice when the pipeline has no
+// strategy set). The frontend uses this to render the
+// blue-green / canary / rolling flow on the pipeline page
+// and in the run-detail modal.
+func (h *Handler) Phases(c *gin.Context) {
+	id := c.Param("id")
+	p, svcErr := h.svc.Get(id)
+	if svcErr != nil {
+		writeAPIError(c.Writer, svcErr)
+		return
+	}
+	phases, err := PlanForPipeline(p)
+	if err != nil {
+		writeAPIError(c.Writer, &contracts.APIError{
+			Code:    contracts.CodeInternal,
+			Message: "failed to plan strategy phases",
+			Cause:   err,
+		})
+		return
+	}
+	handler.WriteJSON(c.Writer, http.StatusOK, gin.H{
+		"pipeline_id":  p.ID,
+		"strategy":     p.Strategy,
+		"phases":       phases,
+	})
+}
+
+// ListAllRuns handles GET /runs. The spec calls this
+// "Get all recent runs" — runs across every pipeline,
+// sorted by time. Honours standard limit/offset paging.
+func (h *Handler) ListAllRuns(c *gin.Context) {
+	limit, offset := parsePaging(c)
+	if limit <= 0 {
+		limit = 50
+	}
+	runs, total, svcErr := h.svc.ListAllRecentRuns(limit, offset)
 	if svcErr != nil {
 		writeAPIError(c.Writer, svcErr)
 		return
