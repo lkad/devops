@@ -28,6 +28,19 @@ interface Pipeline {
   last_run_status?: RunStatus;
   last_run_id?: string;
   created_at?: string;
+  // Spec: blue_green | canary | rolling. Empty = linear
+  // step execution (the legacy path).
+  strategy?: StrategyType;
+}
+
+type StrategyType = 'blue_green' | 'canary' | 'rolling' | '' | string;
+
+interface Phase {
+  name: string;
+  env?: string;
+  traffic_pct?: number;
+  command?: string;
+  healthcheck?: string;
 }
 
 interface Run {
@@ -57,6 +70,51 @@ function runTone(s: RunStatus) {
   if (s === 'cancelled') return 'muted' as const;
   if (s === 'pending') return 'warning' as const;
   return 'neutral' as const;
+}
+
+// strategyLabel renders the strategy enum as a human
+// label: blue_green → "Blue-Green", canary → "Canary",
+// rolling → "Rolling", "" → "Linear".
+function strategyLabel(s?: StrategyType): string {
+  switch (s) {
+    case 'blue_green': return 'Blue-Green';
+    case 'canary': return 'Canary';
+    case 'rolling': return 'Rolling';
+    default: return 'Linear';
+  }
+}
+
+// strategyTone maps the strategy enum to a Badge tone for
+// visual consistency with the rest of the page.
+function strategyTone(s?: StrategyType): 'info' | 'success' | 'warning' | 'neutral' {
+  switch (s) {
+    case 'blue_green': return 'info';
+    case 'canary': return 'warning';
+    case 'rolling': return 'success';
+    default: return 'neutral';
+  }
+}
+
+// isStrategyPhase reports whether a step name was generated
+// by a strategy planner (rather than being a user-defined
+// step). The detection is by name pattern — the planner
+// emits a fixed set of well-known names per strategy. The
+// goal is to mark a strategy-managed step on the run detail
+// modal so the operator can tell at a glance which steps
+// came from the deployment strategy and which from the
+// pipeline's linear Steps list.
+function isStrategyPhase(name: string, s: StrategyType): boolean {
+  switch (s) {
+    case 'blue_green':
+      return name === 'deploy-inactive' || name === 'smoke-inactive' ||
+             name === 'switch-traffic' || name === 'decommission';
+    case 'canary':
+      return name === 'deploy-candidate' || name.startsWith('canary-');
+    case 'rolling':
+      return name.startsWith('rolling-batch-');
+    default:
+      return false;
+  }
 }
 
 function fmtDuration(ms?: number) {
@@ -193,6 +251,11 @@ export function Pipelines() {
                       }}
                     >
                       {p.target_type && <span>{p.target_type}</span>}
+                      {p.strategy && (
+                        <Badge tone={strategyTone(p.strategy)}>
+                          {strategyLabel(p.strategy)}
+                        </Badge>
+                      )}
                       {p.last_run_status && (
                         <Badge tone={runTone(p.last_run_status)}>{p.last_run_status}</Badge>
                       )}
@@ -232,7 +295,11 @@ export function Pipelines() {
       )}
 
       {viewingRun && (
-        <RunDetailModal runId={viewingRun} onClose={() => setViewingRun(null)} />
+        <RunDetailModal
+          runId={viewingRun}
+          strategy={selected?.strategy}
+          onClose={() => setViewingRun(null)}
+        />
       )}
     </div>
   );
@@ -331,10 +398,20 @@ function RunHistory({
         }}
       >
         <h2 style={{ fontSize: 'var(--fs-h2)' }}>{pipeline.name}</h2>
-        {pipeline.target_type && (
-          <Badge tone="info">{pipeline.target_type}</Badge>
-        )}
+        <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+          {pipeline.strategy && (
+            <Badge tone={strategyTone(pipeline.strategy)}>
+              {strategyLabel(pipeline.strategy)}
+            </Badge>
+          )}
+          {pipeline.target_type && (
+            <Badge tone="info">{pipeline.target_type}</Badge>
+          )}
+        </div>
       </div>
+
+      <StrategyFlow pipelineId={pipeline.id} strategy={pipeline.strategy} />
+
       <DataTable
         rows={runs}
         columns={columns}
@@ -348,7 +425,125 @@ function RunHistory({
   );
 }
 
-function RunDetailModal({ runId, onClose }: { runId: string; onClose: () => void }) {
+// StrategyFlow fetches GET /pipelines/:id/phases and renders
+// the strategy's planned phases as a horizontal flow. A
+// pipeline with no strategy renders nothing — the linear
+// steps show up in the run detail modal directly.
+function StrategyFlow({
+  pipelineId,
+  strategy,
+}: {
+  pipelineId: string;
+  strategy?: StrategyType;
+}) {
+  const { data, loading, error } = useApi<{ strategy: string; phases: Phase[] }>(
+    strategy ? `pipelines/${pipelineId}/phases` : '',
+  );
+  const phases: Phase[] = data?.phases ?? [];
+
+  if (!strategy) return null;
+  if (loading) {
+    return (
+      <div
+        style={{
+          padding: 'var(--sp-3)',
+          marginBottom: 'var(--sp-3)',
+          color: 'var(--color-text-muted)',
+          fontSize: 'var(--fs-caption)',
+        }}
+      >
+        Loading strategy flow…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div
+        style={{
+          padding: 'var(--sp-3)',
+          marginBottom: 'var(--sp-3)',
+          color: 'var(--color-error)',
+          fontSize: 'var(--fs-caption)',
+        }}
+      >
+        Strategy flow unavailable: {error}
+      </div>
+    );
+  }
+  if (phases.length === 0) return null;
+
+  return (
+    <div
+      data-testid="strategy-flow"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--sp-2)',
+        padding: 'var(--sp-3) var(--sp-4)',
+        marginBottom: 'var(--sp-3)',
+        background: 'var(--color-surface-elevated)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-md)',
+        overflowX: 'auto',
+      }}
+    >
+      <span
+        style={{
+          fontSize: 'var(--fs-caption)',
+          color: 'var(--color-text-muted)',
+          marginRight: 'var(--sp-2)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        Flow:
+      </span>
+      {phases.map((ph, i) => (
+        <span
+          key={ph.name}
+          style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}
+        >
+          <span
+            style={{
+              display: 'inline-flex',
+              flexDirection: 'column',
+              gap: 2,
+              padding: 'var(--sp-2) var(--sp-3)',
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 'var(--fs-caption)',
+              minWidth: 100,
+              textAlign: 'center',
+            }}
+          >
+            <span className="mono" style={{ fontWeight: 600 }}>
+              {ph.name}
+            </span>
+            {ph.env && (
+              <span style={{ color: 'var(--color-text-muted)' }}>env: {ph.env}</span>
+            )}
+            {ph.traffic_pct != null && ph.traffic_pct > 0 && (
+              <span style={{ color: 'var(--color-text-muted)' }}>{ph.traffic_pct}%</span>
+            )}
+          </span>
+          {i < phases.length - 1 && (
+            <span style={{ color: 'var(--color-text-muted)' }}>→</span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RunDetailModal({
+  runId,
+  strategy,
+  onClose,
+}: {
+  runId: string;
+  strategy?: StrategyType;
+  onClose: () => void;
+}) {
   const { push: toast } = useToast();
   const { data, loading, error, reload } = useApi<Run>(`runs/${runId}`);
   const [cancelling, setCancelling] = useState(false);
@@ -406,6 +601,16 @@ function RunDetailModal({ runId, onClose }: { runId: string; onClose: () => void
             <div>{fmtDuration(data.duration_ms)}</div>
             <div style={{ color: 'var(--color-text-secondary)' }}>Triggered By</div>
             <div>{data.triggered_by ?? '—'}</div>
+            {strategy && (
+              <>
+                <div style={{ color: 'var(--color-text-secondary)' }}>Strategy</div>
+                <div>
+                  <Badge tone={strategyTone(strategy)}>
+                    {strategyLabel(strategy)}
+                  </Badge>
+                </div>
+              </>
+            )}
           </div>
 
           <h3 style={{ fontSize: 'var(--fs-h3)', marginBottom: 'var(--sp-3)' }}>Steps</h3>
@@ -431,6 +636,9 @@ function RunDetailModal({ runId, onClose }: { runId: string; onClose: () => void
                       {i + 1}.
                     </span>
                     <span className="mono">{s.name}</span>
+                    {strategy && isStrategyPhase(s.name, strategy) && (
+                      <Badge tone={strategyTone(strategy)}>phase</Badge>
+                    )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
                     <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--color-text-secondary)' }}>
