@@ -149,6 +149,16 @@ type Pipeline struct {
 	Trigger string `gorm:"column:trigger;size:32;not null;default:manual" json:"trigger"`
 	Steps   StepList `gorm:"column:steps;type:text" json:"steps"`
 	Enabled bool   `gorm:"column:enabled;default:true" json:"enabled"`
+
+	// Deployment strategy (spec: blue-green / canary /
+	// rolling). Empty string means "no strategy — use the
+	// linear Steps list as-is". The config sub-structs
+	// are JSON-serialized into dedicated columns so the
+	// planner can fetch them without a JOIN.
+	Strategy        StrategyType    `gorm:"column:strategy;size:32;index" json:"strategy,omitempty"`
+	BlueGreenConfig BlueGreenConfig  `gorm:"column:blue_green_config;type:text" json:"blue_green_config,omitempty"`
+	CanaryConfig    CanaryConfig     `gorm:"column:canary_config;type:text" json:"canary_config,omitempty"`
+	RollingConfig   RollingConfig    `gorm:"column:rolling_config;type:text" json:"rolling_config,omitempty"`
 }
 
 // TableName pins the GORM-generated table name.
@@ -225,6 +235,108 @@ func (s *StepList) Scan(src any) error {
 // GormDataType pins the column type so AutoMigrate lands
 // TEXT (sqlite) / JSONB (postgres) consistently.
 func (StepList) GormDataType() string { return "text" }
+
+// =============================================================================
+// Strategy config Valuer/Scanner pairs. Each config is
+// persisted as a JSON column; the GormDataType pins the
+// column type so AutoMigrate lands TEXT (sqlite) / JSONB
+// (postgres) consistently. A zero-value config renders as
+// NULL so empty strategy columns stay compact.
+// =============================================================================
+
+// Value renders BlueGreenConfig as JSON. A zero-value
+// config renders NULL.
+func (b BlueGreenConfig) Value() (driver.Value, error) {
+	if b.ActiveEnv == "" && b.InactiveEnv == "" {
+		return nil, nil
+	}
+	return json.Marshal(b)
+}
+
+// Scan parses the column value into a fresh BlueGreenConfig.
+func (b *BlueGreenConfig) Scan(src any) error {
+	if src == nil {
+		*b = BlueGreenConfig{}
+		return nil
+	}
+	raw, err := scanJSONBytes(src)
+	if err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		*b = BlueGreenConfig{}
+		return nil
+	}
+	return json.Unmarshal(raw, b)
+}
+
+// Value renders CanaryConfig as JSON. A zero-value config
+// renders NULL.
+func (c CanaryConfig) Value() (driver.Value, error) {
+	if c.Baseline == "" && c.Candidate == "" && len(c.Stages) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(c)
+}
+
+// Scan parses the column value into a fresh CanaryConfig.
+func (c *CanaryConfig) Scan(src any) error {
+	if src == nil {
+		*c = CanaryConfig{}
+		return nil
+	}
+	raw, err := scanJSONBytes(src)
+	if err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		*c = CanaryConfig{}
+		return nil
+	}
+	return json.Unmarshal(raw, c)
+}
+
+// Value renders RollingConfig as JSON. A zero-value config
+// renders NULL.
+func (r RollingConfig) Value() (driver.Value, error) {
+	if r.TotalInstances == 0 && r.MaxSurgePct == 0 {
+		return nil, nil
+	}
+	return json.Marshal(r)
+}
+
+// Scan parses the column value into a fresh RollingConfig.
+func (r *RollingConfig) Scan(src any) error {
+	if src == nil {
+		*r = RollingConfig{}
+		return nil
+	}
+	raw, err := scanJSONBytes(src)
+	if err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		*r = RollingConfig{}
+		return nil
+	}
+	return json.Unmarshal(raw, r)
+}
+
+// scanJSONBytes is the small adapter shared by every
+// config Scanner: accept []byte / string, drop empty, return.
+func scanJSONBytes(src any) ([]byte, error) {
+	switch v := src.(type) {
+	case []byte:
+		return v, nil
+	case string:
+		if v == "" {
+			return nil, nil
+		}
+		return []byte(v), nil
+	default:
+		return nil, errors.New("pipeline: unsupported scan source type")
+	}
+}
 
 // RunStatus is the lifecycle state of a PipelineRun. The
 // five states mirror the task spec: pending, running,
