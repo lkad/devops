@@ -7,8 +7,8 @@
 name: devops-toolkit-clab
 prefix: clab
 mgmt:
-  network: devops-mgmt
-  ipv4-subnet: 172.30.30.0/24
+  network: devops-mgmt-v2
+  ipv4-subnet: 172.31.30.0/24
 
 topology:
   kinds:
@@ -22,6 +22,8 @@ topology:
         role: physical_host
         dc: dc1
         env: test
+      env:
+        PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII9laPZPJQ7O6rWffAKgeGMGQMhYQzC6YbBa1e8Z/ZKL vagrant@test6"
     dc2-physical-01:
       kind: linux
       image: linuxserver/openssh-server:latest
@@ -29,5 +31,7 @@ topology:
         role: physical_host
         dc: dc2
         env: test
+      env:
+        PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII9laPZPJQ7O6rWffAKgeGMGQMhYQzC6YbBa1e8Z/ZKL vagrant@test6"
   links:
     - endpoints: ["dc1-physical-01:eth1", "dc2-physical-01:eth1"]
