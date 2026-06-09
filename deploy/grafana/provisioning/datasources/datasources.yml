@@ -1,0 +1,66 @@
+# Grafana datasource provisioning for DevOps Toolkit.
+#
+# Auto-loaded on Grafana startup; declares the four
+# datasources the dashboards query:
+#   - Prometheus  → backend's /metrics (Go runtime, request count/duration)
+#   - InfluxDB v2 → physical host CPU / memory / disk (per host time series)
+#   - Loki        → log aggregation
+#   - Postgres    → pipeline runs, audit, hosts (business-data dashboards)
+#
+# `isDefault: true` is set on Prometheus so the Overview
+# dashboard opens against it.
+#
+# Mount into grafana container:
+#   volumes:
+#     - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: '15s'
+      httpMethod: POST
+
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    editable: true
+    jsonData:
+      version: Flux
+      organization: devops-toolkit
+      defaultBucket: metrics
+      tlsSkipVerify: true
+    secureJsonData:
+      token: ${INFLUXDB_TOKEN}
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: true
+    jsonData:
+      maxLines: 1000
+      timeout: 60
+
+  - name: Postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: ${POSTGRES_USER:-devops}
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD:-devops}
+    editable: true
+    jsonData:
+      database: ${POSTGRES_DB:-devops}
+      sslmode: disable
+      maxIdleConns: 2
+      maxOpenConns: 10
+      postgresVersion: 1500
+      timescaledb: false

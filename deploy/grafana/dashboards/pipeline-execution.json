@@ -1,0 +1,161 @@
+{
+  "description": "Pipeline execution outcomes, success rate, average duration, and recent runs. Postgres datasource queries the pipeline_runs and pipeline_step_runs tables directly.",
+  "editable": true,
+  "graphTooltip": 1,
+  "title": "DevOps Toolkit — Pipeline Execution",
+  "tags": ["devops-toolkit", "pipeline"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "postgres",
+        "current": { "text": "Postgres", "value": "Postgres" }
+      },
+      {
+        "name": "pipeline_id",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "query": {
+          "rawSql": "SELECT id AS __value, name AS __text FROM pipelines ORDER BY name",
+          "refId": "pipeline_query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total Runs (24h)",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS n FROM pipeline_runs WHERE started_at > now() - interval '24 hours'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Success Rate (24h)",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT CASE WHEN COUNT(*)=0 THEN 0 ELSE 100.0*SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END)/COUNT(*) END AS rate FROM pipeline_runs WHERE started_at > now() - interval '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "green", "value": 90 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Avg Duration (24h, completed runs)",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(AVG(duration_ms), 0) AS ms FROM pipeline_runs WHERE started_at > now() - interval '24 hours' AND status IN ('succeeded','failed')",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" } }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Cancelled (24h)",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS n FROM pipeline_runs WHERE started_at > now() - interval '24 hours' AND status = 'cancelled'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Runs per status (1h bins)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('hour', started_at) AS t, status, COUNT(*) AS n FROM pipeline_runs WHERE $__timeFilter(started_at) GROUP BY 1, 2 ORDER BY 1",
+          "refId": "A",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "p50 / p95 / p99 duration (ms, completed runs)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT $__time(started_at) AS time, percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS p50, percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95, percentile_cont(0.99) WITHIN GROUP (ORDER BY duration_ms) AS p99 FROM pipeline_runs WHERE $__timeFilter(started_at) AND status IN ('succeeded','failed') GROUP BY 1 ORDER BY 1",
+          "refId": "A",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" } }
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Recent Runs (last 20)",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT r.id::text AS run_id, p.name AS pipeline, r.status, r.triggered_by, r.started_at, r.finished_at, r.duration_ms FROM pipeline_runs r JOIN pipelines p ON p.id = r.pipeline_id WHERE ('$pipeline_id' = '$__all' OR r.pipeline_id IN ($pipeline_id)) ORDER BY r.started_at DESC LIMIT 20",
+          "refId": "A",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Step-level fail rate (per step_name, 24h)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 22 },
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('hour', s.started_at) AS t, s.step_name, 100.0*SUM(CASE WHEN s.status='failed' THEN 1 ELSE 0 END)/COUNT(*) AS fail_pct FROM pipeline_step_runs s WHERE s.started_at > now() - interval '24 hours' GROUP BY 1, 2 ORDER BY 1",
+          "refId": "A",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" } }
+    }
+  ]
+}

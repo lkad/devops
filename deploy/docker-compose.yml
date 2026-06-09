@@ -98,8 +98,17 @@ services:
     ports: ["3001:3000"]
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
+      # Auto-provision datasources + dashboards on boot.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     depends_on:
       - prometheus
+      - loki
+    volumes:
+      # Provisioning config (datasources, dashboard provider).
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # Dashboard JSONs (read at boot + every 30s thereafter).
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
 
   # Alertmanager: routes alerts from Prometheus to the channels defined in
   # config-ci.yaml. Empty receivers by default.
