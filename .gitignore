@@ -54,3 +54,4 @@ vendor/
 # containerlab runtime artifacts (per-host generated state)
 deploy/containerlab/clab-devops-toolkit-clab/
 devops-toolkit
+.gstack/
