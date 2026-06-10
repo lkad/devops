@@ -6,12 +6,16 @@
 // trace view. When no Tempo is configured, the page
 // shows the trace id in a copyable <pre> block so
 // the on-call can paste it into Grafana / Jaeger
-// / wherever their stack lives.
+// / wherever their stack lives. The page also shows
+// when the trace was opened and offers a deep link
+// to the Logs page (where the trace id is one of the
+// existing search fields).
 
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference types="vite/client" />
 
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { PageHeader } from '../components/common/PageHeader';
 import { Button } from '../components/common/Button';
 
@@ -19,9 +23,7 @@ const TEMPO_URL = (import.meta.env.VITE_TEMPO_URL as string | undefined) ?? '';
 
 function buildTempoURL(traceId: string, base: string): string | null {
   if (!base) return null;
-  // Tempo's Grafana datasource URL format:
-  //   <grafana>/explore?left=...
-  // We use the more permissive TraceQL search URL:
+  // Tempo's TraceQL search URL:
   //   <tempo>/api/traces/<traceId>
   // Operators can override by setting the env to the
   // exact template they use (a {traceId} placeholder
@@ -32,10 +34,24 @@ function buildTempoURL(traceId: string, base: string): string | null {
   return base.replace(/\/+$/, '') + '/api/traces/' + traceId;
 }
 
+function fmtTimestamp(d: Date): string {
+  return d.toISOString().replace('T', ' ').replace(/\..+$/, '') + ' UTC';
+}
+
 export function TraceDetail() {
   const { id } = useParams<{ id: string }>();
   const traceId = id ?? '';
   const tempoURL = buildTempoURL(traceId, TEMPO_URL);
+  const [openedAt] = useState(() => new Date());
+
+  // Refresh "how long ago" every 30s so the page is
+  // useful even when the operator has it open in a
+  // background tab.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
 
   async function copyToClipboard() {
     try {
@@ -50,7 +66,12 @@ export function TraceDetail() {
     <div>
       <PageHeader
         title="Trace"
-        subtitle="OpenTelemetry trace id from the failed request"
+        subtitle="OpenTelemetry trace id from a failed request"
+        actions={
+          <Link to="/services">
+            <Button variant="secondary">← Back to Services</Button>
+          </Link>
+        }
       />
 
       <div
@@ -64,15 +85,33 @@ export function TraceDetail() {
       >
         <div
           style={{
-            fontSize: 'var(--fs-caption)',
-            color: 'var(--color-text-secondary)',
-            marginBottom: 'var(--sp-2)',
+            display: 'grid',
+            gridTemplateColumns: '120px 1fr',
+            gap: 'var(--sp-2) var(--sp-4)',
+            marginBottom: 'var(--sp-4)',
+            fontSize: 'var(--fs-small)',
           }}
         >
-          Trace id
+          <div style={{ color: 'var(--color-text-secondary)' }}>Trace id</div>
+          <div
+            className="mono"
+            style={{ wordBreak: 'break-all' }}
+            data-testid="trace-id"
+          >
+            {traceId}
+          </div>
+
+          <div style={{ color: 'var(--color-text-secondary)' }}>Opened</div>
+          <div>{fmtTimestamp(openedAt)}</div>
+
+          <div style={{ color: 'var(--color-text-secondary)' }}>Source</div>
+          <div>
+            <code style={{ fontSize: 'var(--fs-caption)' }}>X-Trace-Id</code>{' '}
+            response header on a failed backend request
+          </div>
         </div>
+
         <pre
-          data-testid="trace-id"
           style={{
             margin: 0,
             padding: 'var(--sp-3) var(--sp-4)',
@@ -94,6 +133,7 @@ export function TraceDetail() {
             gap: 'var(--sp-3)',
             marginTop: 'var(--sp-4)',
             alignItems: 'center',
+            flexWrap: 'wrap',
           }}
         >
           <Button onClick={copyToClipboard}>Copy</Button>
@@ -107,6 +147,12 @@ export function TraceDetail() {
               <Button variant="secondary">Open in Tempo ↗</Button>
             </a>
           )}
+          <Link
+            to={`/logs?q=${encodeURIComponent(traceId)}`}
+            data-testid="logs-link"
+          >
+            <Button variant="secondary">Search Logs</Button>
+          </Link>
         </div>
 
         {!tempoURL && (
