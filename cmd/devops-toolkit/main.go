@@ -94,10 +94,10 @@ func run() error {
 		phMaintenance := registerPhysicalHostRoutes(eng, db, log, hubPublisher, auditSvc, auditRepo)
 		registerAlertsRoutes(eng, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance})
 		registerDiscoveryRoutes(eng, db, log)
-		registerK8sClusterRoutes(eng, db, log)
+		k8sSvc := registerK8sClusterRoutes(eng, db, log)
 		registerHostProjectLinkRoutes(eng, db, log)
 		registerPipelineRoutes(eng, db, log)
-		registerServiceCatalogRoutes(eng, db, log)
+		registerServiceCatalogRoutes(eng, db, log, k8sSvc)
 		registerLogsRoutes(eng, db, log)
 		registerMetricsRoutes(eng, db, log)
 		registerLogStreamRoutes(eng, db, log)
@@ -632,10 +632,10 @@ func registerDiscoveryRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 // The AES-256 key is loaded from K8S_CRYPTO_KEY env var; in dev a
 // deterministic 32-byte key is used with a warning, mirroring the
 // JWT-secret pattern.
-func registerK8sClusterRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+func registerK8sClusterRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) *k8s.Service {
 	if err := dbpkg.AutoMigrate(db, k8s.AllModels()...); err != nil {
 		log.Error("k8s AutoMigrate failed", "err", err)
-		return
+		return nil
 	}
 	key := []byte(envOr("K8S_CRYPTO_KEY", "dev-k8s-crypto-key-32-bytes-long-xx"))
 	if len(key) != 32 {
@@ -648,6 +648,7 @@ func registerK8sClusterRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	v1 := r.Group("/api/v1")
 	k8s.NewHandler(svc).Register(v1)
 	log.Info("k8s cluster routes registered")
+	return svc
 }
 
 // registerHostProjectLinkRoutes wires the physical-host-project-linking
@@ -695,7 +696,7 @@ func registerPipelineRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 // wiring is done here in main.go via two function-typed
 // adapters. Pipeline migrations must already be applied
 // (registerPipelineRoutes runs first).
-func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, k8sSvc *k8s.Service) {
 	if err := dbpkg.AutoMigrate(db, &servicecatalog.Service{}, &servicecatalog.OnCall{}, &servicecatalog.RunbookEntry{}); err != nil {
 		log.Error("servicecatalog AutoMigrate failed", "err", err)
 		return
@@ -739,7 +740,7 @@ func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger
 	// rollup falls back to the pipeline signal — the
 	// behaviour the tests cover.
 	k8sRepo := k8s.NewRepository(db)
-	health.WithK8s(buildK8sSource(k8sRepo))
+	health.WithK8s(buildK8sSource(k8sRepo, k8sSvc))
 
 	handler.SetHealth(health)
 
@@ -748,101 +749,83 @@ func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger
 	log.Info("servicecatalog routes registered")
 }
 
-// buildK8sSource wires the production K8sSource:
-// list every registered cluster, build a getter that
-// resolves a per-cluster client via the k8s module's
-// existing single-client seam (P1.5 will add a real
-// per-cluster registry; today the single client is
-// shared). The walker aggregates across clusters and
-// filters by deployment name == service name.
-func buildK8sSource(repo *k8s.Repository) servicecatalog.K8sSource {
+// buildK8sSource wires the production K8sSource via
+// the P1.5 per-cluster ClientRegistry. The registry
+// builds a per-cluster KubeClient from each cluster's
+// decrypted kubeconfig and caches it. The walker
+// aggregates across clusters and filters by
+// deployment name == service name.
+func buildK8sSource(repo *k8s.Repository, decrypter *k8s.Service) servicecatalog.K8sSource {
+	registry := k8s.NewClientRegistry(repo, decrypter)
 	clusters, _, err := repo.List(k8s.ListFilter{})
 	if err != nil {
-		// Walking failed at startup: fall back to the
-		// "no K8s data" branch by returning nil
-		// clusters. The rollup will use the pipeline
-		// signal. Logged at info level (this is a
-		// common dev path; production should never
-		// hit it).
 		clusters = nil
 	}
 	ids := make([]string, 0, len(clusters))
 	for _, c := range clusters {
 		ids = append(ids, c.ID)
 	}
-	getter := &k8sRepoClientGetter{repo: repo}
-	return servicecatalog.NewMultiClusterK8sSource(getter, ids, "default")
+	return servicecatalog.NewMultiClusterK8sSource(registryAdapter{registry: registry}, ids, "default")
 }
 
-// k8sRepoClientGetter resolves a cluster's K8s client
-// from the k8s package's Repository + Service seam. The
-// current k8s module has a single client shared across
-// all clusters (registerK8sClusterRoutes wires one
-// FakeClient or one KubeClient); for a real per-cluster
-// registry, P1.5 will replace this with a map of
-// cluster-id -> client built from each cluster's
-// decrypted kubeconfig.
-type k8sRepoClientGetter struct {
-	repo *k8s.Repository
+// registryAdapter bridges k8s.ClientRegistry to the
+// servicecatalog.K8sClientGetter interface. The bridge
+// is needed because the two packages cannot share
+// types (cycle prevention) — servicecatalog stays
+// free of any k8s-package imports.
+type registryAdapter struct {
+	registry k8s.ClientRegistry
 }
 
-// ClientFor implements servicecatalog.K8sClientGetter.
-// In dev with the FakeClient wired in
-// registerK8sClusterRoutes, every cluster "has a
-// client" (the same one); the walker's behaviour is
-// driven by the registered clusters, not the client
-// resolution. In a production wiring where no cluster
-// is registered, ClientFor returns ErrK8sNoClient
-// for every cluster and the walker short-circuits to
-// the pipeline signal.
-func (g *k8sRepoClientGetter) ClientFor(_ string) (servicecatalog.K8sClient, error) {
-	// The current k8s.Service has a single client. If
-	// a future iteration gives each cluster its own
-	// client, this method will key on the clusterID
-	// and dispatch. For now, every cluster that is
-	// registered gets the same client (which is
-	// FakeClient in dev) so ListDeployments returns
-	// the same list — but only entries whose
-	// ClusterID matches will be returned by the
-	// walker's filter, so the multiplicity collapses
-	// to a single entry per cluster.
-	// We hand the walker a per-cluster adapter that
-	// rewrites the clusterID on the way out.
-	return &perClusterAdapter{inner: nil, clusterID: ""}, nil
+// ClientFor implements servicecatalog.K8sClientGetter
+// by delegating to the k8s registry. The k8s.Client
+// (which has all the production methods) is adapted
+// to the minimal servicecatalog.K8sClient.
+func (a registryAdapter) ClientFor(clusterID string) (servicecatalog.K8sClient, error) {
+	c, err := a.registry.ClientFor(clusterID)
+	if err != nil {
+		// Map the k8s package's ErrNotFound to the
+		// servicecatalog's ErrK8sNoClient so the
+		// walker skips the cluster silently.
+		if errors.Is(err, k8s.ErrNotFound) {
+			return nil, servicecatalog.ErrK8sNoClient
+		}
+		return nil, err
+	}
+	return k8sClientAdapter{client: c, clusterID: clusterID}, nil
 }
 
-// perClusterAdapter is the per-cluster wrapper that
-// fills the clusterID field. The "inner" client is
-// currently nil because the k8s module does not yet
-// expose per-cluster clients; P1.5 will set this from
-// the cluster's decrypted kubeconfig. For now, an
-// inner=nil client returns an empty deployment list
-// (no pods visible) — the walker returns the empty
-// list and the rollup falls through to the pipeline
-// signal. That is exactly the dev behaviour the spec
-// requires: "no K8s deployment found" -> fall
-// through.
-type perClusterAdapter struct {
-	inner     servicecatalog.K8sClient
+// k8sClientAdapter wraps a k8s.Client (production
+// type with the full method set) and exposes only
+// the ListDeployments method the servicecatalog
+// actually calls. Each adapter is bound to a single
+// cluster ID so the walker's filter is not
+// ambiguous.
+type k8sClientAdapter struct {
+	client    k8s.Client
 	clusterID string
 }
 
 // ListDeployments satisfies servicecatalog.K8sClient.
-// Returns an empty list in the current P1.4 build;
-// the clusterID rewriting is wired but inactive
-// until P1.5 provides real per-cluster clients.
-func (p *perClusterAdapter) ListDeployments(ctx context.Context, ns string) ([]servicecatalog.K8sDeployment, error) {
-	if p.inner == nil {
-		return nil, nil
-	}
-	deps, err := p.inner.ListDeployments(ctx, ns)
+// It translates the k8s package's Deployment into the
+// servicecatalog's K8sDeployment (separate types to
+// keep the package boundary clean).
+func (a k8sClientAdapter) ListDeployments(ctx context.Context, ns string) ([]servicecatalog.K8sDeployment, error) {
+	deps, err := a.client.ListDeployments(ctx, ns)
 	if err != nil {
 		return nil, err
 	}
-	for i := range deps {
-		deps[i].ClusterID = p.clusterID
+	out := make([]servicecatalog.K8sDeployment, 0, len(deps))
+	for _, d := range deps {
+		out = append(out, servicecatalog.K8sDeployment{
+			ClusterID: a.clusterID,
+			Namespace: d.Namespace,
+			Name:      d.Name,
+			Replicas:  d.Replicas,
+			Available: d.Available,
+		})
 	}
-	return deps, nil
+	return out, nil
 }
 
 // orZeroTime returns t if non-nil, otherwise the zero
