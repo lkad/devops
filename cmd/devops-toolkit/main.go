@@ -162,6 +162,27 @@ func buildRouter(log *logger.Logger) http.Handler {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	// OpenTelemetry tracing. Initialised before the
+	// Prometheus middleware so the trace is the outermost
+	// span (Prometheus / Gin metrics are children of the
+	// HTTP span). Exports to stdout when OTEL_EXPORTER=stdout
+	// or to a remote OTLP collector when OTEL_EXPORTER_OTLP_ENDPOINT
+	// is set; otherwise a noop tracer keeps the API stable.
+	tracingCfg := observability.TracingConfig{
+		ServiceName:  "devops-toolkit",
+		ServiceVer:   envOr("APP_VERSION", "dev"),
+		SamplerRatio: observability.SamplerRatioFromEnv(),
+		OTLPEndpoint: os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		Stdout:       envOr("OTEL_EXPORTER", "") == "stdout",
+	}
+	tracing := observability.NewTracing(tracingCfg)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tracing.Shutdown(ctx)
+	}()
+	r.Use(tracing.Middleware())
+
 	// Prometheus instrumentation. The middleware counts every
 	// request by route template + status; the /metrics endpoint
 	// itself is mounted as a plain handler so it doesn't show up
@@ -183,6 +204,7 @@ func buildRouter(log *logger.Logger) http.Handler {
 				"GET  /health",
 				"GET  /metrics",
 				"GET  /api/v1/capabilities",
+				"X-Trace-Id response header (every request)",
 				"POST /api/v1/auth/login",
 				"GET  /api/v1/auth/ldap/health",
 				"WS   /api/v1/ws",
