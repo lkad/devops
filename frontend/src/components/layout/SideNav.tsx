@@ -4,6 +4,7 @@ import { NavLink } from 'react-router-dom';
 const items = [
   { to: '/', label: 'Dashboard', icon: '◫' },
   { to: '/projects', label: 'Projects', icon: '⌥' },
+  { to: '/services', label: 'Services', icon: '⬢' },
   { to: '/devices', label: 'Devices', icon: '◇' },
   { to: '/physical-hosts', label: 'Physical Hosts', icon: '☷' },
   { to: '/k8s', label: 'K8s Clusters', icon: '⬡' },

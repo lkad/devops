@@ -12,6 +12,7 @@ import { PhysicalHosts } from './pages/PhysicalHosts';
 import { K8sClusters } from './pages/K8sClusters';
 import { Discovery } from './pages/Discovery';
 import { Pipelines } from './pages/Pipelines';
+import { Services } from './pages/Services';
 import { Logs } from './pages/Logs';
 import { Metrics } from './pages/Metrics';
 import { Alerts } from './pages/Alerts';
@@ -31,6 +32,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/k8s" element={<K8sClusters />} />
             <Route path="/discovery" element={<Discovery />} />
             <Route path="/pipelines" element={<Pipelines />} />
+            <Route path="/services" element={<Services />} />
             <Route path="/logs" element={<Logs />} />
             <Route path="/metrics" element={<Metrics />} />
             <Route path="/alerts" element={<Alerts />} />
