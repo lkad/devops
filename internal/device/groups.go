@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/database"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
@@ -258,12 +259,14 @@ func NewGroupHandler(svc *GroupService) *GroupHandler {
 
 // Register attaches the device-group routes to the supplied
 // router group.
-func (h *GroupHandler) Register(r *gin.RouterGroup) {
-	r.GET("/device-groups", h.List)
-	r.POST("/device-groups", h.Create)
-	r.GET("/device-groups/:id", h.Get)
-	r.PUT("/device-groups/:id", h.Update)
-	r.DELETE("/device-groups/:id", h.Delete)
+func (h *GroupHandler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewDevices)
+	writeP := perms(rbac.PermissionManageDeviceGroups)
+	r.GET("/device-groups", viewP, h.List)
+	r.POST("/device-groups", writeP, h.Create)
+	r.GET("/device-groups/:id", viewP, h.Get)
+	r.PUT("/device-groups/:id", writeP, h.Update)
+	r.DELETE("/device-groups/:id", writeP, h.Delete)
 }
 
 // groupRequest is the wire shape for the POST/PUT endpoints.

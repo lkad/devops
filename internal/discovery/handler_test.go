@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -28,7 +29,7 @@ func discoveryHandlerFixture(t *testing.T, hosts []Host, results map[string]Prob
 
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 	return r
 }
 

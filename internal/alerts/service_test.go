@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/devops-toolkit/backend/internal/handler"
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -367,7 +368,7 @@ func newHandlerRouter(t *testing.T) (*gin.Engine, *Service, *FakeDispatcher) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	v1 := r.Group("/api/v1")
-	h.Register(v1)
+	h.Register(v1, rbac.NoopPermFactory())
 	return r, svc, disp
 }
 

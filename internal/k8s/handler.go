@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/internal/k8s/logstream"
 	"github.com/devops-toolkit/backend/pkg/contracts"
@@ -31,22 +32,29 @@ func NewHandler(svc *Service) *Handler {
 // Register attaches the k8s routes to the supplied router
 // group. The group is expected to live under /api/v1; the
 // handler is agnostic about the surrounding stack.
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.GET("/k8s/clusters", h.List)
-	r.POST("/k8s/clusters", h.Create)
-	r.GET("/k8s/clusters/:clusterID", h.Get)
-	r.PUT("/k8s/clusters/:clusterID", h.Replace)
-	r.DELETE("/k8s/clusters/:clusterID", h.Delete)
-	r.POST("/k8s/clusters/:clusterID/probe", h.Probe)
-	r.GET("/k8s/clusters/:clusterID/pods", h.ListPods)
-	r.GET("/k8s/clusters/:clusterID/deployments", h.ListDeployments)
-	r.GET("/k8s/clusters/:clusterID/services", h.ListServices)
-	r.POST("/k8s/clusters/:clusterID/namespaces/:ns/pods/:pod/exec", h.Exec)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewK8sResources)
+	clusterP := perms(rbac.PermissionManageK8sClusters)
+	execP := perms(rbac.PermissionExecK8sPod)
+	logsP := perms(rbac.PermissionViewK8sPodLogs)
+	r.GET("/k8s/clusters", viewP, h.List)
+	r.POST("/k8s/clusters", clusterP, h.Create)
+	r.GET("/k8s/clusters/:clusterID", viewP, h.Get)
+	r.PUT("/k8s/clusters/:clusterID", clusterP, h.Replace)
+	r.DELETE("/k8s/clusters/:clusterID", clusterP, h.Delete)
+	r.POST("/k8s/clusters/:clusterID/probe", clusterP, h.Probe)
+	r.GET("/k8s/clusters/:clusterID/pods", viewP, h.ListPods)
+	r.GET("/k8s/clusters/:clusterID/deployments", viewP, h.ListDeployments)
+	r.GET("/k8s/clusters/:clusterID/services", viewP, h.ListServices)
+	r.POST("/k8s/clusters/:clusterID/namespaces/:ns/pods/:pod/exec", execP, h.Exec)
 	// Per-cluster log query (P2 follow-up). The
 	// label-selector path fan-outs across pods in the
 	// namespace; the apiserver call lives on the
 	// per-cluster Client resolved via Service.Registry.
-	r.GET("/k8s/clusters/:clusterID/namespaces/:ns/logs", h.GetLogs)
+	r.GET("/k8s/clusters/:clusterID/namespaces/:ns/logs", logsP, h.GetLogs)
 }
 
 // clusterRequest is the wire shape for POST/PUT /k8s/clusters.

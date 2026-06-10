@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -29,7 +30,7 @@ func newLogsHandlerFixture(t *testing.T) *gin.Engine {
 	r := gin.New()
 	api := r.Group("/api/v1")
 	h := NewHandlerWithExtra(svc, extra, repo)
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 	return r
 }
 

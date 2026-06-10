@@ -1,6 +1,7 @@
 package project
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -26,7 +27,7 @@ func newTestRouter(t *testing.T) *gin.Engine {
 	svc := NewService(repo)
 	h := NewHandler(svc, repo)
 	r := gin.New()
-	h.Register(r.Group("/api/v1"))
+	h.Register(r.Group("/api/v1"), rbac.NoopPermFactory())
 	return r
 }
 

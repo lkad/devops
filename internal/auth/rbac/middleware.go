@@ -13,6 +13,18 @@ import (
 // package can write to the same key without a shared constant.
 const AuthUserKey = "auth.user"
 
+// NoopPermFactory is a no-op Permission factory for tests
+// that build a *Handler.Register on a plain *gin.RouterGroup
+// without exercising the auth + RBAC chain. Every returned
+// middleware is a pass-through; the route handlers run
+// untouched. Production wiring MUST NOT use this — pass
+// rbac.RequirePermission(svc, perm) instead.
+func NoopPermFactory() func(Permission) gin.HandlerFunc {
+	return func(Permission) gin.HandlerFunc {
+		return func(c *gin.Context) { c.Next() }
+	}
+}
+
 // RequirePermission returns a Gin middleware that 403s any request
 // whose authenticated user does not hold the required global
 // permission. The check is the matrix lookup in Service.HasPermission

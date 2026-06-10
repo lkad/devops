@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -29,11 +30,16 @@ func NewHandler(svc *Service) *Handler {
 // Register attaches the discovery routes to the supplied
 // router group. The group is expected to live under /api/v1;
 // the handler is agnostic about the surrounding stack.
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.POST("/discovery/runs", h.CreateRun)
-	r.GET("/discovery/runs", h.ListRuns)
-	r.GET("/discovery/runs/:id", h.GetRun)
-	r.POST("/discovery/runs/:id/promote", h.Promote)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewDiscovery)
+	runP := perms(rbac.PermissionRunDiscovery)
+	r.POST("/discovery/runs", runP, h.CreateRun)
+	r.GET("/discovery/runs", viewP, h.ListRuns)
+	r.GET("/discovery/runs/:id", viewP, h.GetRun)
+	r.POST("/discovery/runs/:id/promote", runP, h.Promote)
 }
 
 // createRunRequest is the wire shape of POST /discovery/runs.

@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/database"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
@@ -269,12 +270,14 @@ func NewTemplateHandler(svc *TemplateService) *TemplateHandler {
 
 // Register attaches the configuration-template routes to the
 // supplied router group.
-func (h *TemplateHandler) Register(r *gin.RouterGroup) {
-	r.GET("/configuration-templates", h.List)
-	r.POST("/configuration-templates", h.Create)
-	r.GET("/configuration-templates/:id", h.Get)
-	r.PUT("/configuration-templates/:id", h.Update)
-	r.DELETE("/configuration-templates/:id", h.Delete)
+func (h *TemplateHandler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewDevices)
+	writeP := perms(rbac.PermissionManageConfigurationTemplates)
+	r.GET("/configuration-templates", viewP, h.List)
+	r.POST("/configuration-templates", writeP, h.Create)
+	r.GET("/configuration-templates/:id", viewP, h.Get)
+	r.PUT("/configuration-templates/:id", writeP, h.Update)
+	r.DELETE("/configuration-templates/:id", writeP, h.Delete)
 }
 
 // templateRequest is the wire shape for the POST/PUT endpoints.

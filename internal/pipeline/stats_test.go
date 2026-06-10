@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 )
 
 // sharedFixture returns a router + repo backed by the same
@@ -22,7 +24,7 @@ func sharedFixture(t *testing.T) (*gin.Engine, *Repository) {
 	h := NewHandler(svc)
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 	return r, repo
 }
 

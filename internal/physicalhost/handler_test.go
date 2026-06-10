@@ -1,6 +1,7 @@
 package physicalhost
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -44,7 +45,7 @@ func handlerFixture(t *testing.T) *gin.Engine {
 	})
 	r := gin.New()
 	v1 := r.Group("/api/v1")
-	h.Register(v1)
+	h.Register(v1, rbac.NoopPermFactory())
 	return r
 }
 

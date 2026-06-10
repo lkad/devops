@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -58,33 +59,38 @@ func NewHandlerWithExtra(svc *Service, extra *ExtraService, repo *ExtraRepositor
 
 // Register attaches the log-aggregation routes to the supplied
 // router group. The group is expected to live under /api/v1.
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.GET("/logs/capabilities", h.Capabilities)
-	r.GET("/logs/query", h.Query)
-	r.GET("/logs/streams", h.Streams)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewLogs)
+	writeP := perms(rbac.PermissionWriteLogs)
+	r.GET("/logs/capabilities", viewP, h.Capabilities)
+	r.GET("/logs/query", viewP, h.Query)
+	r.GET("/logs/streams", viewP, h.Streams)
 	// Dev-only echo endpoint. The leading underscore in the path
 	// is the spec's "this is not part of the stable surface"
 	// convention.
-	r.POST("/logs/_test/echo", h.Echo)
+	r.POST("/logs/_test/echo", writeP, h.Echo)
 
 	// Spec coverage: retention policy + log statistics.
 	if h.extra != nil {
-		r.GET("/logs/retention", h.GetRetention)
-		r.PUT("/logs/retention", h.SetRetention)
-		r.POST("/logs/retention/cleanup", h.TriggerRetentionCleanup)
-		r.GET("/logs/stats", h.GetLogStats)
+		r.GET("/logs/retention", viewP, h.GetRetention)
+		r.PUT("/logs/retention", writeP, h.SetRetention)
+		r.POST("/logs/retention/cleanup", writeP, h.TriggerRetentionCleanup)
+		r.GET("/logs/stats", viewP, h.GetLogStats)
 
 		// Spec coverage: saved filters (full CRUD + apply).
-		r.POST("/logs/saved-filters", h.CreateSavedFilter)
-		r.GET("/logs/saved-filters", h.ListSavedFilters)
-		r.GET("/logs/saved-filters/:id", h.GetSavedFilter)
-		r.DELETE("/logs/saved-filters/:id", h.DeleteSavedFilter)
-		r.POST("/logs/saved-filters/:id/apply", h.ApplySavedFilter)
+		r.POST("/logs/saved-filters", writeP, h.CreateSavedFilter)
+		r.GET("/logs/saved-filters", viewP, h.ListSavedFilters)
+		r.GET("/logs/saved-filters/:id", viewP, h.GetSavedFilter)
+		r.DELETE("/logs/saved-filters/:id", writeP, h.DeleteSavedFilter)
+		r.POST("/logs/saved-filters/:id/apply", viewP, h.ApplySavedFilter)
 
 		// Spec coverage: alert rules CRUD.
-		r.POST("/logs/alert-rules", h.CreateAlertRule)
-		r.GET("/logs/alert-rules", h.ListAlertRules)
-		r.DELETE("/logs/alert-rules/:id", h.DeleteAlertRule)
+		r.POST("/logs/alert-rules", writeP, h.CreateAlertRule)
+		r.GET("/logs/alert-rules", viewP, h.ListAlertRules)
+		r.DELETE("/logs/alert-rules/:id", writeP, h.DeleteAlertRule)
 	}
 }
 

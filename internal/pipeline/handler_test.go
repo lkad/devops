@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -34,7 +35,7 @@ func pipelineHandlerFixture(t *testing.T) *gin.Engine {
 	h := NewHandler(svc)
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 	return r
 }
 
@@ -53,7 +54,7 @@ func pipelineHandlerFixtureWithFake(t *testing.T) (*gin.Engine, *Fake) {
 	h := NewHandler(svc)
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 	return r, fake
 }
 

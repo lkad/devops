@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 )
 
 // TestHandler_Get_IncludesOnCall pins the wire shape:
@@ -22,7 +24,7 @@ func TestHandler_Get_IncludesOnCall(t *testing.T) {
 	h := NewHandler(cat)
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 
 	// Create the service and a current shift.
 	w, body := doJSON(t, r, "POST", "/api/v1/services",
@@ -63,7 +65,7 @@ func TestHandler_Get_OnCallAbsent(t *testing.T) {
 	h := NewHandler(cat)
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 
 	w, body := doJSON(t, r, "POST", "/api/v1/services",
 		`{"name":"svc-no-oncall","tier":"standard"}`)
@@ -94,7 +96,7 @@ func TestHandler_Get_IncludesRunbook(t *testing.T) {
 	h := NewHandler(cat)
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 
 	w, body := doJSON(t, r, "POST", "/api/v1/services",
 		`{"name":"svc-rb","tier":"standard"}`)

@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/devops-toolkit/backend/internal/auth"
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -35,7 +36,7 @@ func TestHandler_Upgrade_Success(t *testing.T) {
 	tok := issueTestToken(t, signer, &contracts.User{ID: "u-1", Username: "alice", Role: contracts.RoleOperator})
 
 	router := gin.New()
-	RegisterRoutes(router, h, signer, nil)
+	RegisterRoutes(router, h, signer, nil, rbac.NoopPermFactory())
 
 	srv := httptest.NewServer(router)
 	defer srv.Close()
@@ -66,7 +67,7 @@ func TestHandler_Upgrade_RejectsMissingToken(t *testing.T) {
 	signer := newTestSigner(t)
 
 	router := gin.New()
-	RegisterRoutes(router, h, signer, nil)
+	RegisterRoutes(router, h, signer, nil, rbac.NoopPermFactory())
 
 	srv := httptest.NewServer(router)
 	defer srv.Close()
@@ -104,7 +105,7 @@ func TestHandler_Upgrade_RejectsBadUpgrade(t *testing.T) {
 	tok := issueTestToken(t, signer, &contracts.User{ID: "u-1", Role: contracts.RoleOperator})
 
 	router := gin.New()
-	RegisterRoutes(router, h, signer, nil)
+	RegisterRoutes(router, h, signer, nil, rbac.NoopPermFactory())
 	srv := httptest.NewServer(router)
 	defer srv.Close()
 
@@ -135,7 +136,7 @@ func TestHandler_Accept_ThenSubscribePublish(t *testing.T) {
 	tok := issueTestToken(t, signer, &contracts.User{ID: "u-1", Role: contracts.RoleOperator})
 
 	router := gin.New()
-	RegisterRoutes(router, h, signer, nil)
+	RegisterRoutes(router, h, signer, nil, rbac.NoopPermFactory())
 	srv := httptest.NewServer(router)
 	defer srv.Close()
 

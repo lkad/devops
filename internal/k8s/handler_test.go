@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -55,7 +56,7 @@ func execFixture(t *testing.T, fc *FakeClient) *gin.Engine {
 
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 	return r
 }
 
@@ -309,7 +310,7 @@ func TestHandler_ListPods_OK(t *testing.T) {
 	h := NewHandler(svc)
 	r2 := gin.New()
 	api := r2.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 
 	_, created := doRequest(t, r2, "POST", "/api/v1/k8s/clusters", map[string]any{
 		"name": "p", "type": "k3d", "kubeconfig": "k",
@@ -335,7 +336,7 @@ func TestHandler_ListDeployments_OK(t *testing.T) {
 	h := NewHandler(svc)
 	r2 := gin.New()
 	api := r2.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 
 	_, created := doRequest(t, r2, "POST", "/api/v1/k8s/clusters", map[string]any{
 		"name": "p", "type": "k3d", "kubeconfig": "k",
@@ -361,7 +362,7 @@ func TestHandler_ListServices_OK(t *testing.T) {
 	h := NewHandler(svc)
 	r2 := gin.New()
 	api := r2.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 
 	_, created := doRequest(t, r2, "POST", "/api/v1/k8s/clusters", map[string]any{
 		"name": "p", "type": "k3d", "kubeconfig": "k",

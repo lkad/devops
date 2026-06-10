@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -31,9 +32,13 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 //
 //	GET /api/v1/audit          list events (filterable)
 //	GET /api/v1/audit/:id      get a single event
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.GET("/audit", h.List)
-	r.GET("/audit/:id", h.Get)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewAuditLog)
+	r.GET("/audit", viewP, h.List)
+	r.GET("/audit/:id", viewP, h.Get)
 }
 
 // List handles GET /api/v1/audit. The supported query

@@ -1,6 +1,7 @@
 package hostproject
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -36,7 +37,7 @@ func newHandlerRig(t *testing.T) (*gin.Engine, *gorm.DB, *Service) {
 
 	r := gin.New()
 	api := r.Group("/api/v1")
-	hpH.Register(api)
+	hpH.Register(api, rbac.NoopPermFactory())
 	return r, db, svc
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -29,14 +30,20 @@ func NewHandler(svc *Service) *Handler {
 // Register attaches the device routes to the supplied router
 // group. The group is expected to live under /api/v1; the
 // handler is agnostic about the surrounding stack.
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.GET("/devices", h.List)
-	r.GET("/devices/search", h.Search)
-	r.POST("/devices", h.Create)
-	r.GET("/devices/:id", h.Get)
-	r.PUT("/devices/:id", h.Replace)
-	r.DELETE("/devices/:id", h.Delete)
-	r.POST("/devices/:id/actions", h.Action)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewDevices)
+	modP := perms(rbac.PermissionModifyConfig)
+	writeP := perms(rbac.PermissionWriteDevices)
+	r.GET("/devices", viewP, h.List)
+	r.GET("/devices/search", viewP, h.Search)
+	r.POST("/devices", writeP, h.Create)
+	r.GET("/devices/:id", viewP, h.Get)
+	r.PUT("/devices/:id", writeP, h.Replace)
+	r.DELETE("/devices/:id", writeP, h.Delete)
+	r.POST("/devices/:id/actions", modP, h.Action)
 }
 
 // deviceRequest is the wire shape for POST /devices. We keep

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 )
 
 // newTestHandler builds a router with the catalog handler
@@ -20,7 +22,7 @@ func newTestHandler(t *testing.T) (*gin.Engine, *Catalog) {
 	cat := NewCatalog(repo)
 	r := gin.New()
 	api := r.Group("/api/v1")
-	NewHandler(cat).Register(api)
+	NewHandler(cat).Register(api, rbac.NoopPermFactory())
 	return r, cat
 }
 

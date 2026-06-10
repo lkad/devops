@@ -1,6 +1,7 @@
 package physicalhost
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"errors"
 	"net/http"
 	"testing"
@@ -115,6 +116,6 @@ func handlerWithMetrics(t *testing.T, seed func(p *Fake)) *gin.Engine {
 	})
 	r := gin.New()
 	v1 := r.Group("/api/v1")
-	h.Register(v1)
+	h.Register(v1, rbac.NoopPermFactory())
 	return r
 }

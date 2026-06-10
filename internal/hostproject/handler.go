@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -45,15 +46,20 @@ func NewHandler(svc *Service) *Handler {
 //
 // The families mirror the spec's "host detail" and
 // "project detail" entry points.
-func (h *Handler) Register(group *gin.RouterGroup) {
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(group *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewDevices)
+	writeP := perms(rbac.PermissionManageHostProjectLinks)
 	d := group.Group("/devices/:id/projects")
 	{
-		d.GET("", h.listDeviceProjects)
-		d.POST("", h.linkDeviceProject)
-		d.POST("/bulk", h.bulkLinkDeviceProjects)
-		d.DELETE("/:project_id", h.unlinkDeviceProject)
+		d.GET("", viewP, h.listDeviceProjects)
+		d.POST("", writeP, h.linkDeviceProject)
+		d.POST("/bulk", writeP, h.bulkLinkDeviceProjects)
+		d.DELETE("/:project_id", writeP, h.unlinkDeviceProject)
 	}
-	group.GET("/projects/:id/devices", h.listProjectDevices)
+	group.GET("/projects/:id/devices", viewP, h.listProjectDevices)
 }
 
 // linkRequest is the wire shape for POST

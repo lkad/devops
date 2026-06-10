@@ -1,6 +1,7 @@
 package logstream
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"bufio"
 	"context"
 	"encoding/json"
@@ -26,7 +27,7 @@ func init() {
 func newTestServer(t *testing.T, h *Handler) *httptest.Server {
 	t.Helper()
 	r := gin.New()
-	h.Register(r.Group("/api/v1"))
+	h.Register(r.Group("/api/v1"), rbac.NoopPermFactory())
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	return srv

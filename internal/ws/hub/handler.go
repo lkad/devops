@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/devops-toolkit/backend/internal/auth"
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -40,15 +41,24 @@ type HandlerConfig struct {
 // handler is the only public surface of this package; everything
 // else is exercised via the Hub.
 //
-// Pre-hander middleware (auth, request-id) is the caller's
-// responsibility. This package implements the *terminal* handler
-// for the upgrade path.
-func RegisterRoutes(router gin.IRouter, h *Hub, signer *auth.Signer, up *websocket.Upgrader) {
+// The supplied permFactory is used to apply per-route RBAC to
+// the upgrade path. Pass a no-op factory in tests that don't
+// exercise auth. Pre-handler auth middleware (e.g. JWT
+// verification on a non-WS path) is the caller's responsibility.
+//
+// This package implements the *terminal* handler for the
+// upgrade path.
+func RegisterRoutes(router gin.IRouter, h *Hub, signer *auth.Signer, up *websocket.Upgrader, permFactory func(rbac.Permission) gin.HandlerFunc) {
 	cfg := HandlerConfig{Hub: h, Signer: signer, Upgrader: up}
 	if router == nil || h == nil || signer == nil {
 		return
 	}
-	router.GET("/ws", cfg.handleUpgrade)
+	if permFactory == nil {
+		permFactory = func(rbac.Permission) gin.HandlerFunc {
+			return func(c *gin.Context) { c.Next() }
+		}
+	}
+	router.GET("/ws", permFactory(rbac.PermissionViewAlerts), cfg.handleUpgrade)
 }
 
 // handleUpgrade is the Gin handler for the /ws endpoint. It runs

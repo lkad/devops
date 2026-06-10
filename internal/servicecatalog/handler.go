@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -44,13 +45,18 @@ func (h *Handler) SetMetrics(m *Metrics) { h.metrics = m }
 // Register attaches the catalog routes to the supplied
 // router group. The group is expected to live under
 // /api/v1.
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.GET("/services", h.List)
-	r.POST("/services", h.Create)
-	r.GET("/services/:id", h.Get)
-	r.PUT("/services/:id", h.Update)
-	r.DELETE("/services/:id", h.Delete)
-	r.GET("/services/:id/health", h.Health)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewServiceCatalog)
+	writeP := perms(rbac.PermissionManageServiceCatalog)
+	r.GET("/services", viewP, h.List)
+	r.POST("/services", writeP, h.Create)
+	r.GET("/services/:id", viewP, h.Get)
+	r.PUT("/services/:id", writeP, h.Update)
+	r.DELETE("/services/:id", writeP, h.Delete)
+	r.GET("/services/:id/health", viewP, h.Health)
 }
 
 // Health handles GET /services/:id/health. The response

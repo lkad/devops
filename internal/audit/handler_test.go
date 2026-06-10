@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -42,7 +43,7 @@ func newTestRouter(repo *Repository) *gin.Engine {
 	svc := NewService(ServiceConfig{Repo: repo})
 	h := NewHandler(svc)
 	v1 := r.Group("/api/v1")
-	h.Register(v1)
+	h.Register(v1, rbac.NoopPermFactory())
 	return r
 }
 

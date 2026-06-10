@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/devops-toolkit/backend/internal/audit"
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -71,17 +72,25 @@ func NewHandler(cfg HandlerConfig) *Handler {
 // Register attaches the physical-host routes to the supplied
 // router group. The group is expected to live under /api/v1;
 // the handler is agnostic about the surrounding stack.
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.GET("/physical-hosts", h.List)
-	r.POST("/physical-hosts", h.Create)
-	r.GET("/physical-hosts/:id", h.Get)
-	r.PUT("/physical-hosts/:id", h.Replace)
-	r.DELETE("/physical-hosts/:id", h.Delete)
-	r.POST("/physical-hosts/:id/probe", h.Probe)
-	r.GET("/physical-hosts/:id/metrics", h.Metrics)
-	r.POST("/physical-hosts/:id/maintenance", h.EnterMaintenance)
-	r.POST("/physical-hosts/:id/maintenance/exit", h.ExitMaintenance)
-	r.GET("/physical-hosts/:id/maintenance-history", h.MaintenanceHistory)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewPhysicalHosts)
+	writeP := perms(rbac.PermissionWritePhysicalHosts)
+	probeP := perms(rbac.PermissionProbePhysicalHost)
+	maintP := perms(rbac.PermissionMaintenancePhysical)
+	auditP := perms(rbac.PermissionViewAuditLog)
+	r.GET("/physical-hosts", viewP, h.List)
+	r.POST("/physical-hosts", writeP, h.Create)
+	r.GET("/physical-hosts/:id", viewP, h.Get)
+	r.PUT("/physical-hosts/:id", writeP, h.Replace)
+	r.DELETE("/physical-hosts/:id", writeP, h.Delete)
+	r.POST("/physical-hosts/:id/probe", probeP, h.Probe)
+	r.GET("/physical-hosts/:id/metrics", viewP, h.Metrics)
+	r.POST("/physical-hosts/:id/maintenance", maintP, h.EnterMaintenance)
+	r.POST("/physical-hosts/:id/maintenance/exit", maintP, h.ExitMaintenance)
+	r.GET("/physical-hosts/:id/maintenance-history", auditP, h.MaintenanceHistory)
 }
 
 // hostRequest is the wire shape for POST/PUT /physical-hosts.

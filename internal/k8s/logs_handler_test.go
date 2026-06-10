@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/k8s/logstream"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -61,7 +62,7 @@ func logsHandlerFixture(t *testing.T, fc *FakeClient, reg ClientRegistry) (*gin.
 
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 	return r, created.ID
 }
 
@@ -255,7 +256,7 @@ func TestHandler_GetLogs_NoRegistryConfigured(t *testing.T) {
 	h := NewHandler(svc)
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 
 	rr, _ := doRequest(t, r, "GET",
 		"/api/v1/k8s/clusters/"+created.ID+"/namespaces/default/logs?labelSelector=app=web", nil)
@@ -323,6 +324,6 @@ func handlerForLogsTest(t *testing.T, _ *FakeClient, reg ClientRegistry) *gin.En
 	h := NewHandler(svc)
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
 	return r
 }

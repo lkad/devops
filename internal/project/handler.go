@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -39,9 +40,16 @@ func NewHandler(svc *Service, repo *Repository) *Handler {
 // registering twice on the same group yields a Gin panic at
 // startup, which is the desired fail-fast behaviour.
 //
+// perms is the per-route permission factory: it returns the
+// RBAC middleware (auth is applied at the parent group) for
+// the supplied permission key. Pass a no-op factory in unit
+// tests that don't exercise auth.
+//
 //	group := r.Group("/api/v1")
-//	project.NewHandler(svc, repo).Register(group)
-func (h *Handler) Register(group *gin.RouterGroup) {
+//	project.NewHandler(svc, repo).Register(group, perms)
+func (h *Handler) Register(group *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewProjects)
+	writeP := perms(rbac.PermissionWriteProjects)
 	pt := group.Group("/project-types")
 	{
 		pt.GET("", h.listTypes)
@@ -49,16 +57,16 @@ func (h *Handler) Register(group *gin.RouterGroup) {
 	}
 	p := group.Group("/projects")
 	{
-		p.GET("", h.list)
-		p.POST("", h.create)
-		p.GET("/:id", h.get)
-		p.PUT("/:id", h.update)
-		p.DELETE("/:id", h.delete)
-		p.GET("/:id/children", h.children)
-		p.GET("/:id/ancestors", h.ancestors)
-		p.GET("/:id/members", h.listMembers)
-		p.POST("/:id/members", h.addMember)
-		p.DELETE("/:id/members/:user_id", h.removeMember)
+		p.GET("", viewP, h.list)
+		p.POST("", writeP, h.create)
+		p.GET("/:id", viewP, h.get)
+		p.PUT("/:id", writeP, h.update)
+		p.DELETE("/:id", writeP, h.delete)
+		p.GET("/:id/children", viewP, h.children)
+		p.GET("/:id/ancestors", viewP, h.ancestors)
+		p.GET("/:id/members", viewP, h.listMembers)
+		p.POST("/:id/members", writeP, h.addMember)
+		p.DELETE("/:id/members/:user_id", writeP, h.removeMember)
 	}
 }
 

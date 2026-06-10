@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -79,10 +80,14 @@ func NewHandler(svc *Service, cfg HandlerConfig) *Handler {
 //	GET /api/v1/k8s/clusters/:id/pods/:namespace/:pod/logs/stream   (WebSocket)
 //	GET /api/v1/k8s/clusters/:id/pods/:namespace/:pod/logs/sse      (Server-Sent Events)
 //	GET /api/v1/k8s/clusters/:id/pods/:namespace/:pod/logs          (one-shot)
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.GET("/k8s/clusters/:id/pods/:namespace/:pod/logs/stream", h.StreamWS)
-	r.GET("/k8s/clusters/:id/pods/:namespace/:pod/logs/sse", h.StreamSSE)
-	r.GET("/k8s/clusters/:id/pods/:namespace/:pod/logs", h.GetLogs)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewK8sPodLogs)
+	r.GET("/k8s/clusters/:id/pods/:namespace/:pod/logs/stream", viewP, h.StreamWS)
+	r.GET("/k8s/clusters/:id/pods/:namespace/:pod/logs/sse", viewP, h.StreamSSE)
+	r.GET("/k8s/clusters/:id/pods/:namespace/:pod/logs", viewP, h.GetLogs)
 }
 
 // requestFromGin is the URL-shape → StreamRequest adapter

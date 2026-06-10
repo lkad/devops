@@ -1,6 +1,7 @@
 package device
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -38,9 +39,9 @@ func deviceHandlerFixture(t *testing.T) *gin.Engine {
 
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.Register(api)
-	groupH.Register(api)
-	tplH.Register(api)
+	h.Register(api, rbac.NoopPermFactory())
+	groupH.Register(api, rbac.NoopPermFactory())
+	tplH.Register(api, rbac.NoopPermFactory())
 	return r
 }
 

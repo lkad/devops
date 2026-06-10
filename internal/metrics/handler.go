@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -38,11 +39,16 @@ func NewHandler(svc *Service) *Handler {
 //	GET    /metrics/series           list unique series
 //	GET    /metrics/series/:name     single series (requires target_type + target_id)
 //	POST   /metrics                  ingest a single Metric
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.GET("/metrics", h.List)
-	r.POST("/metrics", h.Create)
-	r.GET("/metrics/series", h.ListSeries)
-	r.GET("/metrics/series/:name", h.GetSeries)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewMetrics)
+	writeP := perms(rbac.PermissionWriteMetrics)
+	r.GET("/metrics", viewP, h.List)
+	r.POST("/metrics", writeP, h.Create)
+	r.GET("/metrics/series", viewP, h.ListSeries)
+	r.GET("/metrics/series/:name", viewP, h.GetSeries)
 }
 
 // metricRequest is the wire shape for POST /metrics. We keep

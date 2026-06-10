@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -27,7 +28,7 @@ func newTestRouter(t *testing.T) (*gin.Engine, *Local) {
 	svc := NewService(local, ServiceConfig{RejectStructuredQueryOnLocal: true})
 	h := NewHandler(svc, local)
 	r := gin.New()
-	h.Register(r.Group("/api/v1"))
+	h.Register(r.Group("/api/v1"), rbac.NoopPermFactory())
 	return r, local
 }
 
@@ -39,7 +40,7 @@ func newTestRouterWithBackend(t *testing.T, b LogBackend) *gin.Engine {
 	svc := NewService(b, ServiceConfig{RejectStructuredQueryOnLocal: true})
 	h := NewHandler(svc, b)
 	r := gin.New()
-	h.Register(r.Group("/api/v1"))
+	h.Register(r.Group("/api/v1"), rbac.NoopPermFactory())
 	return r
 }
 

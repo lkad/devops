@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -45,21 +46,26 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 //	GET    /alerts/channels/:id    get a single channel (masked)
 //	PUT    /alerts/channels/:id    partial update of a channel
 //	DELETE /alerts/channels/:id    soft-delete a channel
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.GET("/alerts", h.List)
-	r.POST("/alerts", h.Create)
-	r.GET("/alerts/history", h.History)
-	r.GET("/alerts/stats", h.Stats)
-	r.GET("/alerts/:id", h.Get)
-	r.PUT("/alerts/:id", h.Update)
-	r.DELETE("/alerts/:id", h.Delete)
-	r.POST("/alerts/:id/acknowledge", h.Acknowledge)
-	r.POST("/alerts/:id/resolve", h.Resolve)
-	r.GET("/alerts/channels", h.ListChannels)
-	r.POST("/alerts/channels", h.CreateChannel)
-	r.GET("/alerts/channels/:id", h.GetChannel)
-	r.PUT("/alerts/channels/:id", h.UpdateChannel)
-	r.DELETE("/alerts/channels/:id", h.DeleteChannel)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewAlerts)
+	writeP := perms(rbac.PermissionWriteAlerts)
+	r.GET("/alerts", viewP, h.List)
+	r.POST("/alerts", writeP, h.Create)
+	r.GET("/alerts/history", viewP, h.History)
+	r.GET("/alerts/stats", viewP, h.Stats)
+	r.GET("/alerts/:id", viewP, h.Get)
+	r.PUT("/alerts/:id", writeP, h.Update)
+	r.DELETE("/alerts/:id", writeP, h.Delete)
+	r.POST("/alerts/:id/acknowledge", writeP, h.Acknowledge)
+	r.POST("/alerts/:id/resolve", writeP, h.Resolve)
+	r.GET("/alerts/channels", viewP, h.ListChannels)
+	r.POST("/alerts/channels", writeP, h.CreateChannel)
+	r.GET("/alerts/channels/:id", viewP, h.GetChannel)
+	r.PUT("/alerts/channels/:id", writeP, h.UpdateChannel)
+	r.DELETE("/alerts/channels/:id", writeP, h.DeleteChannel)
 }
 
 // alertRequest is the wire shape for POST /alerts and PUT
@@ -354,6 +360,12 @@ func (h *Handler) parseFilter(c *gin.Context) AlertFilter {
 		f.SourceID = v
 	}
 	if v := c.Query("state"); v != "" {
+		f.State = State(v)
+	}
+	// "status" is a more conventional REST query name;
+	// accept it as a synonym for "state" so clients can
+	// use either. "state" wins if both are present.
+	if v := c.Query("status"); v != "" && f.State == "" {
 		f.State = State(v)
 	}
 	if v := c.Query("limit"); v != "" {

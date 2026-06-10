@@ -23,6 +23,7 @@ import (
 	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/internal/auth"
 	"github.com/devops-toolkit/backend/internal/auth/ldap"
+	rbacpkg "github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/config"
 	dbpkg "github.com/devops-toolkit/backend/internal/database"
 	devicepkg "github.com/devops-toolkit/backend/internal/device"
@@ -79,28 +80,63 @@ func run() error {
 
 	router, obs := buildRouter(log)
 	if eng, ok := router.(*gin.Engine); ok {
-		registerAuthRoutes(eng, cfg, log)
-		registerProjectRoutes(eng, db, log)
-		registerDeviceRoutes(eng, db, log)
-		wsHub := registerWsHubRoutes(eng, cfg, log)
+		// Signer is the JWT signer. The auth middleware
+		// uses it to verify the Bearer token. The same
+		// secret is used to issue tokens on /auth/login
+		// and to verify them on every protected endpoint,
+		// so the auth route registration returns the
+		// signer so we can reuse it as the auth
+		// middleware's dependency.
+		signer, err := registerAuthRoutes(eng, cfg, log)
+		if err != nil {
+			return err
+		}
+		// Build the auth + RBAC stack once and thread
+		// the per-perm factory into every module's
+		// Register. The auth middleware goes on the
+		// /api/v1 group (parses the JWT) and per-route
+		// RBAC is applied by the modules via the
+		// factory. The factory does NOT call
+		// authMW.RequireAuth() — auth already ran at
+		// the group level and the per-route middleware
+		// just enforces the permission.
+		authMW := auth.NewAuthenticator(auth.AuthMiddlewareConfig{
+			Signer:        signer,
+			DevBypass:     cfg.LDAP.DevBypass,
+			PermissionSvc: rbacpkg.NewService(),
+		})
+		rbacSvc := rbacpkg.NewService()
+		perms := func(perm rbacpkg.Permission) gin.HandlerFunc {
+			return rbacpkg.RequirePermission(rbacSvc, perm)
+		}
+		// Apply the auth middleware at the /api/v1
+		// group level so every protected route is
+		// gated by the same JWT-verify step. The
+		// per-route RBAC factory is then applied
+		// inside each module's Register.
+		v1 := eng.Group("/api/v1", authMW.RequireAuth())
+
+		registerProjectRoutes(v1, db, log, perms)
+		registerDeviceRoutes(v1, db, log, perms)
+		wsHub := registerWsHubRoutes(v1, cfg, log, perms)
 		// Audit must be registered before physicalhost so the
 		// physical-host module can share the same audit svc +
 		// repo (one DB table, one emitter, no double writes).
-		auditSvc, auditRepo := registerAuditRoutes(eng, db, log)
+		auditSvc, auditRepo := registerAuditRoutes(v1, db, log, perms)
 		var hubPublisher realtime.Publisher
 		if wsHub != nil {
 			hubPublisher = realtime.NewHubPublisher(wsHubAdapter{wsHub})
 		}
-		phMaintenance := registerPhysicalHostRoutes(eng, db, log, hubPublisher, auditSvc, auditRepo)
-		registerAlertsRoutes(eng, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance})
-		registerDiscoveryRoutes(eng, db, log)
-		k8sSvc := registerK8sClusterRoutes(eng, db, log)
-		registerHostProjectLinkRoutes(eng, db, log)
-		registerPipelineRoutes(eng, db, log)
-		registerServiceCatalogRoutes(eng, db, log, k8sSvc, obs)
-		registerLogsRoutes(eng, db, log)
-		registerMetricsRoutes(eng, db, log)
-		registerLogStreamRoutes(eng, db, log)
+		phMaintenance := registerPhysicalHostRoutes(v1, db, log, hubPublisher, auditSvc, auditRepo, perms)
+		registerAlertsRoutes(v1, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance}, perms)
+		registerDiscoveryRoutes(v1, db, log, perms)
+		k8sSvc := registerK8sClusterRoutes(v1, db, log, perms)
+		registerHostProjectLinkRoutes(v1, db, log, perms)
+		registerPipelineRoutes(v1, db, log, perms)
+		registerServiceCatalogRoutes(v1, db, log, k8sSvc, obs, perms)
+		registerLogsRoutes(v1, db, log, perms)
+		registerMetricsRoutes(v1, db, log, perms)
+		registerLogStreamRoutes(v1, db, log, perms)
 	} else {
 		log.Warn("router is not a *gin.Engine; auth routes not registered")
 	}
@@ -239,9 +275,19 @@ func buildRouter(log *logger.Logger) (http.Handler, *observability.Metrics) {
 		})
 	})
 
-	v1 := r.Group("/api/v1")
+	// /api/v1/capabilities is intentionally NOT
+	// authenticated — it tells the client what sections
+	// are available (so the UI can render a "this
+	// deployment is missing X" message). The
+	// /api/v1/auth/login and /api/v1/auth/ldap/health
+	// routes registered by registerAuthRoutes are also
+	// public; their handler group lives under
+	// /api/v1/auth and is set up after the auth-
+	// protected v1 group in run() so Gin treats them
+	// as separate routes.
+	v1Public := r.Group("/api/v1")
 	{
-		v1.GET("/capabilities", func(c *gin.Context) {
+		v1Public.GET("/capabilities", func(c *gin.Context) {
 			// Phase-1 placeholder; later phases add module-specific capability probes.
 			sections := []string{"app", "database", "logs", "ldap", "alerts", "k8s", "physicalhost", "websocket"}
 			handler.WriteJSON(c.Writer, http.StatusOK, gin.H{
@@ -337,11 +383,11 @@ func envOr(key, fallback string) string {
 // a deployment-injected APP_JWT_SECRET env var, with a deterministic
 // dev-only default if neither is set (we log a warning so it never
 // silently ships to production).
-func registerAuthRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) {
+func registerAuthRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) (*auth.Signer, error) {
 	client, err := buildLDAPClient(cfg)
 	if err != nil {
 		log.Error("ldap client init failed; auth routes will not be registered", "err", err)
-		return
+		return nil, nil
 	}
 	svc := ldap.NewService(ldap.ServiceConfig{
 		Client:          client,
@@ -351,6 +397,9 @@ func registerAuthRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) {
 
 	secret := os.Getenv("APP_JWT_SECRET")
 	if secret == "" {
+		if cfg.App.Env == "production" {
+			return nil, fmt.Errorf("APP_JWT_SECRET must be set when env=production (no dev fallback in prod)")
+		}
 		secret = "dev-secret-do-not-use-in-prod"
 		log.Warn("no APP_JWT_SECRET configured; using dev-only fallback")
 	}
@@ -368,15 +417,21 @@ func registerAuthRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) {
 		Logger:    log.Logger,
 	})
 
-	auth := r.Group("/api/v1/auth")
-	auth.POST("/login", h.Login)
-	auth.GET("/ldap/health", h.Health)
+	signer, err := auth.NewSigner(secret, time.Duration(ttl)*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("auth: signer init: %w", err)
+	}
+
+	authGrp := r.Group("/api/v1/auth")
+	authGrp.POST("/login", h.Login)
+	authGrp.GET("/ldap/health", h.Health)
 
 	log.Info("auth routes registered",
 		"dev_bypass", cfg.LDAP.DevBypass,
 		"dev_users", len(cfg.LDAP.DevUsers),
 		"token_ttl_seconds", ttl,
 	)
+	return signer, nil
 }
 
 // buildLDAPClient selects the Fake or Real client based on the
@@ -424,7 +479,7 @@ func devRoleToGroups(role string) []string {
 // Gin engine. Phase 3 owns this registration. AutoMigrate registers
 // ProjectType, Project, and ProjectMember; the service enforces the
 // 3-level depth cap at create/update time.
-func registerProjectRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	if err := dbpkg.AutoMigrate(db,
 		&projectpkg.ProjectType{},
 		&projectpkg.Project{},
@@ -436,8 +491,7 @@ func registerProjectRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	repo := projectpkg.NewRepository(db)
 	svc := projectpkg.NewService(repo)
 	h := projectpkg.NewHandler(svc, repo)
-	v1 := r.Group("/api/v1")
-	h.Register(v1)
+	h.Register(v1, perms)
 	log.Info("project routes registered")
 }
 
@@ -445,7 +499,7 @@ func registerProjectRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 // Gin engine. AutoMigrate covers Device, DeviceGroup, and
 // ConfigurationTemplate. The service enforces the 4-state model
 // (online/monitoring_issue/offline/maintenance) and action rules.
-func registerDeviceRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+func registerDeviceRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	if err := dbpkg.AutoMigrate(db, devicepkg.AllModels()...); err != nil {
 		log.Error("device AutoMigrate failed", "err", err)
 		return
@@ -453,18 +507,17 @@ func registerDeviceRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	repo := devicepkg.NewRepository(db)
 	svc := devicepkg.NewService(repo)
 	h := devicepkg.NewHandler(svc)
-	v1 := r.Group("/api/v1")
-	h.Register(v1)
+	h.Register(v1, perms)
 
 	// device-groups and configuration-templates have separate
 	// sub-handlers with their own Register methods.
 	groupRepo := devicepkg.NewGroupRepository(db)
 	groupSvc := devicepkg.NewGroupService(groupRepo)
-	devicepkg.NewGroupHandler(groupSvc).Register(v1)
+	devicepkg.NewGroupHandler(groupSvc).Register(v1, perms)
 
 	tmplRepo := devicepkg.NewTemplateRepository(db)
 	tmplSvc := devicepkg.NewTemplateService(tmplRepo)
-	devicepkg.NewTemplateHandler(tmplSvc).Register(v1)
+	devicepkg.NewTemplateHandler(tmplSvc).Register(v1, perms)
 
 	log.Info("device routes registered")
 }
@@ -478,7 +531,7 @@ func registerDeviceRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 // into the AsyncInfluxWriter for long-term storage. Returns the
 // *MaintenanceService so callers (e.g. the alert module) can
 // consult IsInMaintenance via a small adapter.
-func registerPhysicalHostRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, pub realtime.Publisher, auditSvc *audit.Service, auditRepo *audit.Repository) *physicalhost.MaintenanceService {
+func registerPhysicalHostRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, pub realtime.Publisher, auditSvc *audit.Service, auditRepo *audit.Repository, perms func(rbacpkg.Permission) gin.HandlerFunc) *physicalhost.MaintenanceService {
 	if err := dbpkg.AutoMigrate(db, append(physicalhost.AllModels(), audit.AllModels()...)...); err != nil {
 		log.Error("physicalhost AutoMigrate failed", "err", err)
 		return nil
@@ -542,7 +595,6 @@ func registerPhysicalHostRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, 
 	go loop.Run(context.Background(), nil)
 	log.Info("monitor loop started", "tick", "1m", "jitter", "5s")
 
-	v1 := r.Group("/api/v1")
 	physicalhost.NewHandler(physicalhost.HandlerConfig{
 		Repo:        repo,
 		Monitor:     monitor,
@@ -550,10 +602,12 @@ func registerPhysicalHostRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, 
 		Metrics:     physicalhost.NewMetricsCache(physicalhost.MetricsCacheConfig{Collector: collector, TTL: 30 * time.Second, MaxEntries: 1024}),
 		Audit:       auditSvc,
 		AuditRepo:   auditRepo,
-	}).Register(v1)
+	}).Register(v1, perms)
 	log.Info("physicalhost routes registered")
 	return maint
 }
+
+// logAuditEmitter is kept as a no-op adapter for code paths
 
 // logAuditEmitter is kept as a no-op adapter for code paths
 // that still want a real AuditEmitter without the audit
@@ -618,7 +672,7 @@ func (a *physicalhostMaintenanceAdapter) IsInMaintenance(ctx context.Context, ho
 // registerDiscoveryRoutes wires the network-discovery module. Scanner
 // and Prober are fakes in dev mode; production deployments swap them
 // for real nmap/ICMP and SNMP impls.
-func registerDiscoveryRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+func registerDiscoveryRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	if err := dbpkg.AutoMigrate(db, discovery.AllModels()...); err != nil {
 		log.Error("discovery AutoMigrate failed", "err", err)
 		return
@@ -626,8 +680,7 @@ func registerDiscoveryRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	repo := discovery.NewRepository(db)
 	devs := devicepkg.NewRepository(db)
 	svc := discovery.NewService(repo, devs, discovery.NewFakeScanner(nil, nil), discovery.NewFakeProber(nil, nil))
-	v1 := r.Group("/api/v1")
-	discovery.NewHandler(svc).Register(v1)
+	discovery.NewHandler(svc).Register(v1, perms)
 	log.Info("discovery routes registered")
 }
 
@@ -635,7 +688,7 @@ func registerDiscoveryRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 // The AES-256 key is loaded from K8S_CRYPTO_KEY env var; in dev a
 // deterministic 32-byte key is used with a warning, mirroring the
 // JWT-secret pattern.
-func registerK8sClusterRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) *k8s.Service {
+func registerK8sClusterRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) *k8s.Service {
 	if err := dbpkg.AutoMigrate(db, k8s.AllModels()...); err != nil {
 		log.Error("k8s AutoMigrate failed", "err", err)
 		return nil
@@ -655,8 +708,7 @@ func registerK8sClusterRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) *k
 	// handler) so a misconfigured cluster's failure mode is
 	// visible at startup rather than on the first exec.
 	svc.SetRegistry(k8s.NewClientRegistry(repo, svc))
-	v1 := r.Group("/api/v1")
-	k8s.NewHandler(svc).Register(v1)
+	k8s.NewHandler(svc).Register(v1, perms)
 	log.Info("k8s cluster routes registered")
 	return svc
 }
@@ -664,7 +716,7 @@ func registerK8sClusterRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) *k
 // registerHostProjectLinkRoutes wires the physical-host-project-linking
 // module. The service walks the project hierarchy when listing devices
 // for a project.
-func registerHostProjectLinkRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+func registerHostProjectLinkRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	if err := dbpkg.AutoMigrate(db, hostproject.AllModels()...); err != nil {
 		log.Error("hostproject AutoMigrate failed", "err", err)
 		return
@@ -673,15 +725,14 @@ func registerHostProjectLinkRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logge
 	projectRepo := projectpkg.NewRepository(db)
 	projectSvc := projectpkg.NewService(projectRepo)
 	svc := hostproject.NewService(repo, projectSvc)
-	v1 := r.Group("/api/v1")
-	hostproject.NewHandler(svc).Register(v1)
+	hostproject.NewHandler(svc).Register(v1, perms)
 	log.Info("hostproject routes registered")
 }
 
 // registerPipelineRoutes wires the cicd-pipeline module. The Executor
 // is the Local implementation (runs shell via os/exec); tests use
 // Fake via direct construction in service_test.go.
-func registerPipelineRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+func registerPipelineRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	if err := dbpkg.AutoMigrate(db, pipeline.AllModels()...); err != nil {
 		log.Error("pipeline AutoMigrate failed", "err", err)
 		return
@@ -689,8 +740,7 @@ func registerPipelineRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	repo := pipeline.NewRepository(db)
 	exec := pipeline.NewLocal(pipeline.WithMaxOutputBytes(1 << 20))
 	svc := pipeline.NewService(repo, exec)
-	v1 := r.Group("/api/v1")
-	pipeline.NewHandler(svc).Register(v1)
+	pipeline.NewHandler(svc).Register(v1, perms)
 	log.Info("pipeline routes registered")
 }
 
@@ -709,7 +759,7 @@ func registerPipelineRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 // observability Metrics so the catalog's domain-level
 // gauges land on the same /metrics registry as the HTTP
 // middleware.
-func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, k8sSvc *k8s.Service, obs *observability.Metrics) {
+func registerServiceCatalogRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, k8sSvc *k8s.Service, obs *observability.Metrics, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	if err := dbpkg.AutoMigrate(db, &servicecatalog.Service{}, &servicecatalog.OnCall{}, &servicecatalog.RunbookEntry{}); err != nil {
 		log.Error("servicecatalog AutoMigrate failed", "err", err)
 		return
@@ -765,8 +815,7 @@ func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger
 
 	handler.SetHealth(health)
 
-	v1 := r.Group("/api/v1")
-	handler.Register(v1)
+	handler.Register(v1, perms)
 	log.Info("servicecatalog routes registered")
 }
 
@@ -864,14 +913,13 @@ func orZeroTime(t *time.Time) time.Time {
 // swap to ES or Loki by changing cfg.Logs.Backend and instantiating
 // the matching backend. The /capabilities endpoint always returns
 // 200 (with a "unavailable" row if the backend is misconfigured).
-func registerLogsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+func registerLogsRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	_ = db // logs module is read-only; no AutoMigrate needed
 	backend := logs.NewLocal(logs.LocalConfig{
 		Dir: envOr("LOG_STORAGE_DIR", "tests/fixtures/logs"),
 	})
 	svc := logs.NewService(backend, logs.ServiceConfig{})
-	v1 := r.Group("/api/v1")
-	logs.NewHandler(svc, backend).Register(v1)
+	logs.NewHandler(svc, backend).Register(v1, perms)
 	log.Info("logs routes registered", "backend", "local")
 }
 
@@ -880,15 +928,14 @@ func registerLogsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 // PrometheusScraper (injected with an HTTPClient). The metrics
 // middleware (metrics.Middleware) is exposed for main.go to
 // install as a global Gin middleware in a follow-up.
-func registerMetricsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+func registerMetricsRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	if err := dbpkg.AutoMigrate(db, metrics.AllModels()...); err != nil {
 		log.Error("metrics AutoMigrate failed", "err", err)
 		return
 	}
 	repo := metrics.NewRepository(db)
 	svc := metrics.NewService(repo, metrics.NewFakeScraper())
-	v1 := r.Group("/api/v1")
-	metrics.NewHandler(svc).Register(v1)
+	metrics.NewHandler(svc).Register(v1, perms)
 	log.Info("metrics routes registered")
 }
 
@@ -897,7 +944,7 @@ func registerMetricsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 // suppression checker is the real DefaultSuppressionChecker
 // driven by a tiny adapter that consults the physicalhost
 // service's InMaintenance predicate.
-func registerAlertsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, phMaintenance physicalhostMaintenanceProbe) {
+func registerAlertsRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, phMaintenance physicalhostMaintenanceProbe, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	if err := dbpkg.AutoMigrate(db, alerts.AllModels()...); err != nil {
 		log.Error("alerts AutoMigrate failed", "err", err)
 		return
@@ -909,8 +956,7 @@ func registerAlertsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, phMain
 		Suppression: alerts.NewDefaultSuppressionChecker(phMaintenance),
 		Logger:      log.Logger,
 	})
-	v1 := r.Group("/api/v1")
-	alerts.NewHandler(svc).Register(v1)
+	alerts.NewHandler(svc).Register(v1, perms)
 	log.Info("alerts routes registered", "real_suppression", true)
 }
 
@@ -920,9 +966,13 @@ func registerAlertsRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, phMain
 // routes so the upgrade path can verify the token. The hub
 // itself is returned so the caller can wire a realtime.Publisher
 // for domain events (device_event, alert_fired, etc).
-func registerWsHubRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) *hub.Hub {
+func registerWsHubRoutes(v1 *gin.RouterGroup, cfg *config.Config, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) *hub.Hub {
 	secret := os.Getenv("APP_JWT_SECRET")
 	if secret == "" {
+		if cfg.App.Env == "production" {
+			log.Error("APP_JWT_SECRET must be set when env=production (no dev fallback); refusing to start WS hub with a known signer")
+			os.Exit(1)
+		}
 		secret = "dev-secret-do-not-use-in-prod"
 	}
 	signer, err := auth.NewSigner(secret, time.Hour)
@@ -937,8 +987,7 @@ func registerWsHubRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) 
 		WriteBufferSize: 1024,
 		CheckOrigin:     func(*http.Request) bool { return true },
 	}
-	v1 := r.Group("/api/v1")
-	hub.RegisterRoutes(v1, h, signer, upgrader)
+	hub.RegisterRoutes(v1, h, signer, upgrader, perms)
 	log.Info("websocket hub routes registered")
 	return h
 }
@@ -948,14 +997,13 @@ func registerWsHubRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) 
 // KubeLogClient which itself wraps a client-go function seam. The
 // RealtimePublisher here is a no-op in dev (logs events are still
 // returned to the WS/SSE client even when no hub is wired).
-func registerLogStreamRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+func registerLogStreamRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	_ = db // no AutoMigrate; log stream is read-mostly
 	client := &logstream.FakeLogClient{}
 	streamer := logstream.NewKubeStreamer(client)
 	pub := &logstreamRealtimeAdapter{} // bridges the local interface to the realtime package
 	svc := logstream.NewService(streamer, client, pub)
-	v1 := r.Group("/api/v1")
-	logstream.NewHandler(svc, logstream.HandlerConfig{}).Register(v1)
+	logstream.NewHandler(svc, logstream.HandlerConfig{}).Register(v1, perms)
 	log.Info("k8s pod log stream routes registered")
 }
 
@@ -980,7 +1028,7 @@ func (logstreamRealtimeAdapter) Publish(channel string, payload any) {
 // returns the underlying svc + repo so the physicalhost wiring
 // can re-use the same audit stack instead of building a second
 // one (which would double-write every event).
-func registerAuditRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) (*audit.Service, *audit.Repository) {
+func registerAuditRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) (*audit.Service, *audit.Repository) {
 	if err := dbpkg.AutoMigrate(db, audit.AllModels()...); err != nil {
 		log.Error("audit AutoMigrate failed", "err", err)
 		return nil, nil
@@ -994,8 +1042,7 @@ func registerAuditRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) (*audit
 		Repo:    repo,
 		Emitter: emitter,
 	})
-	v1 := r.Group("/api/v1")
-	audit.NewHandler(svc).Register(v1)
+	audit.NewHandler(svc).Register(v1, perms)
 	log.Info("audit routes registered")
 	return svc, repo
 }

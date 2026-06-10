@@ -217,6 +217,15 @@ func (c *Config) Validate() error {
 		if c.Database.Password == "devops" || c.Database.Password == "" {
 			return fmt.Errorf("production requires a non-default database.password (got %q)", c.Database.Password)
 		}
+		// APP_JWT_SECRET and K8S_CRYPTO_KEY are not
+		// stored in the YAML (they are env-only — see
+		// cmd/devops-toolkit/main.go). The dev-bypass
+		// gate is the only production-deny check we can
+		// do at Validate time; the JWT/K8S-crypto
+		// missing-env check is at startup in main.go.
+		if c.LDAP.DevBypass {
+			return fmt.Errorf("production must not enable ldap.dev_bypass (set ldap.dev_bypass: false or use a non-production env)")
+		}
 	}
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -28,19 +29,24 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 // router group. The group is expected to live under
 // /api/v1; the handler is agnostic about the surrounding
 // stack.
-func (h *Handler) Register(r *gin.RouterGroup) {
-	r.GET("/pipelines", h.List)
-	r.POST("/pipelines", h.Create)
-	r.GET("/pipelines/:id", h.Get)
-	r.PUT("/pipelines/:id", h.Update)
-	r.DELETE("/pipelines/:id", h.Delete)
-	r.POST("/pipelines/:id/trigger", h.Trigger)
-	r.GET("/pipelines/:id/runs", h.ListRuns)
-	r.GET("/pipelines/:id/stats", h.Stats)
-	r.GET("/pipelines/:id/phases", h.Phases)
-	r.GET("/runs", h.ListAllRuns)
-	r.GET("/runs/:run_id", h.GetRun)
-	r.POST("/runs/:run_id/cancel", h.CancelRun)
+//
+// perms is the per-route permission factory; pass a no-op
+// factory in unit tests that don't exercise auth.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+	viewP := perms(rbac.PermissionViewPipelines)
+	writeP := perms(rbac.PermissionManagePipelines)
+	r.GET("/pipelines", viewP, h.List)
+	r.POST("/pipelines", writeP, h.Create)
+	r.GET("/pipelines/:id", viewP, h.Get)
+	r.PUT("/pipelines/:id", writeP, h.Update)
+	r.DELETE("/pipelines/:id", writeP, h.Delete)
+	r.POST("/pipelines/:id/trigger", writeP, h.Trigger)
+	r.GET("/pipelines/:id/runs", viewP, h.ListRuns)
+	r.GET("/pipelines/:id/stats", viewP, h.Stats)
+	r.GET("/pipelines/:id/phases", viewP, h.Phases)
+	r.GET("/runs", viewP, h.ListAllRuns)
+	r.GET("/runs/:run_id", viewP, h.GetRun)
+	r.POST("/runs/:run_id/cancel", writeP, h.CancelRun)
 }
 
 // pipelineRequest is the wire shape for POST /pipelines. We

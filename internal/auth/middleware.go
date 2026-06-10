@@ -18,26 +18,37 @@ import (
 // environment so unit tests and the dev-tier fixture can drive
 // the API without standing up LDAP. The bypass MUST be false in
 // any non-dev config (config.App.DevBypass is the single switch).
+//
+// RequiredPerm, when set, makes the group-level middleware
+// also enforce a permission check after auth succeeds. The
+// production path uses per-route RequirePermission instead
+// (set via the perms factory in cmd/devops-toolkit/main.go),
+// but the group-level form is convenient for unit tests and
+// for any module that wants a single permission for every
+// route it owns.
 type AuthMiddlewareConfig struct {
-	Signer         *Signer
-	DevBypass      bool
-	RequiredPerm   rbac.Permission
-	PermissionSvc  *rbac.Service
+	Signer        *Signer
+	DevBypass     bool
+	RequiredPerm  rbac.Permission
+	PermissionSvc *rbac.Service
 }
 
 // NewAuthMiddleware returns a Gin middleware that verifies the
-// JWT (or accepts the dev bypass), then enforces the required
-// permission. A nil Signer with DevBypass true is the only
-// supported dev wiring; production calls panic on the
-// combination because it would be a security hole.
+// JWT (or accepts the dev bypass), and — when RequiredPerm is
+// set — also enforces the supplied permission. A nil Signer
+// with DevBypass true is the only supported dev wiring;
+// production calls panic on the combination because it would
+// be a security hole.
+//
+// The returned gin.HandlerFunc is suitable for use as a group-
+// level middleware. For per-route wiring (the production
+// pattern), call Authenticator.RequireAuth and pair it with
+// rbac.RequirePermission in the route registration.
 func NewAuthMiddleware(cfg AuthMiddlewareConfig) gin.HandlerFunc {
-	if cfg.Signer == nil && !cfg.DevBypass {
-		panic("auth: Signer is nil but DevBypass is false — would disable auth in production")
-	}
 	return func(c *gin.Context) {
 		user, ok := authenticate(c, cfg)
 		if !ok {
-			return // authenticate already wrote the response
+			return // authenticate already wrote 401 + aborted
 		}
 		c.Set(rbac.AuthUserKey, user)
 		if cfg.RequiredPerm != "" && cfg.PermissionSvc != nil {
@@ -46,6 +57,58 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) gin.HandlerFunc {
 				return
 			}
 		}
+		c.Next()
+	}
+}
+
+// getUser reads the authenticated user from the gin context.
+// Pulled into a helper so the group-level permission check
+// (above) can read it without re-implementing the lookup.
+func getUser(c *gin.Context) *contracts.User {
+	v, ok := c.Get(rbac.AuthUserKey)
+	if !ok {
+		return nil
+	}
+	u, _ := v.(*contracts.User)
+	return u
+}
+
+// Authenticator packages the auth + permission state so the
+// per-route wiring can call RequireAuth and pair it with
+// rbac.RequirePermission for the right permission key.
+//
+// The production pattern in cmd/devops-toolkit/main.go builds
+// one Authenticator (the signer + permission service) and
+// threads it into every module's Register function. Each
+// module's handler then writes:
+//
+//	r.GET("/foo", a.RequireAuth(), rbac.RequirePermission(svc, "foo.read"), h.Get)
+type Authenticator struct {
+	cfg AuthMiddlewareConfig
+}
+
+// NewAuthenticator returns an Authenticator from the supplied
+// config. Same panic-on-nil-Signer-without-bypass rule as
+// NewAuthMiddleware.
+func NewAuthenticator(cfg AuthMiddlewareConfig) *Authenticator {
+	if cfg.Signer == nil && !cfg.DevBypass {
+		panic("auth: Signer is nil but DevBypass is false — would disable auth in production")
+	}
+	return &Authenticator{cfg: cfg}
+}
+
+// RequireAuth returns a Gin middleware that verifies the JWT
+// (or accepts the dev bypass) and stashes the authenticated
+// user on the context under rbac.AuthUserKey. It does NOT
+// check any permission — pair with rbac.RequirePermission
+// to add per-route RBAC.
+func (a *Authenticator) RequireAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user, ok := authenticate(c, a.cfg)
+		if !ok {
+			return // authenticate already wrote the response
+		}
+		c.Set(rbac.AuthUserKey, user)
 		c.Next()
 	}
 }

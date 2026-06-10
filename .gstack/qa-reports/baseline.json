@@ -1,0 +1,44 @@
+{
+  "date": "2026-06-08",
+  "url": "http://127.0.0.1:5173",
+  "branch": "main",
+  "healthScore": 92,
+  "issues": [
+    {
+      "id": "ISSUE-001",
+      "title": "Auth state lost on every page reload",
+      "severity": "critical",
+      "category": "functional",
+      "status": "fixed",
+      "commit": "54f097b4",
+      "files": [
+        "frontend/src/stores/auth.ts",
+        "frontend/src/components/layout/AppShell.tsx"
+      ]
+    },
+    {
+      "id": "DEFERRED-1",
+      "title": "React Router v7 future-flag warnings in console",
+      "severity": "low",
+      "category": "console",
+      "status": "deferred"
+    },
+    {
+      "id": "DEFERRED-2",
+      "title": "Dashboard welcome line concatenates all stats onto one paragraph",
+      "severity": "low",
+      "category": "visual",
+      "status": "deferred"
+    }
+  ],
+  "categoryScores": {
+    "console": 100,
+    "links": 100,
+    "visual": 95,
+    "functional": 100,
+    "ux": 85,
+    "performance": 90,
+    "content": 100,
+    "accessibility": 85
+  }
+}

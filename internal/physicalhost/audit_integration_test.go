@@ -1,6 +1,7 @@
 package physicalhost
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"context"
 	"testing"
 	"time"
@@ -119,6 +120,6 @@ func handlerWithAudit(t *testing.T) *gin.Engine {
 	h := NewHandler(HandlerConfig{Repo: repo, Monitor: mon, Maintenance: maint, Audit: auditSvc, AuditRepo: auditRepo})
 	r := gin.New()
 	v1 := r.Group("/api/v1")
-	h.Register(v1)
+	h.Register(v1, rbac.NoopPermFactory())
 	return r
 }
