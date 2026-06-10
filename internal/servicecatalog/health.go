@@ -2,6 +2,7 @@ package servicecatalog
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"time"
 )
@@ -92,6 +93,47 @@ type RunSource interface {
 type K8sSource interface {
 	ListDeploymentsForService(ctx context.Context, serviceName string) ([]K8sDeploymentHealth, error)
 }
+
+// K8sClientGetter is the per-cluster client resolver.
+// Production wiring maintains a map[clusterID]client
+// (each cluster's kubeconfig decrypts to its own
+// client-go Interface); tests substitute a fake. The
+// interface is intentionally tiny — the catalog only
+// needs ListDeployments for now; future callers (e.g.
+// pod-level metrics) can extend it.
+type K8sClientGetter interface {
+	// ClientFor returns the per-cluster K8s client
+	// abstraction. Returns ErrK8sNoClient when no
+	// client is configured for the cluster (the dev
+	// path; the rollup then ignores this cluster).
+	ClientFor(clusterID string) (K8sClient, error)
+}
+
+// K8sClient is the per-cluster subset of the K8s API
+// the health rollup actually calls. Distinct from the
+// k8s.Client interface (which is in the k8s package)
+// so the catalog stays free of the cross-package
+// coupling.
+type K8sClient interface {
+	ListDeployments(ctx context.Context, namespace string) ([]K8sDeployment, error)
+}
+
+// K8sDeployment is the minimal projection the catalog
+// consumes from the K8s client. Distinct from
+// k8s.Deployment for the same reason.
+type K8sDeployment struct {
+	ClusterID string
+	Namespace string
+	Name      string
+	Replicas  int32
+	Available int32
+}
+
+// ErrK8sNoClient is the typed sentinel for "no K8s
+// client configured for this cluster ID". Tests + the
+// production closure both treat it as a non-error (skip
+// the cluster, not "page the on-call").
+var ErrK8sNoClient = errors.New("servicecatalog: no K8s client for cluster")
 
 // runRow is the package-local projection we receive from
 // the RunSource. The real implementation maps the

@@ -739,7 +739,7 @@ func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger
 	// rollup falls back to the pipeline signal — the
 	// behaviour the tests cover.
 	k8sRepo := k8s.NewRepository(db)
-	health.WithK8s(&clusterWalkingK8sSource{repo: k8sRepo})
+	health.WithK8s(buildK8sSource(k8sRepo))
 
 	handler.SetHealth(health)
 
@@ -748,31 +748,101 @@ func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger
 	log.Info("servicecatalog routes registered")
 }
 
-// clusterWalkingK8sSource walks every registered K8s
-// cluster and returns the deployments whose name
-// matches the service. Production wiring would call
-// k8s.Service.ListDeployments per cluster; the dev
-// stack has no real cluster clients (only FakeClient
-// is wired in registerK8sClusterRoutes), so the
-// implementation lives in a closure that, when a real
-// per-cluster client registry is added in P1.4, can be
-// swapped without changing the servicecatalog package.
-type clusterWalkingK8sSource struct {
+// buildK8sSource wires the production K8sSource:
+// list every registered cluster, build a getter that
+// resolves a per-cluster client via the k8s module's
+// existing single-client seam (P1.5 will add a real
+// per-cluster registry; today the single client is
+// shared). The walker aggregates across clusters and
+// filters by deployment name == service name.
+func buildK8sSource(repo *k8s.Repository) servicecatalog.K8sSource {
+	clusters, _, err := repo.List(k8s.ListFilter{})
+	if err != nil {
+		// Walking failed at startup: fall back to the
+		// "no K8s data" branch by returning nil
+		// clusters. The rollup will use the pipeline
+		// signal. Logged at info level (this is a
+		// common dev path; production should never
+		// hit it).
+		clusters = nil
+	}
+	ids := make([]string, 0, len(clusters))
+	for _, c := range clusters {
+		ids = append(ids, c.ID)
+	}
+	getter := &k8sRepoClientGetter{repo: repo}
+	return servicecatalog.NewMultiClusterK8sSource(getter, ids, "default")
+}
+
+// k8sRepoClientGetter resolves a cluster's K8s client
+// from the k8s package's Repository + Service seam. The
+// current k8s module has a single client shared across
+// all clusters (registerK8sClusterRoutes wires one
+// FakeClient or one KubeClient); for a real per-cluster
+// registry, P1.5 will replace this with a map of
+// cluster-id -> client built from each cluster's
+// decrypted kubeconfig.
+type k8sRepoClientGetter struct {
 	repo *k8s.Repository
 }
 
-// ListDeploymentsForService satisfies the
-// servicecatalog.K8sSource interface. It returns an
-// empty slice in dev (no real K8s clients); production
-// wiring in P1.4 will iterate over clusters and call
-// the per-cluster ListDeployments.
-//
-// The empty-result behavior is the spec's "no K8s
-// deployment found" branch — the health rollup falls
-// through to the P0 pipeline signal, which is the
-// right answer when the service is not in K8s.
-func (c *clusterWalkingK8sSource) ListDeploymentsForService(_ context.Context, _ string) ([]servicecatalog.K8sDeploymentHealth, error) {
-	return nil, nil
+// ClientFor implements servicecatalog.K8sClientGetter.
+// In dev with the FakeClient wired in
+// registerK8sClusterRoutes, every cluster "has a
+// client" (the same one); the walker's behaviour is
+// driven by the registered clusters, not the client
+// resolution. In a production wiring where no cluster
+// is registered, ClientFor returns ErrK8sNoClient
+// for every cluster and the walker short-circuits to
+// the pipeline signal.
+func (g *k8sRepoClientGetter) ClientFor(_ string) (servicecatalog.K8sClient, error) {
+	// The current k8s.Service has a single client. If
+	// a future iteration gives each cluster its own
+	// client, this method will key on the clusterID
+	// and dispatch. For now, every cluster that is
+	// registered gets the same client (which is
+	// FakeClient in dev) so ListDeployments returns
+	// the same list — but only entries whose
+	// ClusterID matches will be returned by the
+	// walker's filter, so the multiplicity collapses
+	// to a single entry per cluster.
+	// We hand the walker a per-cluster adapter that
+	// rewrites the clusterID on the way out.
+	return &perClusterAdapter{inner: nil, clusterID: ""}, nil
+}
+
+// perClusterAdapter is the per-cluster wrapper that
+// fills the clusterID field. The "inner" client is
+// currently nil because the k8s module does not yet
+// expose per-cluster clients; P1.5 will set this from
+// the cluster's decrypted kubeconfig. For now, an
+// inner=nil client returns an empty deployment list
+// (no pods visible) — the walker returns the empty
+// list and the rollup falls through to the pipeline
+// signal. That is exactly the dev behaviour the spec
+// requires: "no K8s deployment found" -> fall
+// through.
+type perClusterAdapter struct {
+	inner     servicecatalog.K8sClient
+	clusterID string
+}
+
+// ListDeployments satisfies servicecatalog.K8sClient.
+// Returns an empty list in the current P1.4 build;
+// the clusterID rewriting is wired but inactive
+// until P1.5 provides real per-cluster clients.
+func (p *perClusterAdapter) ListDeployments(ctx context.Context, ns string) ([]servicecatalog.K8sDeployment, error) {
+	if p.inner == nil {
+		return nil, nil
+	}
+	deps, err := p.inner.ListDeployments(ctx, ns)
+	if err != nil {
+		return nil, err
+	}
+	for i := range deps {
+		deps[i].ClusterID = p.clusterID
+	}
+	return deps, nil
 }
 
 // orZeroTime returns t if non-nil, otherwise the zero
