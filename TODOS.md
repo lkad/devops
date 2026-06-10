@@ -10,42 +10,32 @@ Add new items at the top. Move done items to `## Completed` with a date.
 
 ## Open
 
-### P3 — Run the load test against a live binary, capture baseline numbers
-
-**What:** Run `tests/load/loadgen_test.go` against `:3000` with
-`LOAD_VUS=50 LOAD_DURATION=20s`, record the p50/p95/p99 numbers
-into a baseline file (e.g. `tests/load/baseline.md`).
-
-**Why:** The load test asserts SLOs (p95 < 500ms, err < 1%) but
-has never actually run end-to-end. Today we don't know whether the
-binary is comfortably under the SLO or hovering at 480ms p95.
-Without a baseline number, we can't tell whether tomorrow's change
-regressed performance.
-
-**Estimate:** 20 min CC (binary up + run + analyze + write
-baseline.md), ~2 hours human.
-
----
-
-### P3 — Implement KubeClient.ExecInPod for K8s log-streaming spec
-
-**What:** The `k8s-pod-log-streaming` spec exists at
-`openspec/specs/k8s-pod-log-streaming/spec.md` and the
-`internal/k8s/logstream/` package handles streaming. The
-underlying `KubeClient` does NOT yet have an `ExecInPod` method
-that the spec mentions for the SSH-into-pod workflow.
-
-**Why:** Adds the only remaining read/exec method missing from
-the production KubeClient now that Ping/ListPods/ListDeployments/
-ListServices are real (v0.2.0.0).
-
-**Estimate:** 1 hour CC.
+(none right now)
 
 ## Completed
 
+### P3 — Run the load test against a live binary, capture baseline numbers
+
+**Completed:** 2026-06-10 (short `2d650276`)
+
+**Shipped:** `tests/load/baseline.md` with three run levels
+(50/100/200 VUs) against a fresh sqlite binary. **p95 list
+never exceeds 11ms** (SLO is 500ms — 45-80x headroom), zero
+errors across 20,000 requests. Reproducer command in the
+baseline file's "How to reproduce" section.
+
+**Side correction:** the earlier P3-ExecInPod item was
+miswritten — the `k8s-pod-log-streaming` spec does NOT
+actually mention exec. ExecInPod is a separate operator
+capability (kubectl exec) that would belong in its own spec;
+not v0.2 work. Removed from the TODO list rather than
+silently dropped.
+
+---
+
 ### P2 — Service health gauge metric + dashboard panel
 
-**Completed:** 2026-06-11 (v0.2.1.0 candidate)
+**Completed:** 2026-06-10 (commit `2d650276`)
 
 **Shipped:** `internal/servicecatalog/metrics.go` (gauge +
 counter + Record + Reset), wired into `Handler.Health()` after
