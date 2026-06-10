@@ -38,9 +38,10 @@ func TestFakeClient_ExecInPod_RejectsEmptyContainer(t *testing.T) {
 // tested without an apiserver round trip.
 func TestFakeClient_ExecInPod_ReturnsCannedResult(t *testing.T) {
 	canned := &PodExecResult{
-		Stdout:   []string{"line1", "line2"},
-		Stderr:   []string{},
-		ExitCode: 0,
+		Stdout:     []string{"line1", "line2"},
+		Stderr:     []string{},
+		ExitCode:   0,
+		DurationMs: 340,
 	}
 	c := &FakeClient{PodExecResult: canned}
 	got, err := c.ExecInPod(context.Background(), "default", "pod", "app", []string{"ls"}, 0)
@@ -49,6 +50,9 @@ func TestFakeClient_ExecInPod_ReturnsCannedResult(t *testing.T) {
 	}
 	if got.ExitCode != 0 || len(got.Stdout) != 2 || got.Stdout[0] != "line1" {
 		t.Errorf("got = %+v, want +canned", got)
+	}
+	if got.DurationMs != 340 {
+		t.Errorf("DurationMs = %d, want 340 (canned value must round-trip verbatim)", got.DurationMs)
 	}
 }
 

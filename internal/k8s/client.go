@@ -105,11 +105,17 @@ const defaultLogMaxPods = 10
 // error — many debugging commands (grep, test) exit
 // non-zero as their normal mode. Callers check the error
 // for connection / permission failures and the ExitCode
-// for command success.
+// for command success. DurationMs is the wall-clock time
+// of the full round-trip (construct URL → SPDY upgrade →
+// command complete → stream drain), measured in
+// milliseconds; the spec at openspec/specs/k8s-pod-exec
+// requires it so the route layer can render "exec took
+// 340ms" without re-measuring client-side.
 type PodExecResult struct {
-	Stdout   []string `json:"stdout_lines"`
-	Stderr   []string `json:"stderr_lines"`
-	ExitCode int      `json:"exit_code"`
+	Stdout     []string `json:"stdout_lines"`
+	Stderr     []string `json:"stderr_lines"`
+	ExitCode   int      `json:"exit_code"`
+	DurationMs int64    `json:"duration_ms"`
 }
 
 // DefaultExecTimeout is the upper bound applied when an
@@ -516,6 +522,11 @@ func (k *KubeClient) ExecInPod(ctx context.Context, namespace, pod, container st
 		timeout = MaxExecTimeout
 	}
 
+	// Wall-clock start: the spec requires duration_ms in
+	// the response so the route layer can render "exec
+	// took Nms" without re-measuring client-side.
+	start := time.Now()
+
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -581,9 +592,10 @@ func (k *KubeClient) ExecInPod(ctx context.Context, namespace, pod, container st
 	}
 
 	return PodExecResult{
-		Stdout:   splitLogLines(stdout.Bytes()),
-		Stderr:   splitLogLines(stderr.Bytes()),
-		ExitCode: exitCode,
+		Stdout:     splitLogLines(stdout.Bytes()),
+		Stderr:     splitLogLines(stderr.Bytes()),
+		ExitCode:   exitCode,
+		DurationMs: time.Since(start).Milliseconds(),
 	}, nil
 }
 
