@@ -6,14 +6,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
+	utilexec "k8s.io/utils/exec"
 )
 
 // Pod is the wire shape for a Kubernetes pod. Fields are
@@ -92,6 +98,33 @@ type LogQuery struct {
 // operator a bounded tail.
 const defaultLogMaxPods = 10
 
+// PodExecResult is the wire shape for one ExecInPod call.
+// Stdout and Stderr are line-split (one element per line, no
+// trailing newline). ExitCode is the remote process's exit
+// status (0 on success). A non-zero ExitCode is NOT an
+// error — many debugging commands (grep, test) exit
+// non-zero as their normal mode. Callers check the error
+// for connection / permission failures and the ExitCode
+// for command success.
+type PodExecResult struct {
+	Stdout   []string `json:"stdout_lines"`
+	Stderr   []string `json:"stderr_lines"`
+	ExitCode int      `json:"exit_code"`
+}
+
+// DefaultExecTimeout is the upper bound applied when an
+// ExecInPod call does not set a timeout. Sized so a runaway
+// command (e.g. `cat` with no args, `find /`) cannot hold
+// a SPDY connection indefinitely.
+const DefaultExecTimeout = 30 * time.Second
+
+// MaxExecTimeout caps the caller's requested timeout. The
+// spec (openspec/specs/k8s-pod-exec/spec.md) sets 600s; we
+// mirror that here so a request with timeout=99999s is
+// silently clamped rather than blowing past the spec'd
+// ceiling.
+const MaxExecTimeout = 600 * time.Second
+
 // Client is the seam between the k8s subsystem and the
 // Kubernetes API. The interface is intentionally tiny — only
 // the read paths used by /api/v1/k8s/clusters/:id/{pods,
@@ -126,6 +159,16 @@ type Client interface {
 	// query without a namespace scope is almost always a
 	// caller bug.
 	GetLogsBySelector(ctx context.Context, namespace, labelSelector string, q LogQuery) ([]LogEntry, error)
+
+	// ExecInPod executes a one-shot command in a running
+	// pod and returns its stdout, stderr, and exit code.
+	// The wire shape is non-streaming (one HTTP round trip
+	// per call); the v0.3 spec documents this. The caller
+	// passes an explicit timeout (or 0 to use
+	// DefaultExecTimeout). The command is argv — no shell
+	// expansion, no PTY. A non-empty command and a
+	// non-empty container are both required.
+	ExecInPod(ctx context.Context, namespace, pod, container string, command []string, timeout time.Duration) (PodExecResult, error)
 }
 
 // FakeClient is an in-memory Client for unit tests. Each
@@ -144,6 +187,13 @@ type FakeClient struct {
 	ListDeploymentsErr    error
 	ListServicesErr       error
 	GetLogsBySelectorErr  error
+	ExecInPodErr          error
+
+	// PodExecResult, if set, is returned by ExecInPod. The
+	// field exists so unit tests can drive the route layer
+	// without an apiserver round trip — the production
+	// SPDY path is integration-tested at the route level.
+	PodExecResult *PodExecResult
 
 	// logEntryFor, if non-nil, replaces the default
 	// "filter LogEntries by Container" path. Tests use it
@@ -199,6 +249,29 @@ func (f *FakeClient) ListServices(ctx context.Context, namespace string) ([]Serv
 	return out, nil
 }
 
+// ExecInPod implements Client. The fake validates inputs
+// (empty command or empty container is rejected with
+// ErrInvalidExecRequest) and returns f.PodExecResult
+// verbatim. Tests drive PodExecResult directly to assert
+// on the route layer's behaviour without an apiserver
+// round trip; the production SPDY path is integration-
+// tested at the route level.
+func (f *FakeClient) ExecInPod(ctx context.Context, namespace, pod, container string, command []string, timeout time.Duration) (PodExecResult, error) {
+	if f.ExecInPodErr != nil {
+		return PodExecResult{}, f.ExecInPodErr
+	}
+	if len(command) == 0 {
+		return PodExecResult{}, fmt.Errorf("k8s: %w: empty command", ErrInvalidExecRequest)
+	}
+	if container == "" {
+		return PodExecResult{}, fmt.Errorf("k8s: %w: empty container", ErrInvalidExecRequest)
+	}
+	if f.PodExecResult == nil {
+		return PodExecResult{}, nil
+	}
+	return *f.PodExecResult, nil
+}
+
 // GetLogsBySelector implements Client. The fake applies the
 // same namespace filter as the production implementation
 // (an empty namespace returns ErrInvalidLogQuery) and returns
@@ -243,6 +316,38 @@ func (f *FakeClient) GetLogsBySelector(ctx context.Context, namespace, labelSele
 //     standard clientcmd loader.
 type KubeClient struct {
 	iface kubernetes.Interface
+
+	// execConfig is the *rest.Config used to build the
+	// SPDY executor for ExecInPod. It is required for
+	// ExecInPod (the read-only methods work on iface
+	// alone, but exec needs the underlying transport +
+	// auth). The KubeClient constructor accepts it
+	// alongside the iface.
+	execConfig *rest.Config
+
+	// execClient is the lazily-constructed executor
+	// factory. It owns the scheme + transport for the
+	// remotecommand package. Lazily built because the
+	// read-only path does not need it and we want to
+	// avoid allocating the SPDY upgrader at startup.
+	execClient *execClient
+}
+
+// execClient wraps the *rest.Config + scheme + transport
+// needed by remotecommand. The factory method executorFor
+// is the seam tests use to inject a fake executor (a real
+// remotecommand.Executor requires a SPDY-capable
+// transport that the test environment does not provide).
+type execClient struct {
+	config *rest.Config
+	scheme *runtime.Scheme
+}
+
+// executorFor builds a remotecommand.Executor for the given
+// URL. Tests can swap this out via execClientFor to inject
+// a fake executor; production gets a real SPDY one.
+func (c *execClient) executorFor(u *url.URL) (remotecommand.Executor, error) {
+	return remotecommand.NewSPDYExecutor(c.config, "POST", u)
 }
 
 // NewKubeClient wraps a pre-built kubernetes.Interface. Used by
@@ -250,6 +355,19 @@ type KubeClient struct {
 // NewKubeClientFromKubeconfig.
 func NewKubeClient(iface kubernetes.Interface) *KubeClient {
 	return &KubeClient{iface: iface}
+}
+
+// NewKubeClientWithExecConfig wraps a pre-built
+// kubernetes.Interface AND the rest.Config that the SPDY
+// executor needs. Tests pass nil for the config (exec
+// path returns a clear error); production wires a real
+// config from NewKubeClientFromKubeconfig.
+func NewKubeClientWithExecConfig(iface kubernetes.Interface, execConfig *rest.Config) *KubeClient {
+	k := &KubeClient{iface: iface, execConfig: execConfig}
+	if execConfig != nil {
+		k.execClient = &execClient{config: execConfig, scheme: scheme.Scheme}
+	}
+	return k
 }
 
 // NewKubeClientFromKubeconfig parses an in-memory kubeconfig
@@ -269,7 +387,7 @@ func NewKubeClientFromKubeconfig(content string) (*KubeClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build clientset: %w", err)
 	}
-	return &KubeClient{iface: clientset}, nil
+	return NewKubeClientWithExecConfig(clientset, cfg), nil
 }
 
 // Ping implements Client by calling Discovery().ServerVersion()
@@ -341,6 +459,132 @@ func (k *KubeClient) ListServices(ctx context.Context, namespace string) ([]Serv
 		out = append(out, serviceToWire(&list.Items[i]))
 	}
 	return out, nil
+}
+
+// ExecInPod implements Client. It opens a SPDY stream to the
+// cluster's apiserver at /pods/{ns}/{pod}/exec, sends the
+// command with the given container, and collects stdout /
+// stderr into line-split slices. The remote exit code is
+// extracted from the executor's error: a non-zero exit is
+// NOT an error from the caller's perspective (it is a
+// normal command outcome); the caller checks PodExecResult
+// .ExitCode to decide.
+//
+// A nil iface is a hard error (the registry never wires
+// KubeClient without a backing client-go interface; this
+// branch is for unit tests). An empty command or empty
+// container returns ErrInvalidExecRequest without a round
+// trip. The timeout is clamped to MaxExecTimeout (10m) so
+// a request that asks for 1 day is silently capped, not
+// silently accepted.
+//
+// The connection lifecycle is owned by the remotecommand
+// SPDY executor: StreamWithContext(ctx, ...) returns when
+// the command completes OR the context is cancelled. We
+// hand the executor a context derived from the caller's
+// ctx with the (clamped) timeout applied.
+func (k *KubeClient) ExecInPod(ctx context.Context, namespace, pod, container string, command []string, timeout time.Duration) (PodExecResult, error) {
+	// Input validation runs first so callers see a
+	// precise "empty command" / "empty container" /
+	// "empty namespace" error rather than a generic
+	// runtime-precondition failure. The SPDY executor
+	// check is below.
+	if len(command) == 0 {
+		return PodExecResult{}, fmt.Errorf("k8s: %w: empty command", ErrInvalidExecRequest)
+	}
+	if container == "" {
+		return PodExecResult{}, fmt.Errorf("k8s: %w: empty container", ErrInvalidExecRequest)
+	}
+	if namespace == "" {
+		return PodExecResult{}, fmt.Errorf("k8s: %w: empty namespace", ErrInvalidExecRequest)
+	}
+	// Check exec config next — the SPDY executor needs
+	// a *rest.Config that the read-only NewKubeClient
+	// path does not wire. Surfaces a clear error before
+	// we touch the iface (whose RESTClient is nil in
+	// tests that use NewKubeClient).
+	if k.execClient == nil {
+		return PodExecResult{}, fmt.Errorf("k8s: KubeClient has no exec-capable client; production wiring must use NewKubeClientFromKubeconfig so exec is enabled")
+	}
+	if k.iface == nil {
+		return PodExecResult{}, fmt.Errorf("k8s: KubeClient is not wired to a client-go interface")
+	}
+	if timeout <= 0 {
+		timeout = DefaultExecTimeout
+	}
+	if timeout > MaxExecTimeout {
+		timeout = MaxExecTimeout
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	opts := &corev1.PodExecOptions{
+		Stdin:     false, // we do not send input in v0.3
+		Stdout:    true,
+		Stderr:    true,
+		TTY:       false, // v0.3 spec: no PTY (raw line stream)
+		Container: container,
+		Command:   command,
+	}
+
+	// Build the SPDY executor. The REST client's POST
+	// builder is the canonical way to construct the exec
+	// URL; VersionedParams packs the PodExecOptions into
+	// query string for the apiserver.
+	req := k.iface.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Namespace(namespace).
+		Name(pod).
+		SubResource("exec").
+		VersionedParams(opts, scheme.ParameterCodec)
+	u := req.URL()
+
+	var stdout, stderr bytes.Buffer
+	executor, err := k.execClient.executorFor(u)
+	if err != nil {
+		return PodExecResult{}, fmt.Errorf("k8s: build exec executor: %w", err)
+	}
+	streamErr := executor.StreamWithContext(execCtx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Tty:    false,
+	})
+
+	// remotecommand's StreamWithContext returns a non-nil
+	// error in three cases:
+	//   1. The context was cancelled or timed out —
+	//      surface as a typed TIMEOUT / cancellation error.
+	//   2. The remote process exited with a non-zero code —
+	//      the error wraps the exit code via
+	//      remotecommand.ExitError; we surface the code in
+	//      the result and return the original error so the
+	//      caller can distinguish (e.g. log "exec exited 1"
+	//      vs "exec timeout").
+	//   3. The SPDY upgrade itself failed (network,
+	//      auth, RBAC, pod not found, container not found)
+	//      — return the raw error.
+	exitCode := 0
+	if streamErr != nil {
+		var exitErr utilexec.ExitError
+		if errors.As(streamErr, &exitErr) {
+			exitCode = exitErr.ExitStatus()
+		} else {
+			// Network / RBAC / context error. If the
+			// context was cancelled, prefer the cancel
+			// error over the underlying one for clarity.
+			if cerr := execCtx.Err(); cerr != nil {
+				return PodExecResult{}, fmt.Errorf("k8s: exec context: %w", cerr)
+			}
+			return PodExecResult{}, fmt.Errorf("k8s: exec stream: %w", streamErr)
+		}
+	}
+
+	return PodExecResult{
+		Stdout:   splitLogLines(stdout.Bytes()),
+		Stderr:   splitLogLines(stderr.Bytes()),
+		ExitCode: exitCode,
+	}, nil
 }
 
 // GetLogsBySelector implements Client. It lists pods matching
@@ -464,6 +708,26 @@ func (k *KubeClient) logsForPod(ctx context.Context, pod *corev1.Pod, q LogQuery
 	return parseLogLines(pod.Name, container, body), nil
 }
 
+// splitLogLines splits a buffered byte slice into lines.
+// Used by ExecInPod's stdout/stderr collectors (where
+// the input is plain command output with no timestamp
+// prefix) and by parseLogLines (which then enriches each
+// line with a parsed timestamp). For the exec case the
+// line is taken verbatim.
+//
+// The function is package-local so it can be called from
+// ExecInPod without re-exporting bufio.
+func splitLogLines(body []byte) []string {
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	out := []string{}
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), "\r")
+		out = append(out, line)
+	}
+	return out
+}
+
 // parseLogLines splits a log body into LogEntry values. The
 // apiserver emits one log line per "\n" (with a trailing
 // newline stripped). Lines that begin with an RFC3339
@@ -585,6 +849,12 @@ func serviceToWire(s *corev1.Service) ServiceEntry {
 // "namespace is required"; future branches (e.g. mutually-
 // exclusive Since/SinceSeconds) can join.
 var ErrInvalidLogQuery = errors.New("invalid log query")
+
+// ErrInvalidExecRequest is the typed sentinel for a
+// malformed exec request. Today emitted on empty command
+// or empty container; future branches (timeout > Max, etc.)
+// can join.
+var ErrInvalidExecRequest = errors.New("invalid exec request")
 
 // Compile-time interface checks.
 var (
