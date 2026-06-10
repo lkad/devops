@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,8 +27,17 @@ jobs:
       - name: Build
         run: make ci-build
 
-      - name: Test
+      - name: Test (with coverage gate)
         run: make ci-test
+
+      - name: Load test smoke
+        # 50 VUs / 20s — same thresholds as the dev box.
+        # -race + -count=1 is implied by ci-test already;
+        # load test is separate so a slow CI machine does
+        # not fail on flaky timing.
+        run: |
+          go build ./tests/load/... && \
+          go test -tags=load -run TestLoadPhysicalHosts -timeout 90s ./tests/load/... -v
 
       - name: Upload coverage
         if: success()
@@ -36,3 +45,31 @@ jobs:
         with:
           name: coverage
           path: coverage.out
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npx vitest run
+
+      - name: Build
+        run: npm run build
+
