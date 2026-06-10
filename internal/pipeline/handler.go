@@ -48,14 +48,18 @@ func (h *Handler) Register(r *gin.RouterGroup) {
 // CreatePipelineInput / UpdatePipelineInput inside the
 // handler so the service stays free of Gin / JSON tags.
 type pipelineRequest struct {
-	Name        string                   `json:"name"`
-	Description string                   `json:"description"`
-	ProjectID   string                   `json:"project_id"`
-	TargetType  string                   `json:"target_type"`
-	TargetID    string                   `json:"target_id"`
-	Trigger     string                   `json:"trigger"`
-	Enabled     *bool                    `json:"enabled"`
-	Steps       []pipelineStepRequest    `json:"steps"`
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
+	ProjectID   string                `json:"project_id"`
+	TargetType  string                `json:"target_type"`
+	TargetID    string                `json:"target_id"`
+	// ServiceID is the FK to a microservice in the
+	// service catalog. Empty for legacy / unassigned
+	// pipelines.
+	ServiceID   string                `json:"service_id"`
+	Trigger     string                `json:"trigger"`
+	Enabled     *bool                 `json:"enabled"`
+	Steps       []pipelineStepRequest `json:"steps"`
 }
 
 type pipelineStepRequest struct {
@@ -81,6 +85,7 @@ func (r pipelineRequest) toCreateInput() CreatePipelineInput {
 		ProjectID:   r.ProjectID,
 		TargetType:  TargetType(r.TargetType),
 		TargetID:    r.TargetID,
+		ServiceID:   r.ServiceID,
 		Trigger:     r.Trigger,
 		Enabled:     r.Enabled,
 		Steps:       steps,
@@ -108,6 +113,10 @@ func (r pipelineRequest) toUpdateInput() UpdatePipelineInput {
 	if r.TargetID != "" {
 		tid := r.TargetID
 		in.TargetID = &tid
+	}
+	if r.ServiceID != "" {
+		sid := r.ServiceID
+		in.ServiceID = &sid
 	}
 	if r.Enabled != nil {
 		en := *r.Enabled

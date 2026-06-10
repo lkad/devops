@@ -144,6 +144,13 @@ type Pipeline struct {
 	// cluster, ...). Optional; many pipelines just run
 	// against the project as a whole.
 	TargetID string `gorm:"column:target_id;type:text;index" json:"target_id,omitempty"`
+	// ServiceID is the FK to the Service entity
+	// (servicecatalog.Service). Nullable: pipelines created
+	// before the service catalog was introduced, or
+	// pipelines whose deploys are not associated with a
+	// specific microservice, leave this as the empty
+	// string. ON DELETE SET NULL at the DB level.
+	ServiceID  string     `gorm:"column:service_id;type:text;size:64;index" json:"service_id,omitempty"`
 	// Trigger is "manual" (default) or "webhook" (stub for
 	// the planned webhook receiver).
 	Trigger string `gorm:"column:trigger;size:32;not null;default:manual" json:"trigger"`

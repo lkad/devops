@@ -37,6 +37,7 @@ import (
 	"github.com/devops-toolkit/backend/internal/physicalhost"
 	"github.com/devops-toolkit/backend/internal/physicalhost/prober"
 	"github.com/devops-toolkit/backend/internal/pipeline"
+	"github.com/devops-toolkit/backend/internal/servicecatalog"
 	projectpkg "github.com/devops-toolkit/backend/internal/project"
 	internalServer "github.com/devops-toolkit/backend/internal/server"
 	"github.com/devops-toolkit/backend/pkg/contracts"
@@ -96,6 +97,7 @@ func run() error {
 		registerK8sClusterRoutes(eng, db, log)
 		registerHostProjectLinkRoutes(eng, db, log)
 		registerPipelineRoutes(eng, db, log)
+		registerServiceCatalogRoutes(eng, db, log)
 		registerLogsRoutes(eng, db, log)
 		registerMetricsRoutes(eng, db, log)
 		registerLogStreamRoutes(eng, db, log)
@@ -657,6 +659,68 @@ func registerPipelineRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 	v1 := r.Group("/api/v1")
 	pipeline.NewHandler(svc).Register(v1)
 	log.Info("pipeline routes registered")
+}
+
+// registerServiceCatalogRoutes wires the microservice
+// catalog. The catalog includes:
+//   - CRUD on /api/v1/services
+//   - /api/v1/services/:id/health (derived from the
+//     most recent pipeline run for the service)
+//
+// The Health rollup needs to read pipeline runs; the
+// service-catalog package cannot import the pipeline
+// package (cycle — pipeline is the lower layer), so the
+// wiring is done here in main.go via the FunRunSource
+// adapter. Pipeline migrations must already be applied
+// (registerPipelineRoutes runs first).
+func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
+	if err := dbpkg.AutoMigrate(db, &servicecatalog.Service{}); err != nil {
+		log.Error("servicecatalog AutoMigrate failed", "err", err)
+		return
+	}
+	repo := servicecatalog.NewRepository(db)
+	cat := servicecatalog.NewCatalog(repo)
+	handler := servicecatalog.NewHandler(cat)
+
+	// Wire the health rollup. The adapter wraps a
+	// pipeline.Repository.LastRunsForService call and
+	// converts the rows. This is the one place that
+	// crosses the package boundary.
+	pipelineRepo := pipeline.NewRepository(db)
+	handler.SetHealth(servicecatalog.NewHealth(
+		&servicecatalog.FunRunSource{
+			Fn: func(serviceID string, n int) ([]servicecatalog.PipelineRun, error) {
+				rows, err := pipelineRepo.LastRunsForService(serviceID, n)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]servicecatalog.PipelineRun, 0, len(rows))
+				for _, r := range rows {
+					out = append(out, servicecatalog.PipelineRun{
+						ID:         r.ID,
+						Status:     string(r.Status),
+						StartedAt:  orZeroTime(r.StartedAt),
+						DurationMs: r.DurationMs,
+					})
+				}
+				return out, nil
+			},
+		},
+	))
+
+	v1 := r.Group("/api/v1")
+	handler.Register(v1)
+	log.Info("servicecatalog routes registered")
+}
+
+// orZeroTime returns t if non-nil, otherwise the zero
+// time. Defensive helper for the adapter; production
+// runs always have StartedAt set.
+func orZeroTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }
 
 // registerLogsRoutes wires the log-aggregation module. The backend

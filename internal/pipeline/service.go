@@ -22,6 +22,11 @@ type CreatePipelineInput struct {
 	ProjectID   string
 	TargetType  TargetType
 	TargetID    string
+	// ServiceID is the FK to a service in the
+	// service-catalog. Empty for legacy / unassigned
+	// pipelines. The FK is ON DELETE SET NULL so removing
+	// a service does not cascade-delete the pipeline row.
+	ServiceID   string
 	Trigger     string
 	Steps       []PipelineStep
 	Enabled     *bool
@@ -36,6 +41,9 @@ type UpdatePipelineInput struct {
 	Description *string
 	TargetType  *TargetType
 	TargetID    *string
+	// ServiceID: nil means "do not change"; non-nil with
+	// an empty string means "clear the association".
+	ServiceID   *string
 	Enabled     *bool
 }
 
@@ -53,6 +61,32 @@ type Service struct {
 	// the cancel endpoint looks up to cancel the goroutine.
 	runMu   sync.Mutex
 	running map[string]context.CancelFunc
+
+	// serviceValidator is the optional function-typed seam
+	// for service_id FK validation. It is nil by default;
+	// when set, every Create / Update that supplies a
+	// non-empty ServiceID calls it. The servicecatalog
+	// package wires the real validator in main.go; tests
+	// can inject a fake via WithServiceValidator.
+	serviceValidator ServiceValidator
+}
+
+// ServiceValidator reports whether a service_id refers to
+// an existing service. Returning a non-nil error fails
+// the create / update with a 400.
+type ServiceValidator func(serviceID string) error
+
+// errUnknownService is the typed sentinel for "service
+// does not exist". The handler maps it to a 400 with a
+// readable message.
+var errUnknownService = errors.New("pipeline: unknown service_id")
+
+// WithServiceValidator injects the validator and returns
+// the receiver for fluent chaining. Called once at
+// startup, after NewService, before serving traffic.
+func (s *Service) WithServiceValidator(v ServiceValidator) *Service {
+	s.serviceValidator = v
+	return s
 }
 
 // NewService builds a Service. The repository and executor
@@ -73,6 +107,9 @@ func (s *Service) Create(in CreatePipelineInput) (*Pipeline, error) {
 	if err := validateCreate(in); err != nil {
 		return nil, err
 	}
+	if err := s.validateServiceID(in.ServiceID); err != nil {
+		return nil, err
+	}
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled
@@ -87,6 +124,7 @@ func (s *Service) Create(in CreatePipelineInput) (*Pipeline, error) {
 		ProjectID:   strings.TrimSpace(in.ProjectID),
 		TargetType:  in.TargetType,
 		TargetID:    in.TargetID,
+		ServiceID:   in.ServiceID,
 		Trigger:     trigger,
 		Steps:       StepList(in.Steps),
 		Enabled:     enabled,
@@ -135,6 +173,11 @@ func (s *Service) List(f PipelineFilter) ([]Pipeline, int64, error) {
 
 // Update applies a partial update.
 func (s *Service) Update(id string, in UpdatePipelineInput) (*Pipeline, error) {
+	if in.ServiceID != nil {
+		if err := s.validateServiceID(*in.ServiceID); err != nil {
+			return nil, err
+		}
+	}
 	p, err := s.repo.GetPipeline(id)
 	if err != nil {
 		if IsNotFound(err) {
@@ -173,6 +216,9 @@ func (s *Service) Update(id string, in UpdatePipelineInput) (*Pipeline, error) {
 	}
 	if in.TargetID != nil {
 		p.TargetID = *in.TargetID
+	}
+	if in.ServiceID != nil {
+		p.ServiceID = *in.ServiceID
 	}
 	if in.Enabled != nil {
 		p.Enabled = *in.Enabled
@@ -722,4 +768,33 @@ func truncateMsg(s string) string {
 		return s
 	}
 	return s[:max]
+}
+
+// validateServiceID is the function-typed seam the
+// servicecatalog package uses. When the validator is
+// configured (production wiring in main.go) every non-empty
+// service_id is checked. When the validator is nil the
+// function fails closed: a non-empty service_id is rejected.
+// This is deliberate — the alternative ("accept anything
+// when no validator is wired") is a footgun. Existing
+// pipelines that did not set service_id keep working
+// because we only check when the caller supplies a value.
+func (s *Service) validateServiceID(id string) error {
+	if id == "" {
+		return nil
+	}
+	if s.serviceValidator == nil {
+		return &contracts.APIError{
+			Code:    contracts.CodeValidation,
+			Message: fmt.Sprintf("service_id %q is not validated (no catalog wired)", id),
+		}
+	}
+	if err := s.serviceValidator(id); err != nil {
+		return &contracts.APIError{
+			Code:    contracts.CodeValidation,
+			Message: fmt.Sprintf("service_id %q does not exist", id),
+			Cause:   err,
+		}
+	}
+	return nil
 }

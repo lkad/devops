@@ -43,6 +43,10 @@ func NewRepository(db *gorm.DB) *Repository { return &Repository{db: db} }
 type PipelineFilter struct {
 	ProjectID string
 	Search    string
+	// ServiceID restricts to pipelines that deploy the
+	// given microservice. Used by the service-catalog
+	// health rollup to answer "what deploys service X".
+	ServiceID string
 	// Limit caps the page size; 0 returns every row.
 	Limit  int
 	Offset int
@@ -79,6 +83,9 @@ func (r *Repository) ListPipelines(f PipelineFilter) ([]Pipeline, int64, error) 
 	q := r.db.Model(&Pipeline{})
 	if f.ProjectID != "" {
 		q = q.Where("project_id = ?", f.ProjectID)
+	}
+	if f.ServiceID != "" {
+		q = q.Where("service_id = ?", f.ServiceID)
 	}
 	if f.Search != "" {
 		like := "%" + f.Search + "%"
@@ -191,6 +198,42 @@ func (r *Repository) ListRunsForPipeline(pipelineID string, limit, offset int) (
 		return nil, 0, fmt.Errorf("pipeline.ListRunsForPipeline find: %w", err)
 	}
 	return rows, total, nil
+}
+
+// LastRunsForService returns the most recent N pipeline
+// runs across all pipelines that deploy the given service,
+// newest first. limit <= 0 means "no limit". Used by the
+// service-catalog health rollup.
+//
+// We join PipelineRun -> Pipeline on pipeline_id; the
+// WHERE service_id = ? filters to just the deploys for
+// the service. The two-step query (sub-select for matching
+// pipeline IDs, then run query) is the cleanest portable
+// shape across SQLite + Postgres.
+func (r *Repository) LastRunsForService(serviceID string, limit int) ([]PipelineRun, error) {
+	if serviceID == "" {
+		return nil, nil
+	}
+	var pipelineIDs []string
+	if err := r.db.Model(&Pipeline{}).
+		Where("service_id = ?", serviceID).
+		Pluck("id", &pipelineIDs).Error; err != nil {
+		return nil, fmt.Errorf("pipeline.LastRunsForService pluck: %w", err)
+	}
+	if len(pipelineIDs) == 0 {
+		return nil, nil
+	}
+	q := r.db.Model(&PipelineRun{}).
+		Where("pipeline_id IN ?", pipelineIDs).
+		Order("started_at DESC, id ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	rows := []PipelineRun{}
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("pipeline.LastRunsForService find: %w", err)
+	}
+	return rows, nil
 }
 
 // ListRecentRuns returns runs across every pipeline,
