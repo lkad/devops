@@ -17,8 +17,9 @@ import (
 // validation, orchestration, and persistence live in the
 // Catalog / Repository.
 type Handler struct {
-	cat    *Catalog
-	health *Health // optional; nil means health endpoint returns "unknown / not configured"
+	cat     *Catalog
+	health  *Health  // optional; nil means health endpoint returns "unknown / not configured"
+	metrics *Metrics // optional; nil = no Prometheus recording (unit tests)
 }
 
 // NewHandler builds a Handler. The Health dependency is
@@ -32,6 +33,13 @@ func NewHandler(cat *Catalog) *Handler { return &Handler{cat: cat} }
 // have to import the pipeline package (which would be a
 // cycle) — main.go wires the dependency in a second step.
 func (h *Handler) SetHealth(hl *Health) { h.health = hl }
+
+// SetMetrics injects the Prometheus instrument set after
+// construction. Optional — handlers without metrics still
+// work (the Record method is a no-op on nil). Production
+// wiring in main.go always passes a non-nil Metrics built
+// off the observability registry.
+func (h *Handler) SetMetrics(m *Metrics) { h.metrics = m }
 
 // Register attaches the catalog routes to the supplied
 // router group. The group is expected to live under
@@ -51,7 +59,8 @@ func (h *Handler) Health(c *gin.Context) {
 	id := c.Param("id")
 	// 404 if the service does not exist (rather than
 	// returning a confusing "unknown health" envelope).
-	if _, err := h.cat.Get(id); err != nil {
+	svc, err := h.cat.Get(id)
+	if err != nil {
 		writeAPIError(c.Writer, err)
 		return
 	}
@@ -71,6 +80,13 @@ func (h *Handler) Health(c *gin.Context) {
 		writeAPIError(c.Writer, err)
 		return
 	}
+	// Record the rollup into Prometheus AFTER we've
+	// computed the real result. A nil h.metrics is a
+	// no-op; the production wiring in main.go always
+	// supplies one. Done before the response is rendered
+	// so a scrape racing with the response sees the
+	// latest value.
+	h.metrics.Record(svc, out)
 	c.JSON(http.StatusOK, out)
 }
 
@@ -221,10 +237,18 @@ func (h *Handler) Update(c *gin.Context) {
 
 // Delete handles DELETE /services/:id (soft delete).
 func (h *Handler) Delete(c *gin.Context) {
-	if err := h.cat.SoftDelete(c.Param("id")); err != nil {
+	id := c.Param("id")
+	if err := h.cat.SoftDelete(id); err != nil {
 		writeAPIError(c.Writer, err)
 		return
 	}
+	// Drop the gauge series for the deleted service so
+	// stale "last known health" labels do not linger in
+	// Prometheus until the scrape-side eviction kicks
+	// in. Counter values are not reset (they describe
+	// observed history, not state). A nil h.metrics is
+	// a no-op.
+	h.metrics.Reset(id)
 	c.Writer.WriteHeader(http.StatusNoContent)
 }
 

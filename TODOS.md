@@ -3,42 +3,12 @@
 Tracks deferred work that's clear but intentionally not done now.
 Add new items at the top. Move done items to `## Completed` with a date.
 
+# TODOS — DevOps Toolkit
+
+Tracks deferred work that's clear but intentionally not done now.
+Add new items at the top. Move done items to `## Completed` with a date.
+
 ## Open
-
-### P2 — Service health gauge metric + dashboard panel
-
-**What:** Add a Prometheus gauge
-`devops_toolkit_service_health_status{service_id, service_name, tier, derived_from}`
-that records the latest rollup status (0=unknown, 1=healthy, 2=degraded)
-each time `Health.Rollup` is called. Plus a counter
-`devops_toolkit_service_health_rollup_total{status, derived_from}` for
-trend graphs.
-
-**Why:** The current `service-catalog.json` Grafana dashboard
-(deploy/grafana/dashboards/service-catalog.json) shows catalog API
-traffic and Postgres-derived service snapshots — but it has NO per-
-service health status. An operator looking at the dashboard cannot
-tell which service is currently red/yellow/green without clicking
-into the frontend Services page.
-
-**Where:**
-- New: `internal/servicecatalog/metrics.go` (~80 LOC)
-- Edit: `internal/servicecatalog/handler.go` — call `metrics.Record(svc, result)`
-  after `Health.Rollup` succeeds (~10 LOC)
-- Edit: `cmd/devops-toolkit/main.go` — build the metric set from the
-  observability registry, wire it into the catalog handler (~5 LOC)
-- New tests: ~60 LOC (counter + gauge update assertions)
-- Edit: `deploy/grafana/dashboards/service-catalog.json` — add a
-  "Per-Service Status" stat row driven by the new gauge.
-
-**Estimate:** 30 min CC, ~1 day human.
-
-**Reference:** the metric naming convention follows
-`internal/observability/metrics.go` (`devops_toolkit_<subsystem>_<name>`).
-The Handler.Health() method already calls `h.cat.Get(id)` so it has
-the Service struct (name + tier) ready to label the gauge with.
-
----
 
 ### P3 — Run the load test against a live binary, capture baseline numbers
 
@@ -73,4 +43,19 @@ ListServices are real (v0.2.0.0).
 
 ## Completed
 
-(empty)
+### P2 — Service health gauge metric + dashboard panel
+
+**Completed:** 2026-06-11 (v0.2.1.0 candidate)
+
+**Shipped:** `internal/servicecatalog/metrics.go` (gauge +
+counter + Record + Reset), wired into `Handler.Health()` after
+every rollup and `Handler.Delete()` to drop stale series.
+`main.go`: `buildRouter` now returns the observability Metrics
+so `registerServiceCatalogRoutes` can register the catalog
+gauges on the same /metrics endpoint. 10 unit tests covering
+the enum mapping, nil-safety, gauge overwrite, counter
+accumulation, partial-delete, and gather-payload health. 3
+new Grafana panels: per-service status (color-coded
+gray/green/red), rollup rate by status, rollup rate by signal
+source.
+

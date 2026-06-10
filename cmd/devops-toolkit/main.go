@@ -77,7 +77,7 @@ func run() error {
 	}
 	log.Info("database connected", "driver", cfg.Database.Driver)
 
-	router := buildRouter(log)
+	router, obs := buildRouter(log)
 	if eng, ok := router.(*gin.Engine); ok {
 		registerAuthRoutes(eng, cfg, log)
 		registerProjectRoutes(eng, db, log)
@@ -97,7 +97,7 @@ func run() error {
 		k8sSvc := registerK8sClusterRoutes(eng, db, log)
 		registerHostProjectLinkRoutes(eng, db, log)
 		registerPipelineRoutes(eng, db, log)
-		registerServiceCatalogRoutes(eng, db, log, k8sSvc)
+		registerServiceCatalogRoutes(eng, db, log, k8sSvc, obs)
 		registerLogsRoutes(eng, db, log)
 		registerMetricsRoutes(eng, db, log)
 		registerLogStreamRoutes(eng, db, log)
@@ -155,9 +155,12 @@ func run() error {
 	}
 }
 
-// buildRouter returns the HTTP handler tree. Kept as a separate
-// function so tests can call it without booting a listener.
-func buildRouter(log *logger.Logger) http.Handler {
+// buildRouter returns the HTTP handler tree plus the Prometheus
+// observability Metrics struct (so route registrars can share
+// the same /metrics registry for domain-level instruments).
+// Kept as a separate function so tests can call it without
+// booting a listener.
+func buildRouter(log *logger.Logger) (http.Handler, *observability.Metrics) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -248,7 +251,7 @@ func buildRouter(log *logger.Logger) http.Handler {
 			})
 		})
 	}
-	return r
+	return r, obs
 }
 
 // toDBConfig maps the config-tree DatabaseConfig to the database
@@ -695,8 +698,11 @@ func registerPipelineRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 // import either upstream package (cycle), so the
 // wiring is done here in main.go via two function-typed
 // adapters. Pipeline migrations must already be applied
-// (registerPipelineRoutes runs first).
-func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, k8sSvc *k8s.Service) {
+// (registerPipelineRoutes runs first). obs is the shared
+// observability Metrics so the catalog's domain-level
+// gauges land on the same /metrics registry as the HTTP
+// middleware.
+func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger, k8sSvc *k8s.Service, obs *observability.Metrics) {
 	if err := dbpkg.AutoMigrate(db, &servicecatalog.Service{}, &servicecatalog.OnCall{}, &servicecatalog.RunbookEntry{}); err != nil {
 		log.Error("servicecatalog AutoMigrate failed", "err", err)
 		return
@@ -704,6 +710,14 @@ func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger
 	repo := servicecatalog.NewRepository(db)
 	cat := servicecatalog.NewCatalog(repo)
 	handler := servicecatalog.NewHandler(cat)
+
+	// Domain-level Prometheus metrics for per-service
+	// health. Registered against the same registry as
+	// the HTTP middleware so a single /metrics scrape
+	// returns both transport and domain signals.
+	if obs != nil {
+		handler.SetMetrics(servicecatalog.NewMetrics(obs.Registry()))
+	}
 
 	// Wire the health rollup. Two seams: a
 	// pipeline.RunSource (always wired — the P0

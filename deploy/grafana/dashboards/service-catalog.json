@@ -12,7 +12,7 @@
       }
     ]
   },
-  "description": "Service catalog operations: how many services we manage, who's on call, how often the catalog API is hit, and what's slow. Built on HTTP metrics + Postgres reads — when the in-process service_health gauge lands (see TODOS.md), add a per-service Status panel.",
+  "description": "Service catalog operations: how many services we manage, who's on call, how often the catalog API is hit, what's slow, and the live per-service health rollup signal. Per-service rows only populate after the first GET /services/:id/health hit (the frontend Services page polls them on view).",
   "editable": true,
   "graphTooltip": 0,
   "title": "DevOps Toolkit — Service Catalog",
@@ -296,6 +296,98 @@
           "format": "table"
         }
       ]
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Per-Service Health (live)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "collapsed": false
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "Service Status (latest rollup)",
+      "description": "0 = unknown (gray), 1 = healthy (green), 2 = degraded (red). Updated whenever GET /services/:id/health is hit (the frontend Services page polls; alerting hits too). A service that never had a rollup will not appear here — open its page once to populate.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 27 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "devops_toolkit_service_health_status",
+          "legendFormat": "{{service_name}} ({{tier}})",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "textMode": "value_and_name",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "unknown", "color": "text", "index": 0 }, "1": { "text": "healthy", "color": "text", "index": 1 }, "2": { "text": "degraded", "color": "text", "index": 2 } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "gray", "value": null },
+              { "color": "green", "value": 1 },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Health Rollups (req/s by status)",
+      "description": "Rate of devops_toolkit_service_health_rollup_total broken out by resulting status. A spike in 'degraded' is the leading indicator of a service going red.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 35 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(devops_toolkit_service_health_rollup_total[$__rate_interval]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "healthy" },
+            "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "degraded" },
+            "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "unknown" },
+            "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "gray" } } ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "Health Rollups (req/s by signal source)",
+      "description": "Which signal drove each rollup: K8s pod health (the primary signal when available) vs the last pipeline run (fallback). A drop in 'k8s_pod_health' with a rise in 'last_pipeline_run' means the cluster lost reachability.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 35 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "sum by (derived_from) (rate(devops_toolkit_service_health_rollup_total[$__rate_interval]))",
+          "legendFormat": "{{derived_from}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
     }
   ]
 }

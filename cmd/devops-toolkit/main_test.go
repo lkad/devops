@@ -17,7 +17,7 @@ func TestBuildRouter_HealthEndpoint(t *testing.T) {
 	// WHEN /health is requested
 	// THEN 200 OK with {"status":"ok"} is returned
 	log := logger.New(logger.WithWriter(&bytes.Buffer{}), logger.WithLevel("error"))
-	r := buildRouter(log)
+	r, _ := buildRouter(log)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -43,7 +43,7 @@ func TestBuildRouter_UnknownRouteReturns404Envelope(t *testing.T) {
 	// WHEN an unknown path is requested
 	// THEN 404 with a contracts-style error envelope is returned
 	log := logger.New(logger.WithWriter(&bytes.Buffer{}), logger.WithLevel("error"))
-	r := buildRouter(log)
+	r, _ := buildRouter(log)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/no-such-route", nil)
@@ -71,7 +71,7 @@ func TestBuildRouter_APIv1Placeholder(t *testing.T) {
 	// THEN 200 with the listed sections is returned
 	// (the endpoint exists in Phase 1 as a placeholder; modules add their own routes in later phases)
 	log := logger.New(logger.WithWriter(&bytes.Buffer{}), logger.WithLevel("error"))
-	r := buildRouter(log)
+	r, _ := buildRouter(log)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil)
