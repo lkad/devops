@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { apiPost, apiDelete } from '../api/client';
+import { formatApiError } from '../api/errors';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
@@ -36,6 +37,29 @@ interface Service {
   tier: Tier;
   created_at?: string;
   updated_at?: string;
+  // P2.2 + P2.3 — embedded by GET /api/v1/services/:id.
+  // Oncall is the current shift (null = no one on call);
+  // runbook is a (possibly empty) array of entries
+  // newest-first.
+  oncall?: OnCall | null;
+  runbook?: RunbookEntry[];
+}
+
+interface OnCall {
+  id: string;
+  service_id?: string;
+  user: string;
+  shift_start: string;
+  shift_end: string;
+}
+
+interface RunbookEntry {
+  id: string;
+  service_id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
 }
 
 interface HealthResult {
@@ -319,7 +343,7 @@ function ServiceDetail({
       await apiDelete(`services/${svc.id}`);
       onDeleted();
     } catch (e: any) {
-      toast(`Delete failed: ${e?.message ?? 'unknown'}`, 'error');
+      toast(formatApiError('Delete failed', e), 'error');
       setDeleting(false);
       setConfirmDelete(false);
     }
@@ -402,7 +426,16 @@ function ServiceDetail({
         )}
       </div>
 
-      <h3 style={{ fontSize: 'var(--fs-h3)', marginBottom: 'var(--sp-3)' }}>Recent deploys</h3>
+      <OnCallBlock oncall={svc.oncall ?? null} />
+
+      <h3 style={{ fontSize: 'var(--fs-h3)', marginBottom: 'var(--sp-3)', marginTop: 'var(--sp-5)' }}>
+        Runbook
+      </h3>
+      <RunbookBlock entries={svc.runbook ?? []} />
+
+      <h3 style={{ fontSize: 'var(--fs-h3)', marginBottom: 'var(--sp-3)', marginTop: 'var(--sp-5)' }}>
+        Recent deploys
+      </h3>
       {loading && <div style={{ color: 'var(--color-text-muted)' }}>Loading…</div>}
       {error && <div style={{ color: 'var(--color-error)' }}>{error}</div>}
       {health && (
@@ -569,5 +602,95 @@ function NewServiceModal({
         {(s) => <input style={s} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" />}
       </FormField>
     </Modal>
+  );
+}
+
+function OnCallBlock({ oncall }: { oncall: OnCall | null }) {
+  if (!oncall) {
+    return (
+      <div
+        style={{
+          padding: 'var(--sp-3) var(--sp-4)',
+          background: 'var(--color-surface-elevated)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-md)',
+          color: 'var(--color-text-muted)',
+          fontSize: 'var(--fs-small)',
+        }}
+      >
+        No one is on call for this service right now.
+      </div>
+    );
+  }
+  return (
+    <div
+      style={{
+        padding: 'var(--sp-3) var(--sp-4)',
+        background: 'var(--color-surface-elevated)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-md)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--sp-3)',
+      }}
+    >
+      <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--color-text-muted)' }}>
+        Currently on call:
+      </span>
+      <span className="mono" style={{ fontWeight: 600 }}>
+        {oncall.user}
+      </span>
+      <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--color-text-secondary)' }}>
+        until {relative(oncall.shift_end)}
+      </span>
+    </div>
+  );
+}
+
+function RunbookBlock({ entries }: { entries: RunbookEntry[] }) {
+  if (entries.length === 0) {
+    return (
+      <div
+        style={{
+          padding: 'var(--sp-3) var(--sp-4)',
+          border: '1px dashed var(--color-border)',
+          borderRadius: 'var(--radius-md)',
+          color: 'var(--color-text-muted)',
+          fontSize: 'var(--fs-small)',
+        }}
+      >
+        No runbook entries yet. Add a procedure the on-call
+        should follow when this service is on fire.
+      </div>
+    );
+  }
+  return (
+    <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+      {entries.map((e) => (
+        <li
+          key={e.id}
+          style={{
+            background: 'var(--color-surface-elevated)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)',
+            padding: 'var(--sp-3) var(--sp-4)',
+            marginBottom: 'var(--sp-2)',
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 'var(--sp-1)' }}>{e.title}</div>
+          <pre
+            style={{
+              margin: 0,
+              whiteSpace: 'pre-wrap',
+              fontFamily: 'inherit',
+              fontSize: 'var(--fs-small)',
+              color: 'var(--color-text-secondary)',
+            }}
+          >
+            {e.body}
+          </pre>
+        </li>
+      ))}
+    </ol>
   );
 }

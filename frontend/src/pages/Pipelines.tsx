@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { apiPost } from '../api/client';
+import { formatApiError } from '../api/errors';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
@@ -162,7 +163,7 @@ export function Pipelines() {
       toast(`Triggered run ${r.id}`, 'success');
       reload();
     } catch (e: any) {
-      toast(`Trigger failed: ${e?.message ?? 'unknown'}`, 'error');
+      toast(formatApiError('Trigger failed', e), 'error');
     } finally {
       setTrigging(false);
     }
@@ -555,7 +556,7 @@ function RunDetailModal({
       toast(`Run ${runId.slice(0, 8)} cancelled`, 'success');
       reload();
     } catch (e: any) {
-      toast(`Cancel failed: ${e?.message ?? 'unknown'}`, 'error');
+      toast(formatApiError('Cancel failed', e), 'error');
     } finally {
       setCancelling(false);
     }

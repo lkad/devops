@@ -53,6 +53,12 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
   };
   const token = getToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
+  // If the caller supplied a W3C trace context (e.g.
+  // via the debug-tools page), propagate it so the
+  // backend links the request to the parent's trace.
+  if ((opts as any).traceparent) {
+    headers['traceparent'] = (opts as any).traceparent;
+  }
 
   const res = await fetch(url, {
     method,
@@ -76,6 +82,10 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
     e.code = err.code;
     e.status = res.status;
     e.details = err.details;
+    // Capture the backend trace ID so the toast (and
+    // any future error boundary) can show "trace:
+    // <hex>". See observability/tracing.go.
+    e.traceId = res.headers.get('X-Trace-Id') || undefined;
     throw e;
   }
   return parsed as T;
