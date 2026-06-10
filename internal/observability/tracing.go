@@ -211,6 +211,20 @@ func (t *Tracing) Middleware() gin.HandlerFunc {
 		)
 		defer span.End()
 
+		// X-Trace-Id: set BEFORE c.Next() so the
+		// header is in the response. Gin's response
+		// writer commits the header set on the first
+		// body Write, so writing it after the handler
+		// runs is too late. (The unit test passes
+		// c.String which uses a non-streaming path; the
+		// real handler uses json.Encoder which does
+		// commit early.)
+		traceID := span.SpanContext().TraceID().String()
+		if traceID == "00000000000000000000000000000000" {
+			traceID = randomTraceID()
+		}
+		c.Writer.Header().Set("X-Trace-Id", traceID)
+
 		start := time.Now()
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
@@ -218,23 +232,8 @@ func (t *Tracing) Middleware() gin.HandlerFunc {
 		status := c.Writer.Status()
 		span.SetAttributes(
 			attribute.Int("http.response.status_code", status),
-		)
-		// server.duration is the canonical name; some
-		// backends expect it under server.duration so
-		// we record both.
-		span.SetAttributes(
 			attribute.Float64("http.server.duration", time.Since(start).Seconds()),
 		)
-
-		// X-Trace-Id: extract the trace_id from the
-		// span context. If somehow empty, fall back to
-		// a fresh random id so the header is always
-		// set.
-		traceID := span.SpanContext().TraceID().String()
-		if traceID == "00000000000000000000000000000000" {
-			traceID = randomTraceID()
-		}
-		c.Writer.Header().Set("X-Trace-Id", traceID)
 	}
 }
 
