@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+// validKubeconfig is a minimal kubeconfig that parses cleanly
+// via client-go's clientcmd.RESTConfigFromKubeConfig. The
+// server URL never gets called in unit tests — the registry
+// stops at building the client. Defined once and shared by
+// every happy-path test below.
+const validKubeconfig = `apiVersion: v1
+kind: Config
+clusters:
+- name: test
+  cluster:
+    server: https://127.0.0.1:6443
+    insecure-skip-tls-verify: true
+contexts:
+- name: test
+  context:
+    cluster: test
+    user: test
+current-context: test
+users:
+- name: test
+  user:
+    token: dev-token
+`
+
 // TestClientRegistry_CacheHitReturnsSameClient pins
 // the sticky-cache rule: a second ClientFor call for
 // the same cluster ID must not re-decrypt the
@@ -15,7 +39,7 @@ func TestClientRegistry_CacheHitReturnsSameClient(t *testing.T) {
 	if err := repo.Create(created); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	svc := &countingDecrypter{resultFor: func(c *Cluster) (string, error) { return "/tmp/kc-" + c.ID, nil }}
+	svc := &countingDecrypter{resultFor: func(c *Cluster) (string, error) { return validKubeconfig, nil }}
 	reg := NewClientRegistry(repo, svc)
 
 	if _, err := reg.ClientFor(created.ID); err != nil {
@@ -67,6 +91,34 @@ func TestClientRegistry_DecryptErrorCached(t *testing.T) {
 	}
 	if svc.count != 1 {
 		t.Errorf("decrypt called %d times, want 1 (sticky error)", svc.count)
+	}
+}
+
+// TestClientRegistry_ParseErrorCached pins the
+// kubeconfig-parse failure path added in P1.6:
+// a decrypted-but-malformed kubeconfig must surface
+// an error AND be cached stickily, exactly like the
+// decrypt-error case. P1.5 silently swallowed this
+// because NewKubeClient was a stub.
+func TestClientRegistry_ParseErrorCached(t *testing.T) {
+	repo := repoFixture(t)
+	created := &Cluster{Name: "cl-1", Type: ClusterTypeK3d, KubeconfigEncrypted: "ct-cl-1"}
+	if err := repo.Create(created); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	svc := &countingDecrypter{resultFor: func(c *Cluster) (string, error) {
+		return "not a kubeconfig", nil
+	}}
+	reg := NewClientRegistry(repo, svc)
+
+	for i := 0; i < 3; i++ {
+		_, err := reg.ClientFor(created.ID)
+		if err == nil {
+			t.Fatalf("call %d: expected error", i)
+		}
+	}
+	if svc.count != 1 {
+		t.Errorf("decrypt called %d times, want 1 (sticky parse error)", svc.count)
 	}
 }
 

@@ -84,25 +84,23 @@ func TestFakeClient_ImplementsClient(t *testing.T) {
 	var _ Client = (*KubeClient)(nil)
 }
 
-// TestNewKubeClient_NilDB ensures the constructor does not panic
-// on a nil db; the test ensures the constructor compiles and
-// returns a non-nil pointer. We never call methods on it
-// because the nil DB would panic.
+// TestNewKubeClient_NotNil ensures the constructor returns
+// a non-nil pointer. We pass nil as the iface — methods
+// would error, but the constructor itself is nil-safe so the
+// registry can still cache the result.
 func TestNewKubeClient_NotNil(t *testing.T) {
-	c := NewKubeClient(nil, "")
+	c := NewKubeClient(nil)
 	if c == nil {
 		t.Fatal("NewKubeClient returned nil")
 	}
 }
 
-// TestKubeClient_BuildConfig_InCluster ensures that the
-// in-cluster mode is recognised (we don't actually call out to
-// k8s in unit tests, but the constructor must not error on the
-// config builder). An empty kubeconfig path means the client
-// should run in in-cluster mode.
-func TestKubeClient_BuildConfig_InCluster(t *testing.T) {
-	c := NewKubeClient(nil, "")
-	if !c.inCluster {
-		t.Errorf("inCluster should be true when kubeconfig is empty, got %v", c.inCluster)
+// TestNewKubeClientFromKubeconfig_InvalidContent pins the
+// registry's sticky-error path: a kubeconfig that fails to
+// parse surfaces an error the registry will cache.
+func TestNewKubeClientFromKubeconfig_InvalidContent(t *testing.T) {
+	_, err := NewKubeClientFromKubeconfig("not a kubeconfig")
+	if err == nil {
+		t.Fatal("expected error for malformed kubeconfig, got nil")
 	}
 }

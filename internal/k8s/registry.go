@@ -101,14 +101,17 @@ func (r *defaultRegistry) ClientFor(clusterID string) (Client, error) {
 		return nil, wrapped
 	}
 
-	// KubeClient is the production Client
-	// implementation. Its methods are still stubs
-	// (P1.5 only wires the registry; the real
-	// client-go calls live in a follow-up). We
-	// construct it with the on-disk path; the
-	// future implementation will parse the
-	// in-memory config string instead.
-	client := NewKubeClient(nil, cfg)
+	// Parse the in-memory kubeconfig and build a real
+	// client-go-backed KubeClient. Failures here are
+	// cached stickily (a bad kubeconfig is "no client"
+	// for the rest of the process — no point retrying
+	// the parse on every health rollup).
+	client, err := NewKubeClientFromKubeconfig(cfg)
+	if err != nil {
+		wrapped := fmt.Errorf("build client: %w", err)
+		r.cacheErr(clusterID, wrapped)
+		return nil, wrapped
+	}
 
 	r.mu.Lock()
 	r.cache[clusterID] = cachedClient{client: client}
