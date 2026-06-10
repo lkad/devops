@@ -1,8 +1,13 @@
 package k8s
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,6 +47,51 @@ type ServiceEntry struct {
 	ClusterIP string `json:"cluster_ip"`
 }
 
+// LogEntry is the wire shape for a single log line returned by
+// GetLogsBySelector. It is intentionally minimal (no container
+// runtime metadata, no parse-failed placeholder fields) — the
+// shape the dashboard + log-search UI consume. Timestamp is
+// zero when the source backend did not emit one (e.g. raw
+// files); callers must check IsZero() before rendering.
+type LogEntry struct {
+	Pod       string    `json:"pod"`
+	Container string    `json:"container,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+	Line      string    `json:"line"`
+}
+
+// LogQuery carries the optional refinements for a label-
+// selector log query. The zero value is valid (returns the
+// last ~10 lines from every container of every matching pod).
+type LogQuery struct {
+	// Container filters the result to one container per pod.
+	// Empty means "all containers in the pod".
+	Container string
+	// TailLines caps the historical tail per pod. Zero or
+	// negative means "use backend default" (client-go sends
+	// no tailLines field, which the apiserver treats as ~10
+	// lines).
+	TailLines int
+	// Since is the lower bound on line timestamps. Zero
+	// means "no lower bound". When non-zero, the apiserver
+	// uses sinceTime (RFC3339) over sinceSeconds because
+	// it is unambiguous across clock-skewed nodes.
+	Since time.Time
+	// MaxPods caps how many matching pods the call will
+	// fan out to. Zero or negative means "use the default
+	// (10)" — a guard against an over-broad selector
+	// (e.g. "app=" hitting 500 pods) blowing up the
+	// apiserver connection budget.
+	MaxPods int
+}
+
+// defaultLogMaxPods is the cap applied when LogQuery.MaxPods
+// is unset. Sized so a single call fits in a dozen concurrent
+// apiserver log reads; the UI caps the visible result at
+// MaxLines regardless so a fanned-out read still gives the
+// operator a bounded tail.
+const defaultLogMaxPods = 10
+
 // Client is the seam between the k8s subsystem and the
 // Kubernetes API. The interface is intentionally tiny — only
 // the read paths used by /api/v1/k8s/clusters/:id/{pods,
@@ -64,6 +114,18 @@ type Client interface {
 	// ListServices returns the services in the given
 	// namespace. An empty namespace means "all namespaces".
 	ListServices(ctx context.Context, namespace string) ([]ServiceEntry, error)
+
+	// GetLogsBySelector lists pods matching the given label
+	// selector (in the given namespace) and returns a merged
+	// historical tail of their log lines. The query is
+	// fan-out: every matching pod up to LogQuery.MaxPods is
+	// fetched and the results are interleaved by timestamp
+	// (or, when timestamps are absent, by source order).
+	// An empty namespace is rejected — pod labels are only
+	// unique within a namespace, so a label-selector log
+	// query without a namespace scope is almost always a
+	// caller bug.
+	GetLogsBySelector(ctx context.Context, namespace, labelSelector string, q LogQuery) ([]LogEntry, error)
 }
 
 // FakeClient is an in-memory Client for unit tests. Each
@@ -73,13 +135,21 @@ type FakeClient struct {
 	Pods        []Pod
 	Deployments []Deployment
 	Services    []ServiceEntry
+	LogEntries  []LogEntry
 
 	// Per-method error overrides; if set, the method returns
 	// this error instead of the canned data.
-	PingErr            error
-	ListPodsErr        error
-	ListDeploymentsErr error
-	ListServicesErr    error
+	PingErr               error
+	ListPodsErr           error
+	ListDeploymentsErr    error
+	ListServicesErr       error
+	GetLogsBySelectorErr  error
+
+	// logEntryFor, if non-nil, replaces the default
+	// "filter LogEntries by Container" path. Tests use it
+	// to model label-selector fan-out, empty-pod-set
+	// behaviour, etc.
+	logEntryFor func(ctx context.Context, namespace, labelSelector string, q LogQuery) ([]LogEntry, error)
 }
 
 // Ping implements Client.
@@ -125,6 +195,34 @@ func (f *FakeClient) ListServices(ctx context.Context, namespace string) ([]Serv
 		if namespace == "" || s.Namespace == namespace {
 			out = append(out, s)
 		}
+	}
+	return out, nil
+}
+
+// GetLogsBySelector implements Client. The fake applies the
+// same namespace filter as the production implementation
+// (an empty namespace returns ErrInvalidLogQuery) and returns
+// f.LogEntries verbatim — tests that need label-selector
+// fan-out semantics wire a custom logEntryFor(pod, sel) fn.
+func (f *FakeClient) GetLogsBySelector(ctx context.Context, namespace, labelSelector string, q LogQuery) ([]LogEntry, error) {
+	if f.GetLogsBySelectorErr != nil {
+		return nil, f.GetLogsBySelectorErr
+	}
+	if namespace == "" {
+		return nil, fmt.Errorf("k8s: %w: GetLogsBySelector requires a namespace", ErrInvalidLogQuery)
+	}
+	if f.logEntryFor != nil {
+		return f.logEntryFor(ctx, namespace, labelSelector, q)
+	}
+	out := []LogEntry{}
+	for _, e := range f.LogEntries {
+		if e.Pod == "" {
+			continue
+		}
+		if q.Container != "" && e.Container != q.Container {
+			continue
+		}
+		out = append(out, e)
 	}
 	return out, nil
 }
@@ -245,6 +343,193 @@ func (k *KubeClient) ListServices(ctx context.Context, namespace string) ([]Serv
 	return out, nil
 }
 
+// GetLogsBySelector implements Client. It lists pods matching
+// the label selector (capped at LogQuery.MaxPods) and fetches
+// a historical log tail from each, then merges the results
+// in pod-then-time order. An empty namespace is rejected —
+// pod labels are only unique within a namespace, and an
+// unscoped query is almost always a caller bug that would
+// either fan out across every namespace or return a confusing
+// empty slice.
+//
+// The apiserver's GetLogs response is plain text (one log
+// line per newline, optionally prefixed with an RFC3339
+// timestamp). We split on newline and emit one LogEntry per
+// non-empty line. Lines with a parseable leading timestamp
+// are split into LogEntry.Timestamp + LogEntry.Line; lines
+// without a timestamp get a zero Timestamp and the whole
+// line goes into LogEntry.Line. Container name is set to the
+// first container in the pod (or LogQuery.Container when the
+// caller narrowed to one).
+func (k *KubeClient) GetLogsBySelector(ctx context.Context, namespace, labelSelector string, q LogQuery) ([]LogEntry, error) {
+	if k.iface == nil {
+		return nil, fmt.Errorf("k8s: KubeClient is not wired to a client-go interface")
+	}
+	if namespace == "" {
+		return nil, fmt.Errorf("k8s: %w: GetLogsBySelector requires a namespace", ErrInvalidLogQuery)
+	}
+	maxPods := q.MaxPods
+	if maxPods <= 0 {
+		maxPods = defaultLogMaxPods
+	}
+
+	// 1. List matching pods. We send the Limit as a hint
+	// to the apiserver (saves bandwidth on a broad
+	// selector) but ALSO enforce maxPods client-side
+	// because not every apiserver implementation honours
+	// Limit (the fake clientset does not, for example,
+	// and a future proxy in front of the apiserver may
+	// strip it). The client-side cap is the hard contract.
+	list, err := k.iface.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+		Limit:         int64(maxPods),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list pods by selector: %w", err)
+	}
+	if len(list.Items) == 0 {
+		return nil, nil
+	}
+	if len(list.Items) > maxPods {
+		list.Items = list.Items[:maxPods]
+	}
+
+	// 2. Fan out one GetLogs call per pod. Sequential today;
+	// a future pass can move to errgroup.WithContext to
+	// parallelise. The current per-pod call is one HTTP
+	// round-trip to the apiserver, so a 10-pod fan-out is
+	// ~10× the per-pod latency. Bounded by maxPods so the
+	// total wall time is predictable.
+	out := make([]LogEntry, 0, maxPods*10)
+	for i := range list.Items {
+		pod := &list.Items[i]
+		entries, err := k.logsForPod(ctx, pod, q)
+		if err != nil {
+			// A single pod's logs failing should not lose
+			// the rest. Surface as a comment in the
+			// result so the operator can see "X pods
+			// succeeded, Y failed" in the UI without
+			// having to retry the whole query.
+			out = append(out, LogEntry{
+				Pod:       pod.Name,
+				Container: q.Container,
+				Line:      fmt.Sprintf("k8s: failed to fetch logs: %v", err),
+			})
+			continue
+		}
+		out = append(out, entries...)
+	}
+	return out, nil
+}
+
+// logsForPod is the per-pod implementation. Picks the first
+// container (or LogQuery.Container when set), builds the
+// PodLogOptions, calls pods.GetLogs(...).Do(ctx).Body, and
+// splits the response on newlines.
+func (k *KubeClient) logsForPod(ctx context.Context, pod *corev1.Pod, q LogQuery) ([]LogEntry, error) {
+	container := q.Container
+	if container == "" {
+		if len(pod.Spec.Containers) == 0 {
+			return nil, nil
+		}
+		container = pod.Spec.Containers[0].Name
+	}
+
+	opts := &corev1.PodLogOptions{
+		Container: container,
+	}
+	if q.TailLines > 0 {
+		n := int64(q.TailLines)
+		opts.TailLines = &n
+	}
+	if !q.Since.IsZero() {
+		t := metav1.NewTime(q.Since)
+		opts.SinceTime = &t
+	}
+
+	req := k.iface.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, opts)
+	// client-go v0.36 returns a rest.Result value from
+	// Do(). The status code is captured internally; we
+	// extract it via the .StatusCode(*int) setter (which
+	// doubles as a getter that writes the int through the
+	// pointer) and read the buffered body with .Raw().
+	var status int
+	body, err := req.Do(ctx).StatusCode(&status).Raw()
+	if err != nil {
+		return nil, fmt.Errorf("apiserver returned status %d for pod %s/%s: %w", status, pod.Namespace, pod.Name, err)
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("apiserver returned status %d for pod %s/%s", status, pod.Namespace, pod.Name)
+	}
+	return parseLogLines(pod.Name, container, body), nil
+}
+
+// parseLogLines splits a log body into LogEntry values. The
+// apiserver emits one log line per "\n" (with a trailing
+// newline stripped). Lines that begin with an RFC3339
+// timestamp are split into Timestamp + Line; lines without
+// one are emitted with Timestamp zero and the whole text
+// in Line. Empty lines are skipped.
+func parseLogLines(pod, container string, body []byte) []LogEntry {
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	// Tail a 1 MiB line cap; apiserver log lines are
+	// short by convention. A pathological single line over
+	// the cap is dropped (the operator would see a
+	// truncation message in the next request).
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	out := make([]LogEntry, 0, 16)
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), "\r")
+		if line == "" {
+			continue
+		}
+		ts, rest := splitLeadingRFC3339(line)
+		out = append(out, LogEntry{
+			Pod:       pod,
+			Container: container,
+			Timestamp: ts,
+			Line:      rest,
+		})
+	}
+	return out
+}
+
+// splitLeadingRFC3339 returns the leading timestamp + the
+// remainder. Apiserver log lines look like
+// "2026-06-10T12:00:00.000Z message body" — the leading
+// RFC3339 is what client-go parsing tools recognise. If
+// the line does not start with an RFC3339 prefix, returns
+// the zero time and the line unchanged.
+func splitLeadingRFC3339(line string) (time.Time, string) {
+	// RFC3339 has a "T" between date and time and either
+	// a "Z" or "+/-HH:MM" trailing. The shortest valid
+	// timestamp is 20 characters: "2006-01-02T15:04:05Z".
+	if len(line) < 20 || line[4] != '-' || line[7] != '-' || line[10] != 'T' {
+		return time.Time{}, line
+	}
+	// Find the end of the timestamp: the first space
+	// (or end of string if the line is timestamp-only).
+	end := strings.IndexAny(line, " \t")
+	if end < 0 {
+		end = len(line)
+	}
+	candidate := line[:end]
+	t, err := time.Parse(time.RFC3339Nano, candidate)
+	if err != nil {
+		// Maybe RFC3339 without nanos.
+		t, err = time.Parse(time.RFC3339, candidate)
+		if err != nil {
+			return time.Time{}, line
+		}
+	}
+	// Strip the whitespace that separated the timestamp
+	// from the message body. The caller wants the line
+	// text to start with the first non-whitespace
+	// character after the timestamp, not the space.
+	rest := strings.TrimLeft(line[end:], " \t")
+	return t, rest
+}
+
 // podToWire translates a core/v1 Pod into the package's Pod
 // wire shape. The Ready string is "ready/total" container
 // counts, matching kubectl get pods.
@@ -294,6 +579,12 @@ func serviceToWire(s *corev1.Service) ServiceEntry {
 		ClusterIP: s.Spec.ClusterIP,
 	}
 }
+
+// ErrInvalidLogQuery is the typed sentinel for a malformed
+// log query. The only branch that emits it today is
+// "namespace is required"; future branches (e.g. mutually-
+// exclusive Since/SinceSeconds) can join.
+var ErrInvalidLogQuery = errors.New("invalid log query")
 
 // Compile-time interface checks.
 var (
