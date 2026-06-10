@@ -1,14 +1,14 @@
 // Toast — minimal non-blocking notification, 3s auto-dismiss.
 import { useState, useEffect, useCallback, createContext, useContext, ReactNode } from 'react';
 
-interface ToastItem { id: number; message: string; tone: 'info' | 'success' | 'error' }
-interface ToastCtx { push: (message: string, tone?: ToastItem['tone']) => void }
+interface ToastItem { id: number; message: ReactNode; tone: 'info' | 'success' | 'error' }
+interface ToastCtx { push: (message: ReactNode, tone?: ToastItem['tone']) => void }
 
 const Ctx = createContext<ToastCtx>({ push: () => {} });
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
-  const push = useCallback((message: string, tone: ToastItem['tone'] = 'info') => {
+  const push = useCallback((message: ReactNode, tone: ToastItem['tone'] = 'info') => {
     const id = Date.now() + Math.random();
     setItems((cur) => [...cur, { id, message, tone }]);
     setTimeout(() => setItems((cur) => cur.filter((i) => i.id !== id)), 3000);
