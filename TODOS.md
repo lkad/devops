@@ -10,52 +10,6 @@ Add new items at the top. Move done items to `## Completed` with a date.
 
 ## Open
 
-### P2 — Wire KubeClient.GetLogsBySelector to the HTTP layer
-
-**What:** Add a route that calls `KubeClient.GetLogsBySelector`.
-The KubeClient method shipped in commit `f51e9cce` but no
-handler exists yet. A natural place is
-`GET /api/v1/k8s/clusters/{clusterID}/namespaces/{ns}/logs?labelSelector=...&tail=50`.
-
-**Why:** The dashboard / log-search UI is the user-facing
-consumer. Without a route the method is a write-only
-in-process capability.
-
-**Estimate:** 30 min CC, ~1-2 hours human (RBAC scope,
-container filter, tail-line caps).
-
----
-
-### P2 — Wire KubeClient.ExecInPod to Handler.Exec (replace 403 stub)
-
-**What:** `Handler.Exec` at `internal/k8s/handler.go:225-247`
-still calls `h.svc.Exec(id, ns, pod, req.Command)` (the 403
-stub at `service.go:384-395`, gated behind the
-`feature_k8s_exec` flag). The KubeClient method shipped in
-commit `802e5dbb` but the route is not rewired.
-
-**Scope:**
-- Update `execRequest` to include `container` and
-  `timeout_seconds` per `openspec/specs/k8s-pod-exec/spec.md`.
-- Update `Handler.Exec` to call the registry's KubeClient
-  (need to thread the registry into the handler, similar
-  to the catalog's pattern).
-- Retire the `feature_k8s_exec` flag and the 403 stub once
-  the real path is wired.
-- Update the existing `TestHandler_ExecStub_DisabledByDefault`
-  test to assert the new path; the assertion changes
-  from "returns 403 when feature flag off" to "returns 200
-  with the spec'd wire shape".
-
-**Why:** Without the route the spec's "operator shells into
-a pod from the web UI" workflow is unreachable. The
-method exists; only the glue is missing.
-
-**Estimate:** 1 hr CC, ~2-3 hours human (auth/RBAC scoping,
-feature-flag retirement, integration test).
-
----
-
 ### P3 — Run promtool check rules pre-merge on alert YAMLs
 
 **What:** `deploy/prometheus/rules/catalog-degraded.yml` was
@@ -68,6 +22,40 @@ file ships.
 step).
 
 ## Completed
+
+### P2 — Wire KubeClient.GetLogsBySelector + ExecInPod to HTTP layer
+
+**Completed:** 2026-06-10 (commit `9382c56d`)
+
+**Shipped (single atomic commit, two parallel subagents):**
+- `GET /api/v1/k8s/clusters/:clusterID/namespaces/:ns/logs`
+  route that fans out via `KubeClient.GetLogsBySelector`.
+  Required `labelSelector`, optional `container` / `tail`
+  (1-1000, default 100) / `since` (RFC3339, capped at
+  30d via `logstream.MaxSinceWindow`). 10 new tests in
+  `internal/k8s/logs_handler_test.go`.
+- `POST /api/v1/k8s/clusters/:clusterID/namespaces/:ns/pods/:pod/exec`
+  route that calls `KubeClient.ExecInPod`. Spec wire shape
+  `{command, container, timeout_seconds?}` ->
+  `{exit_code, stdout_lines, stderr_lines, duration_ms}`.
+  Replaces the 403 stub. The `feature_k8s_exec` flag,
+  `Service.Exec` stub, and `ExecResult` legacy type are
+  retired. 9 new handler tests + 3 new service tests.
+- 6 new `contracts.ErrorCode` constants for the spec's
+  error code surface.
+- `:id` -> `:clusterID` URL param rename across all k8s
+  routes (non-API-breaking; URL param names are not part
+  of the HTTP contract; required by Gin's same-name-
+  wildcard conflict check).
+
+**Coordination note:** the two subagents ran in parallel
+and their changes interlocked — Agent 2 (ExecInPod) had
+to rename the existing `:id` to `:clusterID` to satisfy
+Gin so Agent 1 (GetLogsBySelector) could add its new
+route under the same prefix. The rename is in
+`internal/k8s/handler.go` (param + 4 handler bodies).
+
+---
 
 ### P3 — Run the load test against a live binary, capture baseline numbers
 
