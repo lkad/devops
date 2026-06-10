@@ -21,6 +21,19 @@ const (
 	CodeQueryTimeout       ErrorCode = "QUERY_TIMEOUT"       // 504
 	CodeQueryTooLong       ErrorCode = "QUERY_TOO_LONG"      // 400
 	CodeTimeRangeExceeded  ErrorCode = "TIME_RANGE_EXCEEDED" // 422
+	// k8s-pod-exec codes (per openspec/specs/k8s-pod-exec/spec.md).
+	// INVALID_EXEC_REQUEST covers "empty command", "empty
+	// container", and "timeout_seconds > 600". TIMEOUT is the
+	// context-deadline-exceeded branch on the SPDY stream.
+	// POD_NOT_FOUND and CONTAINER_NOT_FOUND distinguish the
+	// "wrong pod" case (404) from the "wrong container" case
+	// (400) so the operator UI can highlight the right field.
+	CodeInvalidExecRequest         ErrorCode = "INVALID_EXEC_REQUEST"          // 400
+	CodePodNotFound                ErrorCode = "POD_NOT_FOUND"                // 404
+	CodeContainerNotFound          ErrorCode = "CONTAINER_NOT_FOUND"          // 400
+	CodeTimeout                    ErrorCode = "TIMEOUT"                      // 504
+	CodeClusterLacksExecPermission ErrorCode = "CLUSTER_LACKS_EXEC_PERMISSION" // 502
+	CodeAPIServerUnreachable       ErrorCode = "APISERVER_UNREACHABLE"        // 502
 )
 
 // HTTPStatus maps an ErrorCode to its HTTP status code per the
@@ -50,6 +63,14 @@ func (c ErrorCode) HTTPStatus() int {
 		return 504
 	case CodeBackendUnavailable:
 		return 503
+	case CodeInvalidExecRequest, CodeContainerNotFound:
+		return 400
+	case CodePodNotFound:
+		return 404
+	case CodeClusterLacksExecPermission, CodeAPIServerUnreachable:
+		return 502
+	case CodeTimeout:
+		return 504
 	default:
 		return 500
 	}

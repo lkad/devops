@@ -648,6 +648,13 @@ func registerK8sClusterRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) *k
 	}
 	repo := k8s.NewRepository(db)
 	svc := k8s.NewService(repo, &k8s.FakeClient{}, key)
+	// Wire the per-cluster ClientRegistry so Handler.Exec can
+	// resolve clusterID → KubeClient. The registry walks every
+	// cluster row, decrypts the kubeconfig on first use, and
+	// caches the result stickily. Built here (not lazily in the
+	// handler) so a misconfigured cluster's failure mode is
+	// visible at startup rather than on the first exec.
+	svc.SetRegistry(k8s.NewClientRegistry(repo, svc))
 	v1 := r.Group("/api/v1")
 	k8s.NewHandler(svc).Register(v1)
 	log.Info("k8s cluster routes registered")

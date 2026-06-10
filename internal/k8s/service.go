@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -44,24 +45,23 @@ type ProbeResult struct {
 	CheckedAt    time.Time     `json:"checked_at"`
 }
 
-// ExecResult is the response shape for Service.Exec. The
-// real implementation will stream stdout/stderr; for now the
-// stub returns a fixed message acknowledging that exec is
-// gated behind a feature flag.
-type ExecResult struct {
-	Output string `json:"output"`
-	Error  string `json:"error,omitempty"`
-}
-
 // Service is the business-logic layer for the k8s cluster
 // management subsystem. It owns validation, kubeconfig
 // encryption, orchestration between the repository and the
-// client interface, and the feature flag for pod exec.
+// client interface, and the per-cluster client registry
+// that resolves clusterID → Client for in-cluster operations
+// (pod exec, etc).
 type Service struct {
-	repo        *Repository
-	client      Client
-	cryptoKey   []byte
-	execEnabled bool
+	repo      *Repository
+	client    Client
+	cryptoKey []byte
+	// registry is the per-cluster ClientResolver (P1.5).
+	// Optional — nil means "no per-cluster registry wired"
+	// (e.g. dev/test fixtures). Set via SetRegistry. The
+	// handler reads it back via Registry() when the
+	// per-cluster read path (logs, exec, fan-out) is
+	// requested.
+	registry ClientRegistry
 }
 
 // NewService builds a Service. The client is seam-able
@@ -75,16 +75,22 @@ func NewService(repo *Repository, client Client, cryptoKey []byte) *Service {
 		repo:      repo,
 		client:    client,
 		cryptoKey: cryptoKey,
-		// execEnabled defaults to false; flip via SetExecEnabled
-		// or by adding a feature-flag check at wiring time.
 	}
 }
 
-// SetExecEnabled toggles the feature_k8s_exec flag. Wire this
-// to your config layer (e.g. config.K8sConfig.ExecEnabled) at
-// startup. The flag is intentionally NOT in CreateClusterInput
-// — it is a global policy, not a per-cluster setting.
-func (s *Service) SetExecEnabled(v bool) { s.execEnabled = v }
+// SetRegistry wires the per-cluster ClientRegistry. Optional —
+// routes that need per-cluster access (logs, exec, fan-out)
+// check Registry() and return a 502 if it is nil. The shared
+// s.client stays as a fallback for read paths that don't
+// require a cluster ID; today those are the same paths that
+// pre-date P1.5.
+func (s *Service) SetRegistry(reg ClientRegistry) { s.registry = reg }
+
+// Registry returns the per-cluster ClientRegistry wired via
+// SetRegistry, or nil when no registry was wired. The handler
+// layer uses this to translate a cluster ID into the
+// per-cluster Client that backs the apiserver calls.
+func (s *Service) Registry() ClientRegistry { return s.registry }
 
 // Create validates the input, encrypts the kubeconfig, and
 // persists the cluster. The returned Cluster's
@@ -376,22 +382,91 @@ func (s *Service) ListServices(id, namespace string) ([]ServiceEntry, error) {
 	return svcs, nil
 }
 
-// Exec is a stub gated behind the feature_k8s_exec flag.
-// When disabled, it returns a 403 FORBIDDEN APIError. When
-// enabled, it returns a fixed acknowledgement message — the
-// real exec logic is delegated to k8s-pod-log-streaming in
-// Phase 6.
-func (s *Service) Exec(id, namespace, pod string, command []string) (*ExecResult, error) {
-	if !s.execEnabled {
-		return nil, &contracts.APIError{
-			Code:    contracts.CodeForbidden,
-			Message: "pod exec is disabled (feature_k8s_exec is off)",
+// Exec is a thin pass-through that resolves the per-cluster
+// Client via the registry and calls its ExecInPod method.
+// The handler layer is the right place for HTTP-level concerns
+// (wire-shape validation, error code mapping), so this
+// function is intentionally small: it exists so the
+// handler can use the Service as its single seam into the
+// subsystem (matching the rest of the k8s handler code).
+//
+// Errors returned by the underlying Client are wrapped in
+// *contracts.APIError so the handler can render the spec's
+// error envelope without re-mapping. An invalid client
+// (empty command/container/namespace) is surfaced as
+// INVALID_EXEC_REQUEST; a network / RBAC failure becomes
+// APISERVER_UNREACHABLE; a context-deadline becomes TIMEOUT;
+// a non-zero exit is NOT an error (the result carries the
+// exit code). The "pod not found" / "container not found"
+// distinction is left to the apiserver's error message — the
+// client does not surface it as a typed sentinel today.
+func (s *Service) Exec(ctx context.Context, id, namespace, pod, container string, command []string, timeout time.Duration) (PodExecResult, error) {
+	if len(command) == 0 {
+		return PodExecResult{}, &contracts.APIError{
+			Code:    contracts.CodeInvalidExecRequest,
+			Message: "command is required and must be a non-empty array",
 		}
 	}
-	return &ExecResult{
-		Output: fmt.Sprintf("exec stub: cluster=%s ns=%s pod=%s cmd=%v (Phase 6 will implement streaming)",
-			id, namespace, pod, command),
-	}, nil
+	if container == "" {
+		return PodExecResult{}, &contracts.APIError{
+			Code:    contracts.CodeInvalidExecRequest,
+			Message: "container is required",
+		}
+	}
+	reg := s.Registry()
+	if reg == nil {
+		return PodExecResult{}, &contracts.APIError{
+			Code:    contracts.CodeAPIServerUnreachable,
+			Message: "no per-cluster client registry wired",
+		}
+	}
+	client, err := reg.ClientFor(id)
+	if err != nil {
+		// Map "cluster not found" to the 404 envelope;
+		// anything else (decrypt, parse, build) is a
+		// 502 — the cluster is registered but its client
+		// is unreachable.
+		if IsNotFound(err) {
+			return PodExecResult{}, &contracts.APIError{
+				Code:    contracts.CodeNotFound,
+				Message: fmt.Sprintf("cluster %q not found", id),
+			}
+		}
+		return PodExecResult{}, &contracts.APIError{
+			Code:    contracts.CodeAPIServerUnreachable,
+			Message: fmt.Sprintf("cluster %q has no usable client: %v", id, err),
+			Cause:   err,
+		}
+	}
+	result, execErr := client.ExecInPod(ctx, namespace, pod, container, command, timeout)
+	if execErr != nil {
+		// Distinguish a context-deadline (TIMEOUT, 504)
+		// from a generic apiserver / RBAC failure
+		// (APISERVER_UNREACHABLE, 502). The fake client
+		// already wraps ErrInvalidExecRequest; we re-
+		// surface that as INVALID_EXEC_REQUEST to match
+		// the spec.
+		if errors.Is(execErr, ErrInvalidExecRequest) {
+			return PodExecResult{}, &contracts.APIError{
+				Code:    contracts.CodeInvalidExecRequest,
+				Message: execErr.Error(),
+				Cause:   execErr,
+			}
+		}
+		if errors.Is(execErr, context.DeadlineExceeded) || errors.Is(execErr, context.Canceled) {
+			return PodExecResult{}, &contracts.APIError{
+				Code:    contracts.CodeTimeout,
+				Message: "exec timed out",
+				Cause:   execErr,
+			}
+		}
+		return PodExecResult{}, &contracts.APIError{
+			Code:    contracts.CodeAPIServerUnreachable,
+			Message: fmt.Sprintf("exec failed: %v", execErr),
+			Cause:   execErr,
+		}
+	}
+	return result, nil
 }
 
 // DecryptKubeconfig returns the plaintext kubeconfig for a

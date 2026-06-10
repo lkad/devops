@@ -379,41 +379,60 @@ func TestService_DecryptKubeconfig_BadCiphertext(t *testing.T) {
 	}
 }
 
-// TestService_ExecStub_DisabledByDefault verifies that
-// PodExec is gated behind a feature flag and returns
-// 403/FORBIDDEN when disabled.
-func TestService_ExecStub_DisabledByDefault(t *testing.T) {
-	svc := serviceFixture(t) // feature_k8s_exec defaults to false
-	c, err := svc.Create(CreateClusterInput{Name: "p", Type: ClusterTypeK3d, Kubeconfig: "k"})
-	if err != nil {
-		t.Fatalf("create: %v", err)
+// TestService_Exec_NoRegistryReturnsUnreachable pins the
+// "registry not wired" branch — the Service without
+// SetRegistry returns APISERVER_UNREACHABLE rather than
+// crashing with a nil-deref. The handler-level path
+// (TestHandler_Exec_*) covers the registry-wired cases.
+func TestService_Exec_NoRegistryReturnsUnreachable(t *testing.T) {
+	svc := serviceFixture(t)
+	_, err := svc.Exec(context.Background(), "missing", "default", "pod", "app", []string{"ls"}, 0)
+	if err == nil {
+		t.Fatal("expected error with no registry wired")
 	}
-	_, execErr := svc.Exec(c.ID, "default", "pod-1", []string{"ls"})
-	apiErr, ok := execErr.(*contracts.APIError)
+	apiErr, ok := err.(*contracts.APIError)
 	if !ok {
-		t.Fatalf("err = %T, want *contracts.APIError", execErr)
+		t.Fatalf("err = %T, want *contracts.APIError", err)
 	}
-	if apiErr.Code != contracts.CodeForbidden {
-		t.Errorf("code = %q, want FORBIDDEN", apiErr.Code)
+	if apiErr.Code != contracts.CodeAPIServerUnreachable {
+		t.Errorf("code = %q, want APISERVER_UNREACHABLE", apiErr.Code)
 	}
 }
 
-// TestService_ExecStub_Enabled covers the happy path when the
-// feature flag is on. The real implementation lives in
-// k8s-pod-log-streaming; the stub returns a fixed message.
-func TestService_ExecStub_Enabled(t *testing.T) {
+// TestService_Exec_EmptyCommandRejected pins the
+// wire-shape validation: an empty command array is
+// rejected at the Service boundary (defence in depth — the
+// handler also rejects it, but the Service contract is
+// self-contained).
+func TestService_Exec_EmptyCommandRejected(t *testing.T) {
 	svc := serviceFixture(t)
-	svc.execEnabled = true
-	c, err := svc.Create(CreateClusterInput{Name: "p", Type: ClusterTypeK3d, Kubeconfig: "k"})
-	if err != nil {
-		t.Fatalf("create: %v", err)
+	_, err := svc.Exec(context.Background(), "x", "default", "pod", "app", nil, 0)
+	if err == nil {
+		t.Fatal("expected error for empty command")
 	}
-	res, execErr := svc.Exec(c.ID, "default", "pod-1", []string{"ls"})
-	if execErr != nil {
-		t.Fatalf("exec: %v", execErr)
+	apiErr, ok := err.(*contracts.APIError)
+	if !ok {
+		t.Fatalf("err = %T, want *contracts.APIError", err)
 	}
-	if res.Output == "" {
-		t.Error("Output should not be empty")
+	if apiErr.Code != contracts.CodeInvalidExecRequest {
+		t.Errorf("code = %q, want INVALID_EXEC_REQUEST", apiErr.Code)
+	}
+}
+
+// TestService_Exec_EmptyContainerRejected pins the
+// "container is required" branch.
+func TestService_Exec_EmptyContainerRejected(t *testing.T) {
+	svc := serviceFixture(t)
+	_, err := svc.Exec(context.Background(), "x", "default", "pod", "", []string{"ls"}, 0)
+	if err == nil {
+		t.Fatal("expected error for empty container")
+	}
+	apiErr, ok := err.(*contracts.APIError)
+	if !ok {
+		t.Fatalf("err = %T, want *contracts.APIError", err)
+	}
+	if apiErr.Code != contracts.CodeInvalidExecRequest {
+		t.Errorf("code = %q, want INVALID_EXEC_REQUEST", apiErr.Code)
 	}
 }
 

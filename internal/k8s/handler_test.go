@@ -2,7 +2,9 @@ package k8s
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,17 +17,99 @@ import (
 // handlerFixture builds a Gin engine wired to a real Service +
 // Repository + FakeClient. Auth / RBAC are not in scope for this
 // package; the engine exposes the k8s routes directly.
+//
+// The per-cluster ClientRegistry is wired against a FakeClient
+// that can be overridden by execFixture to return canned
+// PodExecResult values; the rest of the k8s read paths (List,
+// Get, ListPods) all share the same FakeClient via the
+// Service's s.client.
 func handlerFixture(t *testing.T) *gin.Engine {
+	t.Helper()
+	return execFixture(t, &FakeClient{})
+}
+
+// execFixture is the exec-aware variant: the FakeClient is
+// passed in so the caller can pre-set PodExecResult /
+// ExecInPodErr. The registry resolves clusterID → this same
+// FakeClient (so the per-cluster code path is exercised, not
+// the fallback shared s.client).
+func execFixture(t *testing.T, fc *FakeClient) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := NewRepository(openTestDB(t))
-	svc := NewService(repo, &FakeClient{}, testCryptoKey)
+	svc := NewService(repo, fc, testCryptoKey)
+	// Production wires a real ClientRegistry that
+	// decrypts each cluster's kubeconfig. For unit
+	// tests the cluster row's kubeconfig is a one-byte
+	// stub ("k") that client-go's parser rejects, so
+	// the real registry would surface a parse error
+	// before our handler test ever gets to the exec
+	// path. The fakeExecRegistry short-circuits that
+	// and always returns the supplied FakeClient —
+	// the per-cluster code path is still exercised
+	// (Service.Exec calls reg.ClientFor) and the test
+	// drives the FakeClient's PodExecResult hook for
+	// the response shape.
+	svc.SetRegistry(&fakeExecRegistry{repo: repo, client: fc})
 	h := NewHandler(svc)
 
 	r := gin.New()
 	api := r.Group("/api/v1")
 	h.Register(api)
 	return r
+}
+
+// fakeExecRegistry is a ClientRegistry that consults the
+// supplied Repository to determine "is this a known
+// cluster" (so the cluster-not-found branch is exercisable
+// from the handler tests) and otherwise returns the
+// supplied FakeClient. Production wires a real
+// ClientRegistry that decrypts each cluster's kubeconfig;
+// for unit tests the cluster row's kubeconfig is a one-byte
+// stub ("k") that client-go's parser rejects, so the real
+// registry would surface a parse error before our handler
+// test ever gets to the exec path. This fake short-circuits
+// the parse step while keeping the per-cluster code path
+// exercised (Service.Exec calls reg.ClientFor).
+type fakeExecRegistry struct {
+	repo   *Repository
+	client Client
+}
+
+func (f *fakeExecRegistry) ClientFor(clusterID string) (Client, error) {
+	if clusterID == "" {
+		return nil, ErrNoSuchCluster
+	}
+	if _, err := f.repo.Get(clusterID); err != nil {
+		if IsNotFound(err) {
+			// Return the repo's ErrNotFound sentinel so the
+			// service's IsNotFound branch (which maps to 404)
+			// fires. The registry sentinel ErrNoSuchCluster
+			// is the production contract for the servicecatalog
+			// walker; the exec path uses the repo's sentinel
+			// because that's what the real defaultRegistry
+			// bubbles up via repo.Get on a cache miss.
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return f.client, nil
+}
+
+// createClusterID is a small helper that POSTs a new cluster
+// and returns its generated ID. Used by the exec tests to
+// produce a real (decryptable) cluster row that the registry
+// can resolve.
+func createClusterID(t *testing.T, r *gin.Engine) string {
+	t.Helper()
+	_, body := doRequest(t, r, "POST", "/api/v1/k8s/clusters", map[string]any{
+		"name": "p", "type": "k3d", "kubeconfig": "k",
+	})
+	id, _ := body["id"].(string)
+	if id == "" {
+		t.Fatalf("create cluster: id missing in response: %+v", body)
+	}
+	return id
 }
 
 // doRequest is a thin helper around httptest.NewRecorder that
@@ -293,18 +377,221 @@ func TestHandler_ListServices_OK(t *testing.T) {
 	}
 }
 
-// TestHandler_ExecStub_DisabledByDefault returns 403 because
-// the feature flag is off.
-func TestHandler_ExecStub_DisabledByDefault(t *testing.T) {
-	r := handlerFixture(t)
-	_, created := doRequest(t, r, "POST", "/api/v1/k8s/clusters", map[string]any{
-		"name": "p", "type": "k3d", "kubeconfig": "k",
-	})
-	id, _ := created["id"].(string)
-	rr, _ := doRequest(t, r, "POST",
+// TestHandler_Exec_HappyPath asserts the spec'd wire shape:
+// a command that exits 0 returns 200 with exit_code /
+// stdout_lines / stderr_lines / duration_ms. The FakeClient
+// is wired with a canned PodExecResult so the test does not
+// need a real apiserver.
+func TestHandler_Exec_HappyPath(t *testing.T) {
+	fc := &FakeClient{PodExecResult: &PodExecResult{
+		Stdout:     []string{"line1", "line2"},
+		Stderr:     []string{},
+		ExitCode:   0,
+		DurationMs: 42,
+	}}
+	r := execFixture(t, fc)
+	id := createClusterID(t, r)
+	rr, body := doRequest(t, r, "POST",
 		"/api/v1/k8s/clusters/"+id+"/namespaces/default/pods/p1/exec",
-		map[string]any{"command": []string{"ls"}})
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403", rr.Code)
+		map[string]any{
+			"command":   []string{"ls", "-la"},
+			"container": "app",
+		})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if ec, _ := body["exit_code"].(float64); int(ec) != 0 {
+		t.Errorf("exit_code = %v, want 0", ec)
+	}
+	if dur, _ := body["duration_ms"].(float64); int(dur) != 42 {
+		t.Errorf("duration_ms = %v, want 42", dur)
+	}
+	stdout, _ := body["stdout_lines"].([]any)
+	if len(stdout) != 2 || stdout[0] != "line1" {
+		t.Errorf("stdout_lines = %v, want [line1, line2]", stdout)
+	}
+}
+
+// TestHandler_Exec_NonZeroExit pins the spec's "non-zero
+// exit is not a request error" rule: a command that exits
+// 7 still returns 200 with exit_code=7 in the body.
+func TestHandler_Exec_NonZeroExit(t *testing.T) {
+	fc := &FakeClient{PodExecResult: &PodExecResult{
+		Stdout:   []string{"matched", "these"},
+		Stderr:   []string{},
+		ExitCode: 7,
+	}}
+	r := execFixture(t, fc)
+	id := createClusterID(t, r)
+	rr, body := doRequest(t, r, "POST",
+		"/api/v1/k8s/clusters/"+id+"/namespaces/default/pods/p1/exec",
+		map[string]any{
+			"command":   []string{"grep", "foo", "/var/log/app.log"},
+			"container": "app",
+		})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if ec, _ := body["exit_code"].(float64); int(ec) != 7 {
+		t.Errorf("exit_code = %v, want 7", ec)
+	}
+}
+
+// TestHandler_Exec_EmptyCommandRejected returns 400
+// INVALID_EXEC_REQUEST when the command array is missing.
+func TestHandler_Exec_EmptyCommandRejected(t *testing.T) {
+	r := handlerFixture(t)
+	id := createClusterID(t, r)
+	rr, body := doRequest(t, r, "POST",
+		"/api/v1/k8s/clusters/"+id+"/namespaces/default/pods/p1/exec",
+		map[string]any{
+			"command":   []string{},
+			"container": "app",
+		})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	errEnv, _ := body["error"].(map[string]any)
+	if errEnv["code"] != string(contracts.CodeInvalidExecRequest) {
+		t.Errorf("code = %v, want INVALID_EXEC_REQUEST", errEnv["code"])
+	}
+}
+
+// TestHandler_Exec_EmptyContainerRejected returns 400
+// INVALID_EXEC_REQUEST when the container field is empty.
+func TestHandler_Exec_EmptyContainerRejected(t *testing.T) {
+	r := handlerFixture(t)
+	id := createClusterID(t, r)
+	rr, body := doRequest(t, r, "POST",
+		"/api/v1/k8s/clusters/"+id+"/namespaces/default/pods/p1/exec",
+		map[string]any{
+			"command":   []string{"ls"},
+			"container": "",
+		})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	errEnv, _ := body["error"].(map[string]any)
+	if errEnv["code"] != string(contracts.CodeInvalidExecRequest) {
+		t.Errorf("code = %v, want INVALID_EXEC_REQUEST", errEnv["code"])
+	}
+}
+
+// TestHandler_Exec_TimeoutOverMaxRejected pins the
+// "reject with 400" choice: a timeout_seconds > 600 is almost
+// certainly a client bug, so we surface it as INVALID_EXEC_REQUEST
+// rather than silently clamping (the KubeClient clamps to
+// MaxExecTimeout as a defence-in-depth, but the route layer
+// should not pretend a 99999s request is sane).
+func TestHandler_Exec_TimeoutOverMaxRejected(t *testing.T) {
+	r := handlerFixture(t)
+	id := createClusterID(t, r)
+	rr, body := doRequest(t, r, "POST",
+		"/api/v1/k8s/clusters/"+id+"/namespaces/default/pods/p1/exec",
+		map[string]any{
+			"command":         []string{"sleep", "60"},
+			"container":       "app",
+			"timeout_seconds": 99999,
+		})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	errEnv, _ := body["error"].(map[string]any)
+	if errEnv["code"] != string(contracts.CodeInvalidExecRequest) {
+		t.Errorf("code = %v, want INVALID_EXEC_REQUEST", errEnv["code"])
+	}
+}
+
+// TestHandler_Exec_NegativeTimeoutRejected covers the
+// adjacent "negative timeout" branch — the spec is silent
+// but a negative duration would silently flip into a
+// huge timeout under time.Duration arithmetic, so the
+// handler rejects it explicitly.
+func TestHandler_Exec_NegativeTimeoutRejected(t *testing.T) {
+	r := handlerFixture(t)
+	id := createClusterID(t, r)
+	rr, body := doRequest(t, r, "POST",
+		"/api/v1/k8s/clusters/"+id+"/namespaces/default/pods/p1/exec",
+		map[string]any{
+			"command":         []string{"ls"},
+			"container":       "app",
+			"timeout_seconds": -1,
+		})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	errEnv, _ := body["error"].(map[string]any)
+	if errEnv["code"] != string(contracts.CodeInvalidExecRequest) {
+		t.Errorf("code = %v, want INVALID_EXEC_REQUEST", errEnv["code"])
+	}
+}
+
+// TestHandler_Exec_ClusterNotFound returns 404 when the
+// clusterID in the URL is unknown to the registry. The
+// handler's Service.Exec surfaces the cluster-not-found
+// branch (mapped from registry.ErrNotFound) as a 404
+// envelope so the operator UI can show "cluster missing".
+func TestHandler_Exec_ClusterNotFound(t *testing.T) {
+	r := handlerFixture(t)
+	rr, body := doRequest(t, r, "POST",
+		"/api/v1/k8s/clusters/does-not-exist/namespaces/default/pods/p1/exec",
+		map[string]any{
+			"command":   []string{"ls"},
+			"container": "app",
+		})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+	}
+	errEnv, _ := body["error"].(map[string]any)
+	if errEnv["code"] != string(contracts.CodeNotFound) {
+		t.Errorf("code = %v, want NOT_FOUND", errEnv["code"])
+	}
+}
+
+// TestHandler_Exec_ClientError returns 502 APISERVER_UNREACHABLE
+// when the FakeClient's ExecInPod returns a non-typed error
+// (the FakeClient's ExecInPodErr hook). The handler
+// distinguishes this from INVALID_EXEC_REQUEST and TIMEOUT
+// by walking errors.Is on the typed sentinels.
+func TestHandler_Exec_ClientError(t *testing.T) {
+	fc := &FakeClient{
+		ExecInPodErr: errors.New("apiserver connection refused"),
+	}
+	r := execFixture(t, fc)
+	id := createClusterID(t, r)
+	rr, body := doRequest(t, r, "POST",
+		"/api/v1/k8s/clusters/"+id+"/namespaces/default/pods/p1/exec",
+		map[string]any{
+			"command":   []string{"ls"},
+			"container": "app",
+		})
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body=%s", rr.Code, rr.Body.String())
+	}
+	errEnv, _ := body["error"].(map[string]any)
+	if errEnv["code"] != string(contracts.CodeAPIServerUnreachable) {
+		t.Errorf("code = %v, want APISERVER_UNREACHABLE", errEnv["code"])
+	}
+}
+
+// TestHandler_Exec_TimeoutReturnsTIMEOUT pins the
+// context-deadline branch: a FakeClient that returns
+// context.DeadlineExceeded gets mapped to 504 TIMEOUT.
+func TestHandler_Exec_TimeoutReturnsTIMEOUT(t *testing.T) {
+	fc := &FakeClient{ExecInPodErr: context.DeadlineExceeded}
+	r := execFixture(t, fc)
+	id := createClusterID(t, r)
+	rr, body := doRequest(t, r, "POST",
+		"/api/v1/k8s/clusters/"+id+"/namespaces/default/pods/p1/exec",
+		map[string]any{
+			"command":   []string{"sleep", "60"},
+			"container": "app",
+		})
+	if rr.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504; body=%s", rr.Code, rr.Body.String())
+	}
+	errEnv, _ := body["error"].(map[string]any)
+	if errEnv["code"] != string(contracts.CodeTimeout) {
+		t.Errorf("code = %v, want TIMEOUT", errEnv["code"])
 	}
 }
