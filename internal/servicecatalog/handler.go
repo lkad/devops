@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -154,14 +155,38 @@ func (h *Handler) Create(c *gin.Context) {
 	handler.WriteCreated(c.Writer, row)
 }
 
-// Get handles GET /services/:id.
+// Get handles GET /services/:id. The response embeds
+// the current on-call (or null) and the runbook so the
+// detail page has everything it needs in one round trip.
 func (h *Handler) Get(c *gin.Context) {
 	row, err := h.cat.Get(c.Param("id"))
 	if err != nil {
 		writeAPIError(c.Writer, err)
 		return
 	}
-	handler.WriteJSON(c.Writer, http.StatusOK, row)
+	oncall, ocErr := h.cat.repo.CurrentOnCall(row.ID, time.Now())
+	if ocErr != nil {
+		// On-call lookup failure is not fatal — the
+		// page just renders "unknown on-call" rather
+		// than a 500.
+		oncall = nil
+	}
+	runbook, rbErr := h.cat.repo.ListRunbook(row.ID)
+	if rbErr != nil {
+		runbook = nil
+	}
+	handler.WriteJSON(c.Writer, http.StatusOK, gin.H{
+		"id":             row.ID,
+		"name":           row.Name,
+		"description":    row.Description,
+		"owner":          row.Owner,
+		"repository_url": row.RepositoryURL,
+		"tier":           row.Tier,
+		"created_at":     row.CreatedAt,
+		"updated_at":     row.UpdatedAt,
+		"oncall":         oncall,
+		"runbook":        runbook,
+	})
 }
 
 // Update handles PUT /services/:id (partial).

@@ -55,3 +55,50 @@ func (s *Service) BeforeCreate(tx *gorm.DB) error {
 	}
 	return nil
 }
+
+// OnCall is one entry in the on-call rotation. A row
+// with an empty ServiceID is a global shift (covers any
+// service that does not have its own active shift).
+// The P2.2 spec rule: a per-service shift wins; if no
+// per-service shift is active, the global shift
+// carries the service.
+type OnCall struct {
+	ID         string    `gorm:"primaryKey;column:id;type:text;size:64" json:"id"`
+	ServiceID  string    `gorm:"column:service_id;type:text;size:64;index" json:"service_id,omitempty"`
+	User       string    `gorm:"column:user;type:text;size:256;not null" json:"user"`
+	ShiftStart time.Time `gorm:"column:shift_start;not null;index" json:"shift_start"`
+	ShiftEnd   time.Time `gorm:"column:shift_end;not null;index" json:"shift_end"`
+	CreatedAt  time.Time `gorm:"column:created_at;not null" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
+}
+
+// BeforeCreate is the GORM hook that fills the primary
+// key before INSERT.
+func (o *OnCall) BeforeCreate(_ *gorm.DB) error {
+	if o.ID == "" {
+		o.ID = uuid.NewString()
+	}
+	return nil
+}
+
+// RunbookEntry is one item in a service's runbook — a
+// short title + body the on-call reads when something
+// goes wrong with the service. P2.3 keeps the body as
+// plain text (markdown is rendered client-side); future
+// iterations can add attachments, ordering, etc.
+type RunbookEntry struct {
+	ID        string    `gorm:"primaryKey;column:id;type:text;size:64" json:"id"`
+	ServiceID string    `gorm:"column:service_id;type:text;size:64;not null;index" json:"service_id"`
+	Title     string    `gorm:"column:title;type:text;size:256;not null" json:"title"`
+	Body      string    `gorm:"column:body;type:text" json:"body"`
+	CreatedAt time.Time `gorm:"column:created_at;not null" json:"created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
+}
+
+// BeforeCreate fills the primary key before INSERT.
+func (r *RunbookEntry) BeforeCreate(_ *gorm.DB) error {
+	if r.ID == "" {
+		r.ID = uuid.NewString()
+	}
+	return nil
+}

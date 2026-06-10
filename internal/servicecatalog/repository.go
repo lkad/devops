@@ -3,6 +3,7 @@ package servicecatalog
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -133,6 +134,48 @@ func (r *Repository) List(f ServiceFilter) ([]Service, error) {
 	return rows, nil
 }
 
+// CreateOnCall inserts a new on-call rotation row.
+func (r *Repository) CreateOnCall(o *OnCall) error {
+	if err := r.db.Create(o).Error; err != nil {
+		return fmt.Errorf("servicecatalog.CreateOnCall: %w", err)
+	}
+	return nil
+}
+
+// CurrentOnCall returns the active shift for a service
+// at the given time. The lookup is per-service first;
+// when no per-service shift covers the time, the global
+// shift (ServiceID == "") wins. Returns (nil, nil) when
+// no shift is active — the page renders "no one on
+// call" without an error.
+func (r *Repository) CurrentOnCall(serviceID string, at time.Time) (*OnCall, error) {
+	var rows []OnCall
+	// Two-step query: per-service first, then global.
+	if err := r.db.
+		Where("service_id = ?", serviceID).
+		Where("shift_start <= ? AND shift_end > ?", at, at).
+		Order("shift_start DESC").
+		Limit(1).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("servicecatalog.CurrentOnCall: %w", err)
+	}
+	if len(rows) > 0 {
+		return &rows[0], nil
+	}
+	if err := r.db.
+		Where("service_id = '' OR service_id IS NULL").
+		Where("shift_start <= ? AND shift_end > ?", at, at).
+		Order("shift_start DESC").
+		Limit(1).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("servicecatalog.CurrentOnCall global: %w", err)
+	}
+	if len(rows) > 0 {
+		return &rows[0], nil
+	}
+	return nil, nil
+}
+
 // lowerASCII is a tiny case-folder used only by List.Query.
 // Full unicode is intentionally avoided; the operator-facing
 // search box expects ASCII names.
@@ -144,4 +187,26 @@ func lowerASCII(s string) string {
 		}
 	}
 	return string(b)
+}
+
+// CreateRunbook inserts a new runbook entry.
+func (r *Repository) CreateRunbook(e *RunbookEntry) error {
+	if err := r.db.Create(e).Error; err != nil {
+		return fmt.Errorf("servicecatalog.CreateRunbook: %w", err)
+	}
+	return nil
+}
+
+// ListRunbook returns all runbook entries for a service,
+// newest first (most recently updated at the top of the
+// page).
+func (r *Repository) ListRunbook(serviceID string) ([]RunbookEntry, error) {
+	var rows []RunbookEntry
+	if err := r.db.
+		Where("service_id = ?", serviceID).
+		Order("created_at DESC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("servicecatalog.ListRunbook: %w", err)
+	}
+	return rows, nil
 }
