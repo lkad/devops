@@ -1,0 +1,69 @@
+{
+  "date": "2026-06-10",
+  "window": "7d",
+  "window_start": "2026-06-03",
+  "window_end": "2026-06-10",
+  "metrics": {
+    "commits": 96,
+    "substantive_commits": 74,
+    "merge_commits": 22,
+    "contributors": 3,
+    "insertions": 72592,
+    "deletions": 58172,
+    "net_loc": 14420,
+    "test_loc": 25860,
+    "test_ratio": 0.356,
+    "active_days": 5,
+    "sessions": 13,
+    "longest_session_minutes": 78,
+    "feat_pct": 0.55,
+    "fix_pct": 0.05,
+    "test_pct": 0.04,
+    "merge_pct": 0.23,
+    "peak_hour_utc": 14,
+    "ai_assisted_commits": 38,
+    "focus_score": 0.455,
+    "focus_area": "internal/",
+    "files_touched": 817
+  },
+  "authors": {
+    "Claude": { "commits": 64, "insertions": 53760, "deletions": 58136, "top_areas": ["frontend/src", "internal/physicalhost", "internal/k8s"] },
+    "vagrant": { "commits": 8, "insertions": 15051, "deletions": 0, "top_areas": ["internal/auth", "internal/discovery", "internal/project"] },
+    "claude": { "commits": 1, "insertions": 3781, "deletions": 0, "top_areas": ["internal/pipeline"], "note": "case-mismatch dup of Claude" }
+  },
+  "streak_days": 3,
+  "hotspots": [
+    { "file": "cmd/devops-toolkit/main.go", "changes": 15 },
+    { "file": "frontend/src/main.tsx", "changes": 8 },
+    { "file": "go.sum", "changes": 7 },
+    { "file": "go.mod", "changes": 7 },
+    { "file": "internal/pipeline/models.go", "changes": 4 }
+  ],
+  "ship_of_the_week": {
+    "hash": "01d2c0b3",
+    "subject": "chore: clean prior code and sync openspec + main docs",
+    "loc_delta": 39382,
+    "note": "Foundation sweep; subsequent feature work landed clean on top"
+  },
+  "runner_up": {
+    "hash": "070f5ccd",
+    "subject": "feat(cicd-pipeline): implement spec (16/16 scenarios GREEN)",
+    "loc": 3781
+  },
+  "wins": [
+    "Microservice catalog end-to-end: spec → backend → frontend → on-call → runbook → K8s health → multi-cluster walker → ClientRegistry in 5 days",
+    "Distributed tracing wired: OTel middleware + X-Trace-Id + clickable toasts + /trace/:id page (with c.Next header bug caught + fixed same-day)",
+    "CI now tests the frontend: backend/frontend job split (f84f0a29) — TS/vitest break catches PRs"
+  ],
+  "improvements": [
+    "Push your work — 98 commits ahead of origin/main is one disk failure away from a bad day",
+    "Reduce merge commits — switch git pull to git pull --rebase (23% merge ratio is high)",
+    "Pin author identity — `git config --global user.name Claude` to stop Claude/claude split"
+  ],
+  "habits": [
+    "Proactive /context-save at ~60% context — the 2026-06-09 11h crash lesson",
+    "Push after every session, not every week",
+    "Run /retro Friday afternoon to make the weekly trend table real"
+  ],
+  "tweetable": "Week of Jun 3: 96 commits (3 contributors), +14.4k net LOC, 36% tests, 13 sessions | Streak: 3d"
+}

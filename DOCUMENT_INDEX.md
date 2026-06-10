@@ -1,25 +1,26 @@
 # DevOps Toolkit — 文档索引
 
-**最后更新:** 2026-06-05
+**最后更新:** 2026-06-10 (v0.2.0.0)
 
-> 重新开发时，从这里开始。本文档列出所有文档的**角色、权威性和阅读顺序**。
+> 新接手代码时,从这里开始。本文档列出所有文档的**角色、权威性和阅读顺序**。本仓库就是当前实现 (~25k 行 Go 后端 + React 前端),不需要"重新开发"。
 
 ---
 
-## 阅读顺序（重新开发）
+## 阅读顺序
 
 1. **本索引** — 了解文档结构
 2. [README.md](README.md) — 项目入口和快速开始
-3. [PRD.md](PRD.md) — 产品需求（要做什么）
-4. [openspec/specs/](openspec/specs/) — 形式化技术规格（怎么做）— **权威**
-5. [ARCHITECTURE.md](ARCHITECTURE.md) — 系统架构总览
+3. [PRD.md](PRD.md) — 产品需求(要做什么)
+4. [openspec/specs/](openspec/specs/) — 形式化技术规格(怎么做)— **权威**
+5. [ARCHITECTURE.md](ARCHITECTURE.md) — 系统架构总览 (含历史迁移说明)
 6. [REQUIREMENTS.md](REQUIREMENTS.md) — 后端技术规格 + 功能完成状态
-7. [docs/BACKEND.md](docs/BACKEND.md) — 后端代码级规范（Draft）
+7. [docs/BACKEND.md](docs/BACKEND.md) — 后端代码级规范
 8. [docs/FRONTEND.md](docs/FRONTEND.md) — 前端实现规格
-9. [DESIGN.md](DESIGN.md) — 前端设计系统（Active）
+9. [DESIGN.md](DESIGN.md) — 前端设计系统 (Active)
 10. [DEPLOY.md](DEPLOY.md) — 部署指南
-11. [docs/TEST-ENVIRONMENT.md](docs/TEST-ENVIRONMENT.md) — 测试环境准备清单（v1.0）
-12. [docs/CONFLICTS.md](docs/CONFLICTS.md) — **必读**：文档间冲突及建议
+11. [docs/TEST-ENVIRONMENT.md](docs/TEST-ENVIRONMENT.md) — 测试环境准备清单 (v1.0)
+12. [TEST_CASES.md](TEST_CASES.md) — 测试用例总览
+13. [docs/CONFLICTS.md](docs/CONFLICTS.md) — 文档间冲突历史溯源 (选择性参考)
 
 ---
 

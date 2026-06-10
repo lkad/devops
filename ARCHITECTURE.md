@@ -1,13 +1,14 @@
 # Architecture — DevOps Toolkit
 
-> **⚠️ 文档警告:** 本文档部分内容已过时（迁移前状态）。
+> **⚠️ 文档警告:** 本文档的早期章节(系统架构图、Modules 表)描述的是 v0.1 时期的状态(gorilla/mux + database/sql + 较少模块)。v0.2.0.0 已迁移到 Gin + GORM,并新增了 servicecatalog / observability / k8s pod health / multi-cluster ClientRegistry 等模块。
 >
-> 重新开发时，请同时参考：
+> 当前权威来源:
+> - [README.md](README.md) — 现有模块表 (v0.2.0.0)
 > - [REQUIREMENTS.md](REQUIREMENTS.md) — 当前技术规格
-> - [docs/CONFLICTS.md](docs/CONFLICTS.md) — 详细冲突清单
-> - [openspec/specs/](openspec/specs/) — 权威形式化规格
+> - [openspec/specs/](openspec/specs/) — 权威形式化规格 (25 个 spec)
+> - [docs/CONFLICTS.md](docs/CONFLICTS.md) — 详细冲突清单 (历史溯源)
 >
-> 主要冲突：HTTP 框架（gorilla/mux → Gin）、配置库（YAML → Viper）、项目 Type（内嵌枚举 → 独立表）
+> 主要变化:HTTP 框架(gorilla/mux → Gin)、配置库(YAML → Viper)、项目 Type(内嵌枚举 → 独立表)、K8s 客户端(stub → 真实 client-go)、新增 servicecatalog + observability + alerts 多通道。
 
 ## Overview
 
