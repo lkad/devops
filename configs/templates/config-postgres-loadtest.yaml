@@ -1,0 +1,61 @@
+# Postgres-backed config for load-test reproduction.
+# Identical to config-ci.yaml except database.driver + host/port/user.
+# Use this to run tests/load/loadgen_test.go against a real
+# Postgres with a 1,000+ host dataset. See
+# tests/load/baseline.md for the full reproducer.
+
+app:
+  name: devops-toolkit
+  env: ci
+  host: 127.0.0.1
+  port: 8081
+  log_level: warn
+
+database:
+  driver: postgres
+  host: 127.0.0.1
+  port: 5432
+  user: devops
+  password: devops
+  dbname: devops
+  sslmode: disable
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 600
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+
+logs:
+  backend: local
+  local:
+    path: tests/fixtures/logs
+
+ldap:
+  url: ""
+  dev_bypass: true
+  dev_users:
+    - username: test_admin
+      password: test
+      role: SuperAdmin
+    - username: test_viewer
+      password: test
+      role: Auditor
+
+alerts:
+  channels: []
+
+k8s:
+  default_namespace: default
+  in_cluster: false
+
+physicalhost:
+  monitoring_interval: 5
+
+websocket:
+  ping_interval: 30
+  write_timeout: 10
+  read_timeout: 60

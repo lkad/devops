@@ -82,6 +82,45 @@ saturation: no errors, no climbing tail.
   hits InfluxDB in production, re-run to capture the real
   read path.
 
+## Postgres + 1,000-host run (added 2026-06-10)
+
+Same binary + load test, but with a real Postgres 15 backend
+(`docker run postgres:15`, `max_open_conns: 50`) and a 1,000-
+host dataset (`configs/templates/config-postgres-loadtest.yaml`).
+Seed was a single `\copy` for the dataset (no per-row GORM
+overhead); the load test itself is identical to the
+sqlite runs.
+
+| Run | VUs | Total reqs | Errors | Err rate | List p50 | List p95 | Metrics p95 | Verdict |
+|-----|-----|------------|--------|----------|----------|----------|-------------|---------|
+| 4   | 200 | 11,808 | 2 | 0.017% | 4ms | **26ms** | 7ms | ✅ PASS |
+| 5   | 300 | 17,510 | 5 | 0.029% | 5ms | **41ms** | 13ms | ✅ PASS |
+| 6   | 500 | 26,751 | 56 | 0.21% | 19ms | **117ms** | 46ms | ✅ PASS (redline) |
+
+**PG headroom: 19x at 200 VUs, 12x at 300 VUs, 4x at 500 VUs.**
+
+The 500 VUs run is the **redline** — 0.21% error rate is
+within the 1% SLO but very close, and p95 list of 117ms is
+1/4 of the SLO. Suspected bottleneck: the 50-connection
+pool. A future tuning pass should bump `max_open_conns` to
+~150 and re-run to see whether the connection pool is the
+bottleneck or something else.
+
+### Diff: PG vs sqlite (200 VUs)
+
+| Metric | sqlite (3 hosts) | PG (1000 hosts) | Delta |
+|--------|------------------|-----------------|-------|
+| List p95 | 7ms | 26ms | +19ms |
+| Metrics p95 | 4ms | 7ms | +3ms |
+| Errors | 0 | 2 | +2 |
+| Throughput | 400 req/s | 393 req/s | -2% |
+
+The PG hit is real but small: GORM is doing more work (real
+SQL, real indices, real network to a separate container) but
+the dataset is 333x larger and the throughput is unchanged.
+The List p95 delta of 19ms is the cost of the extra index
+page reads — still 19x under SLO, no operational concern.
+
 ## What "baseline" means here
 
 This file is a **floor**, not a target. If a future change

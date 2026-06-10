@@ -1,0 +1,130 @@
+# Prometheus alert rules for the service-catalog health signal.
+#
+# Three rules wired to the v0.2.0.0 metrics exposed in
+# internal/servicecatalog/metrics.go:
+#   - devops_toolkit_service_health_status (gauge, 0/1/2)
+#   - devops_toolkit_service_health_rollup_total (counter)
+#
+# Design notes:
+#   - The gauge is last-write-wins, not rate. A service in
+#     degraded state surfaces as 2 on the gauge. We trigger
+#     off the gauge value being 2 for a sustained window
+#     rather than off rate of change (a service that goes
+#     degraded, then never recovers, would be missed by a
+#     rate-of-change rule).
+#   - The K8s-source fallback rule catches the silent
+#     "K8s walker lost reachability" case: rollups still
+#     happen (catalog page works) but derived_from flips
+#     from k8s_pod_health to last_pipeline_run. This is
+#     the leading indicator that the multi-cluster registry
+#     has a bad kubeconfig.
+#   - The counter is the secondary signal for "is the catalog
+#     even being polled?": silence means no one is looking,
+#     which is itself worth a log-severity alert.
+#
+# The rule group follows the existing alerts.yml conventions
+# (service + severity + alertname labels; alertmanager
+# route tree keys on those). Reuses the existing
+# /etc/prometheus/rules mount from docker-compose.
+
+groups:
+  - name: devops-toolkit.service-catalog
+    interval: 30s
+    rules:
+
+      - alert: service_health_degraded
+        # A specific service has been reporting degraded
+        # (gauge == 2) for at least 3 minutes. The
+        # `for: 3m` cushion absorbs a single unhealthy
+        # rollup during a deploy restart.
+        expr: |
+          max by (service_id, service_name, tier, derived_from) (
+            devops_toolkit_service_health_status == 2
+          ) == 2
+        for: 3m
+        labels:
+          service: devops-toolkit
+          severity: page
+        annotations:
+          summary: "service {{ $labels.service_name }} degraded for 3m"
+          description: |
+            Service '{{ $labels.service_name }}' (id={{ $labels.service_id }},
+            tier={{ $labels.tier }}) has been reporting degraded health
+            for the last 3 minutes. The signal source is
+            '{{ $labels.derived_from }}'.
+
+            Drill into /services/{{ $labels.service_id }}/health for the
+            full rollup (reason, last_run, recent_runs), or open the
+            service-catalog Grafana dashboard.
+
+      - alert: service_critical_health_down
+        # Stricter version of the above for tier=critical
+        # services: page on the first 1m of degraded, not
+        # the standard 3m. The on-call SLO for critical
+        # services is "page immediately".
+        expr: |
+          max by (service_id, service_name, derived_from) (
+            devops_toolkit_service_health_status{tier="critical"} == 2
+          ) == 2
+        for: 1m
+        labels:
+          service: devops-toolkit
+          severity: page
+        annotations:
+          summary: "CRITICAL service {{ $labels.service_name }} degraded for 1m"
+          description: |
+            Critical-tier service '{{ $labels.service_name }}' has
+            been reporting degraded health for 1m. Page immediately
+            per the on-call SLO.
+
+      - alert: k8s_source_silent_fallback
+        # The multi-cluster K8s walker is silently falling
+        # back to the pipeline signal: rollup rate split
+        # between k8s_pod_health and last_pipeline_run.
+        # In a healthy setup, k8s_pod_health dominates;
+        # last_pipeline_run rising means at least one
+        # cluster's kubeconfig failed to decrypt / parse.
+        # Page because the operator is now seeing stale
+        # data without realising it.
+        expr: |
+          (
+            sum(rate(devops_toolkit_service_health_rollup_total{derived_from="last_pipeline_run"}[5m]))
+            /
+            clamp_min(sum(rate(devops_toolkit_service_health_rollup_total[5m])), 1)
+          ) > 0.5
+        for: 5m
+        labels:
+          service: devops-toolkit
+          severity: page
+        annotations:
+          summary: "K8s health source >50% fallback to pipeline for 5m"
+          description: |
+            More than 50% of health rollups are coming from
+            last_pipeline_run (the fallback signal) instead of
+            k8s_pod_health. At least one cluster's kubeconfig
+            is failing to decrypt or parse, and the multi-cluster
+            walker is silently downgrading the health signal.
+
+            Check /api/v1/k8s/clusters/ for connection status
+            and re-issue kubeconfigs as needed.
+
+      - alert: catalog_rollups_silent
+        # No /services/:id/health calls in 15 minutes.
+        # The frontend Services page polls on view, so a
+        # long silence means either (a) no one is on the
+        # platform, or (b) the catalog UI is broken and
+        # silently not rendering. Log severity, not page —
+        # a quiet afternoon is fine, but a quiet Tuesday
+        # is suspicious.
+        expr: |
+          rate(devops_toolkit_service_health_rollup_total[15m]) == 0
+        for: 15m
+        labels:
+          service: devops-toolkit
+          severity: log
+        annotations:
+          summary: "no /services/:id/health calls in 15m"
+          description: |
+            No rollup traffic in 15m. Either no operator is on
+            the Services page, or the catalog UI is broken.
+            Check the frontend /services route.
