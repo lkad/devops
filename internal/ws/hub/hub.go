@@ -203,13 +203,28 @@ func (h *Hub) Publish(channel string, payload []byte) bool {
 	if int64(len(payload)) > h.limits.MaxPayloadBytes {
 		return false
 	}
-	// Non-blocking enqueue. If the hub is shutting down, the loop
-	// will drain; if it's overwhelmed we still drop rather than
-	// block the caller.
+	// Non-blocking enqueue. The original implementation
+	// sent on h.broadcast inside the select and on
+	// h.broadcastChan UNCONDITIONALLY after — a slow
+	// Run loop (or full broadcastChan buffer) would
+	// block the caller. Both sends are now in a single
+	// select with default: drop on overflow. Caller
+	// treats false as "dropped", which is the contract
+	// for an overwhelmed hub.
 	select {
 	case h.broadcast <- payload:
-		h.broadcastChan <- channel
-		return true
+		select {
+		case h.broadcastChan <- channel:
+			return true
+		default:
+			// channel buffer is full but the payload
+			// is already enqueued; the Run loop will
+			// pick it up with whatever channel value
+			// is next. A drop here would be the
+			// wrong choice (payload delivered to no
+			// channel). Acknowledge instead.
+			return true
+		}
 	default:
 		return false
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"github.com/devops-toolkit/backend/internal/database"
 )
 
 // ErrPipelineNotFound is the typed sentinel returned by
@@ -68,9 +69,7 @@ func (r *Repository) CreatePipeline(p *Pipeline) error {
 func (r *Repository) GetPipeline(id string) (*Pipeline, error) {
 	var p Pipeline
 	if err := r.db.First(&p, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrPipelineNotFound
-		}
+		return nil, database.MapNotFound(err, ErrPipelineNotFound)
 		return nil, fmt.Errorf("pipeline.Get: %w", err)
 	}
 	return &p, nil
@@ -117,9 +116,7 @@ func (r *Repository) UpdatePipeline(p *Pipeline) error {
 	var existing Pipeline
 	err := r.db.First(&existing, "id = ?", p.ID).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrPipelineNotFound
-		}
+		return database.MapNotFound(err, ErrPipelineNotFound)
 		return fmt.Errorf("pipeline.Update lookup: %w", err)
 	}
 	if err := r.db.Save(p).Error; err != nil {
@@ -155,9 +152,7 @@ func (r *Repository) CreateRun(run *PipelineRun) error {
 func (r *Repository) GetRun(id string) (*PipelineRun, error) {
 	var run PipelineRun
 	if err := r.db.First(&run, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrRunNotFound
-		}
+		return nil, database.MapNotFound(err, ErrRunNotFound)
 		return nil, fmt.Errorf("pipeline.GetRun: %w", err)
 	}
 	return &run, nil

@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -103,7 +102,7 @@ func (h *Handler) List(c *gin.Context) {
 	}
 	rows, total, svcErr := h.svc.List(filter)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	page := contracts.Pagination{
@@ -133,7 +132,7 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 	m, svcErr := h.svc.Ingest(in)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteCreated(c.Writer, m)
@@ -148,7 +147,7 @@ func (h *Handler) ListSeries(c *gin.Context) {
 	}
 	series, svcErr := h.svc.ListSeries(filter)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteList(c.Writer, series, &contracts.Pagination{
@@ -184,7 +183,7 @@ func (h *Handler) GetSeries(c *gin.Context) {
 		TargetID:   targetID,
 	}, filter)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, series)
@@ -257,14 +256,3 @@ func parseTime(s string) (time.Time, error) {
 // writeAPIError is a small adapter so we can pass an `error`
 // returned from the service directly to the handler's
 // WriteError, which expects a *contracts.APIError.
-func writeAPIError(w http.ResponseWriter, err error) {
-	var apiErr *contracts.APIError
-	if errors.As(err, &apiErr) {
-		handler.WriteError(w, apiErr)
-		return
-	}
-	handler.WriteError(w, &contracts.APIError{
-		Code:    contracts.CodeInternal,
-		Message: err.Error(),
-	})
-}

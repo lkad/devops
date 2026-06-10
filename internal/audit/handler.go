@@ -48,12 +48,12 @@ func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.H
 func (h *Handler) List(c *gin.Context) {
 	filter, err := h.parseFilter(c)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	rows, total, err := h.svc.List(filter)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	page := contracts.Pagination{
@@ -71,7 +71,7 @@ func (h *Handler) Get(c *gin.Context) {
 	id := c.Param("id")
 	e, err := h.svc.Get(id)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, e)
@@ -147,14 +147,3 @@ func parseTime(v string) (time.Time, error) {
 // writeAPIError is a small adapter so we can pass an `error`
 // returned from the service directly to the handler's
 // WriteError, which expects a *contracts.APIError.
-func writeAPIError(w http.ResponseWriter, err error) {
-	var apiErr *contracts.APIError
-	if errors.As(err, &apiErr) {
-		handler.WriteError(w, apiErr)
-		return
-	}
-	handler.WriteError(w, &contracts.APIError{
-		Code:    contracts.CodeInternal,
-		Message: err.Error(),
-	})
-}

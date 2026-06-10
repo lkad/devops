@@ -2,7 +2,6 @@ package alerts
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 
@@ -144,7 +143,7 @@ func (h *Handler) List(c *gin.Context) {
 	filter := h.parseFilter(c)
 	rows, total, err := h.svc.List(filter)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	page := contracts.Pagination{
@@ -166,7 +165,7 @@ func (h *Handler) History(c *gin.Context) {
 	}
 	rows, total, err := h.svc.List(filter)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	page := contracts.Pagination{
@@ -183,7 +182,7 @@ func (h *Handler) History(c *gin.Context) {
 func (h *Handler) Stats(c *gin.Context) {
 	stats, err := h.svc.Stats()
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, stats)
@@ -195,7 +194,7 @@ func (h *Handler) Get(c *gin.Context) {
 	id := c.Param("id")
 	a, err := h.svc.GetAlert(id)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, a)
@@ -211,7 +210,7 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 	a, err := h.svc.Fire(c.Request.Context(), req.toFire())
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteCreated(c.Writer, a)
@@ -243,7 +242,7 @@ func (h *Handler) Update(c *gin.Context) {
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.svc.Delete(id); err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteNoContent(c.Writer)
@@ -260,7 +259,7 @@ func (h *Handler) Acknowledge(c *gin.Context) {
 	}
 	a, err := h.svc.Acknowledge(id, userID)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, a)
@@ -271,7 +270,7 @@ func (h *Handler) Resolve(c *gin.Context) {
 	id := c.Param("id")
 	a, err := h.svc.Resolve(id)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, a)
@@ -282,7 +281,7 @@ func (h *Handler) Resolve(c *gin.Context) {
 func (h *Handler) ListChannels(c *gin.Context) {
 	rows, err := h.svc.ListChannels()
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	masked := make([]Channel, len(rows))
@@ -302,7 +301,7 @@ func (h *Handler) CreateChannel(c *gin.Context) {
 	}
 	ch, err := h.svc.CreateChannel(req.toCreate())
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteCreated(c.Writer, Mask(*ch))
@@ -313,7 +312,7 @@ func (h *Handler) GetChannel(c *gin.Context) {
 	id := c.Param("id")
 	ch, err := h.svc.GetChannel(id)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, Mask(*ch))
@@ -328,7 +327,7 @@ func (h *Handler) UpdateChannel(c *gin.Context) {
 		return
 	}
 	if err := h.svc.UpdateChannel(id, req.toUpdate()); err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	ch, _ := h.svc.GetChannel(id)
@@ -339,7 +338,7 @@ func (h *Handler) UpdateChannel(c *gin.Context) {
 func (h *Handler) DeleteChannel(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.svc.DeleteChannel(id); err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteNoContent(c.Writer)
@@ -386,17 +385,6 @@ func (h *Handler) parseFilter(c *gin.Context) AlertFilter {
 // writeAPIError is a small adapter so we can pass an `error`
 // returned from the service directly to the handler's
 // WriteError, which expects a *contracts.APIError.
-func writeAPIError(w http.ResponseWriter, err error) {
-	var apiErr *contracts.APIError
-	if errors.As(err, &apiErr) {
-		handler.WriteError(w, apiErr)
-		return
-	}
-	handler.WriteError(w, &contracts.APIError{
-		Code:    contracts.CodeInternal,
-		Message: err.Error(),
-	})
-}
 
 // writeValidationError is the convenience used for JSON parse
 // failures: a 400 with a fixed message.

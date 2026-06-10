@@ -7,6 +7,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/devops-toolkit/backend/pkg/contracts"
@@ -57,4 +58,33 @@ func WriteCreated(w http.ResponseWriter, resource any) {
 // WriteNoContent renders the standard 204 No Content.
 func WriteNoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// WriteAPIError translates a service-layer error into the
+// project's standard APIError envelope. The pattern was
+// duplicated as `writeAPIError` in nine module handlers
+// (alerts, audit, device, discovery, k8s/logstream, logs,
+// metrics, physicalhost, pipeline); the domain-specific
+// servicecatalog handler keeps its own copy because it
+// maps IsNotFound/IsConflict/IsValidation to specific
+// messages.
+//
+// The contract:
+//   - If err already wraps a *contracts.APIError, forward it
+//     as-is (the service layer chose the right code).
+//   - Otherwise, surface as a 500 with the underlying
+//     error text in the body. The Cause field is preserved
+//     server-side for log correlation (the envelope's
+//     ErrorBody does not serialise Cause, by design — see
+//     the audit's note on secrets safety).
+func WriteAPIError(w http.ResponseWriter, err error) {
+	var apiErr *contracts.APIError
+	if errors.As(err, &apiErr) {
+		WriteError(w, apiErr)
+		return
+	}
+	WriteError(w, &contracts.APIError{
+		Code:    contracts.CodeInternal,
+		Message: err.Error(),
+	})
 }

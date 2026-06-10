@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"gorm.io/gorm"
+	"github.com/devops-toolkit/backend/internal/database"
 )
 
 // ErrNotFound is the typed sentinel returned by every Repository
@@ -50,9 +51,7 @@ func (r *Repository) Create(d *Device) error {
 func (r *Repository) Get(id string) (*Device, error) {
 	var d Device
 	if err := r.db.First(&d, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNotFound
-		}
+		return nil, database.MapNotFound(err, ErrNotFound)
 		return nil, fmt.Errorf("device.Get: %w", err)
 	}
 	return &d, nil
@@ -107,9 +106,7 @@ func (r *Repository) Update(d *Device) error {
 	var existing Device
 	err := r.db.First(&existing, "id = ?", d.ID).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrNotFound
-		}
+		return database.MapNotFound(err, ErrNotFound)
 		return fmt.Errorf("device.Update lookup: %w", err)
 	}
 	if err := r.db.Save(d).Error; err != nil {

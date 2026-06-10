@@ -1,7 +1,6 @@
 package discovery
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 
@@ -68,7 +67,7 @@ func (h *Handler) CreateRun(c *gin.Context) {
 		SNMP:  req.SNMP,
 	})
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteCreated(c.Writer, run)
@@ -103,7 +102,7 @@ func (h *Handler) ListRuns(c *gin.Context) {
 	}
 	rows, total, svcErr := h.svc.ListRuns(filter)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	page := contracts.Pagination{
@@ -122,7 +121,7 @@ func (h *Handler) GetRun(c *gin.Context) {
 	id := c.Param("id")
 	detail, svcErr := h.svc.GetRunWithHosts(id)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, detail)
@@ -162,7 +161,7 @@ func (h *Handler) Promote(c *gin.Context) {
 		HostIDs: req.HostIDs,
 	})
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	// Marshal the device slice through a generic slice so
@@ -178,14 +177,3 @@ func (h *Handler) Promote(c *gin.Context) {
 // writeAPIError is a small adapter so we can pass an
 // `error` returned from the service directly to the handler's
 // WriteError, which expects a *contracts.APIError.
-func writeAPIError(w http.ResponseWriter, err error) {
-	var apiErr *contracts.APIError
-	if errors.As(err, &apiErr) {
-		handler.WriteError(w, apiErr)
-		return
-	}
-	handler.WriteError(w, &contracts.APIError{
-		Code:    contracts.CodeInternal,
-		Message: err.Error(),
-	})
-}

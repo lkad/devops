@@ -51,9 +51,7 @@ func (r *GroupRepository) Create(g *DeviceGroup) error {
 func (r *GroupRepository) Get(id string) (*DeviceGroup, error) {
 	var g DeviceGroup
 	if err := r.db.First(&g, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrGroupNotFound
-		}
+		return nil, database.MapNotFound(err, ErrGroupNotFound)
 		return nil, fmt.Errorf("group.Get: %w", err)
 	}
 	return &g, nil
@@ -279,7 +277,7 @@ type groupRequest struct {
 func (h *GroupHandler) List(c *gin.Context) {
 	rows, total, err := h.svc.List(20, 0)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	page := &contracts.Pagination{Total: total, Limit: 20, Offset: 0, HasMore: false}
@@ -298,7 +296,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 	}
 	g, err := h.svc.Create(GroupCreateInput{Name: req.Name, Description: req.Description})
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteCreated(c.Writer, g)
@@ -309,7 +307,7 @@ func (h *GroupHandler) Get(c *gin.Context) {
 	id := c.Param("id")
 	g, err := h.svc.Get(id)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, g)
@@ -337,7 +335,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 	}
 	g, err := h.svc.Update(id, in)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, g)
@@ -347,7 +345,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 func (h *GroupHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.svc.Delete(id); err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteNoContent(c.Writer)

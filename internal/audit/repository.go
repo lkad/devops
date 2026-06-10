@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"github.com/devops-toolkit/backend/internal/database"
 )
 
 // ErrNotFound is the typed sentinel returned by every Repository
@@ -72,9 +73,7 @@ func (r *Repository) Create(e *AuditEvent) error {
 func (r *Repository) Get(id string) (*AuditEvent, error) {
 	var e AuditEvent
 	if err := r.db.First(&e, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNotFound
-		}
+		return nil, database.MapNotFound(err, ErrNotFound)
 		return nil, fmt.Errorf("audit.Repository.Get: %w", err)
 	}
 	return &e, nil

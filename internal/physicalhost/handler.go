@@ -196,7 +196,7 @@ func (h *Handler) List(c *gin.Context) {
 
 	rows, total, err := h.repo.ListWithDevice(filter)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	page := contracts.Pagination{
@@ -213,7 +213,7 @@ func (h *Handler) Get(c *gin.Context) {
 	id := c.Param("id")
 	p, err := h.repo.Get(id)
 	if err != nil {
-		writeAPIError(c.Writer, mapRepoError(err, id))
+		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, p)
@@ -236,7 +236,7 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 	p := req.toModel()
 	if err := h.repo.Create(p); err != nil {
-		writeAPIError(c.Writer, mapRepoError(err, p.DeviceID))
+		handler.WriteAPIError(c.Writer, mapRepoError(err, p.DeviceID))
 		return
 	}
 	handler.WriteCreated(c.Writer, p)
@@ -261,7 +261,7 @@ func (h *Handler) Replace(c *gin.Context) {
 
 	p, err := h.repo.Get(id)
 	if err != nil {
-		writeAPIError(c.Writer, mapRepoError(err, id))
+		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
 	}
 	if req.DeviceID != "" {
@@ -280,7 +280,7 @@ func (h *Handler) Replace(c *gin.Context) {
 		p.State = PhysicalHostState(req.State)
 	}
 	if err := h.repo.Update(p); err != nil {
-		writeAPIError(c.Writer, mapRepoError(err, id))
+		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, p)
@@ -294,7 +294,7 @@ func (h *Handler) Replace(c *gin.Context) {
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.repo.Delete(id); err != nil {
-		writeAPIError(c.Writer, mapRepoError(err, id))
+		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
 	}
 	handler.WriteNoContent(c.Writer)
@@ -308,12 +308,12 @@ func (h *Handler) Delete(c *gin.Context) {
 func (h *Handler) Probe(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.monitor.Check(c.Request.Context(), id); err != nil {
-		writeAPIError(c.Writer, mapMonitorError(err, id))
+		handler.WriteAPIError(c.Writer, mapMonitorError(err, id))
 		return
 	}
 	p, err := h.repo.Get(id)
 	if err != nil {
-		writeAPIError(c.Writer, mapRepoError(err, id))
+		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, p)
@@ -348,7 +348,7 @@ func (h *Handler) EnterMaintenance(c *gin.Context) {
 	}
 	host, _, err := h.maintenance.EnterMaintenance(contextFor(c), id, req.Reason, userID)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, host)
@@ -363,7 +363,7 @@ func (h *Handler) ExitMaintenance(c *gin.Context) {
 	}
 	host, _, err := h.maintenance.ExitMaintenance(contextFor(c), id, userID)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, host)
@@ -376,7 +376,7 @@ func (h *Handler) Metrics(c *gin.Context) {
 	id := c.Param("id")
 	host, err := h.repo.Get(id)
 	if err != nil {
-		writeAPIError(c.Writer, mapRepoError(err, id))
+		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
 	}
 	if h.metrics == nil {
@@ -420,7 +420,7 @@ func (h *Handler) MaintenanceHistory(c *gin.Context) {
 		Limit:        limit,
 	})
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	page := contracts.Pagination{
@@ -442,17 +442,6 @@ func contextFor(c *gin.Context) context.Context {
 // writeAPIError is the same adapter the device package uses: it
 // turns an `error` returned from the service into a
 // *contracts.APIError, then delegates to handler.WriteError.
-func writeAPIError(w http.ResponseWriter, err error) {
-	var apiErr *contracts.APIError
-	if errors.As(err, &apiErr) {
-		handler.WriteError(w, apiErr)
-		return
-	}
-	handler.WriteError(w, &contracts.APIError{
-		Code:    contracts.CodeInternal,
-		Message: err.Error(),
-	})
-}
 
 // mapRepoError converts a repository-layer error into a
 // *contracts.APIError so the handler can render the right HTTP

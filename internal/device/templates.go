@@ -63,9 +63,7 @@ func (r *TemplateRepository) Create(t *ConfigurationTemplate) error {
 func (r *TemplateRepository) Get(id string) (*ConfigurationTemplate, error) {
 	var t ConfigurationTemplate
 	if err := r.db.First(&t, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrTemplateNotFound
-		}
+		return nil, database.MapNotFound(err, ErrTemplateNotFound)
 		return nil, fmt.Errorf("template.Get: %w", err)
 	}
 	return &t, nil
@@ -291,7 +289,7 @@ type templateRequest struct {
 func (h *TemplateHandler) List(c *gin.Context) {
 	rows, total, err := h.svc.List(20, 0)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	page := &contracts.Pagination{Total: total, Limit: 20, Offset: 0, HasMore: false}
@@ -314,7 +312,7 @@ func (h *TemplateHandler) Create(c *gin.Context) {
 		Body:        req.Body,
 	})
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteCreated(c.Writer, t)
@@ -325,7 +323,7 @@ func (h *TemplateHandler) Get(c *gin.Context) {
 	id := c.Param("id")
 	t, err := h.svc.Get(id)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, t)
@@ -357,7 +355,7 @@ func (h *TemplateHandler) Update(c *gin.Context) {
 	}
 	t, err := h.svc.Update(id, in)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, t)
@@ -367,7 +365,7 @@ func (h *TemplateHandler) Update(c *gin.Context) {
 func (h *TemplateHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.svc.Delete(id); err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteNoContent(c.Writer)

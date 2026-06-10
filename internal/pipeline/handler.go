@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 
@@ -142,7 +141,7 @@ func (h *Handler) List(c *gin.Context) {
 	}
 	rows, total, svcErr := h.svc.List(filter)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	page := contracts.Pagination{
@@ -161,7 +160,7 @@ func (h *Handler) Get(c *gin.Context) {
 	id := c.Param("id")
 	p, svcErr := h.svc.Get(id)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, p)
@@ -180,7 +179,7 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 	p, svcErr := h.svc.Create(req.toCreateInput())
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteCreated(c.Writer, p)
@@ -201,7 +200,7 @@ func (h *Handler) Update(c *gin.Context) {
 	}
 	p, svcErr := h.svc.Update(id, req.toUpdateInput())
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, p)
@@ -212,7 +211,7 @@ func (h *Handler) Update(c *gin.Context) {
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if svcErr := h.svc.Delete(id); svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteNoContent(c.Writer)
@@ -226,7 +225,7 @@ func (h *Handler) Trigger(c *gin.Context) {
 	triggeredBy := c.GetHeader("X-User-Id")
 	run, svcErr := h.svc.Trigger(id, triggeredBy)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteCreated(c.Writer, run)
@@ -239,7 +238,7 @@ func (h *Handler) ListRuns(c *gin.Context) {
 	limit, offset := parsePaging(c)
 	runs, total, svcErr := h.svc.ListRuns(id, limit, offset)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	page := contracts.Pagination{
@@ -258,7 +257,7 @@ func (h *Handler) Stats(c *gin.Context) {
 	id := c.Param("id")
 	stats, svcErr := h.svc.Stats(id)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, stats)
@@ -274,12 +273,12 @@ func (h *Handler) Phases(c *gin.Context) {
 	id := c.Param("id")
 	p, svcErr := h.svc.Get(id)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	phases, err := PlanForPipeline(p)
 	if err != nil {
-		writeAPIError(c.Writer, &contracts.APIError{
+		handler.WriteAPIError(c.Writer, &contracts.APIError{
 			Code:    contracts.CodeInternal,
 			Message: "failed to plan strategy phases",
 			Cause:   err,
@@ -303,7 +302,7 @@ func (h *Handler) ListAllRuns(c *gin.Context) {
 	}
 	runs, total, svcErr := h.svc.ListAllRecentRuns(limit, offset)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	page := contracts.Pagination{
@@ -326,7 +325,7 @@ func (h *Handler) GetRun(c *gin.Context) {
 	id := c.Param("run_id")
 	run, steps, svcErr := h.svc.GetRunWithSteps(id)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, runDetailResponse{PipelineRun: run, Steps: steps})
@@ -338,12 +337,12 @@ func (h *Handler) GetRun(c *gin.Context) {
 func (h *Handler) CancelRun(c *gin.Context) {
 	id := c.Param("run_id")
 	if svcErr := h.svc.Cancel(id); svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	run, _, svcErr := h.svc.GetRunWithSteps(id)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, run)
@@ -400,14 +399,3 @@ func parsePaging(c *gin.Context) (int, int) {
 // writeAPIError is a small adapter so we can pass an
 // `error` returned from the service directly to the
 // handler's WriteError, which expects a *contracts.APIError.
-func writeAPIError(w http.ResponseWriter, err error) {
-	var apiErr *contracts.APIError
-	if errors.As(err, &apiErr) {
-		handler.WriteError(w, apiErr)
-		return
-	}
-	handler.WriteError(w, &contracts.APIError{
-		Code:    contracts.CodeInternal,
-		Message: err.Error(),
-	})
-}

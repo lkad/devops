@@ -109,7 +109,7 @@ func (h *Handler) List(c *gin.Context) {
 	}
 	rows, total, err := h.svc.List(filter)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	page := contracts.Pagination{
@@ -126,7 +126,7 @@ func (h *Handler) Get(c *gin.Context) {
 	id := c.Param("clusterID")
 	cl, err := h.svc.Get(id)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, cl)
@@ -144,7 +144,7 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 	cl, err := h.svc.Create(req.toCreate())
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteCreated(c.Writer, cl)
@@ -164,7 +164,7 @@ func (h *Handler) Replace(c *gin.Context) {
 	}
 	cl, err := h.svc.Update(id, req.toUpdate())
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, cl)
@@ -174,7 +174,7 @@ func (h *Handler) Replace(c *gin.Context) {
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("clusterID")
 	if err := h.svc.Delete(id); err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteNoContent(c.Writer)
@@ -195,7 +195,7 @@ func (h *Handler) Probe(c *gin.Context) {
 			handler.WriteJSON(c.Writer, http.StatusBadGateway, res)
 			return
 		}
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, res)
@@ -207,7 +207,7 @@ func (h *Handler) ListPods(c *gin.Context) {
 	ns := c.Query("namespace")
 	pods, err := h.svc.ListPods(id, ns)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteList(c.Writer, pods, nil)
@@ -219,7 +219,7 @@ func (h *Handler) ListDeployments(c *gin.Context) {
 	ns := c.Query("namespace")
 	deps, err := h.svc.ListDeployments(id, ns)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteList(c.Writer, deps, nil)
@@ -231,7 +231,7 @@ func (h *Handler) ListServices(c *gin.Context) {
 	ns := c.Query("namespace")
 	svcs, err := h.svc.ListServices(id, ns)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteList(c.Writer, svcs, nil)
@@ -308,7 +308,7 @@ func (h *Handler) Exec(c *gin.Context) {
 	timeout := time.Duration(req.TimeoutSeconds) * time.Second
 	res, err := h.svc.Exec(c.Request.Context(), id, ns, pod, req.Container, req.Command, timeout)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	// The spec's wire shape (exit_code / stdout_lines /
@@ -321,17 +321,6 @@ func (h *Handler) Exec(c *gin.Context) {
 // writeAPIError is a small adapter so we can pass an `error`
 // returned from the service directly to the handler's
 // WriteError, which expects a *contracts.APIError.
-func writeAPIError(w http.ResponseWriter, err error) {
-	var apiErr *contracts.APIError
-	if errors.As(err, &apiErr) {
-		handler.WriteError(w, apiErr)
-		return
-	}
-	handler.WriteError(w, &contracts.APIError{
-		Code:    contracts.CodeInternal,
-		Message: err.Error(),
-	})
-}
 
 // logQueryRequest is the wire shape for the
 // /k8s/clusters/:clusterID/namespaces/:ns/logs query string.

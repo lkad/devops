@@ -106,9 +106,7 @@ func NewExtraRepository(db *gorm.DB) *ExtraRepository { return &ExtraRepository{
 func (r *ExtraRepository) GetRetention() (*RetentionPolicy, error) {
 	var p RetentionPolicy
 	if err := r.db.First(&p, "singleton_key = ?", "default").Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNotFound
-		}
+		return nil, database.MapNotFound(err, ErrNotFound)
 		return nil, err
 	}
 	return &p, nil
@@ -145,9 +143,7 @@ func (r *ExtraRepository) ListSavedFilters() ([]SavedFilter, error) {
 func (r *ExtraRepository) GetSavedFilter(id string) (*SavedFilter, error) {
 	var f SavedFilter
 	if err := r.db.First(&f, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNotFound
-		}
+		return nil, database.MapNotFound(err, ErrNotFound)
 		return nil, err
 	}
 	return &f, nil

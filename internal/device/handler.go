@@ -1,7 +1,6 @@
 package device
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 
@@ -116,7 +115,7 @@ func (h *Handler) List(c *gin.Context) {
 	}
 	rows, total, svcErr := h.svc.List(filter)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	page := contracts.Pagination{
@@ -136,7 +135,7 @@ func (h *Handler) Search(c *gin.Context) {
 	q := c.Query("q")
 	rows, total, svcErr := h.svc.Search(q)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	page := contracts.Pagination{
@@ -155,7 +154,7 @@ func (h *Handler) Get(c *gin.Context) {
 	id := c.Param("id")
 	d, svcErr := h.svc.Get(id)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, d)
@@ -174,7 +173,7 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 	d, svcErr := h.svc.Create(req.toCreate())
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteCreated(c.Writer, d)
@@ -195,7 +194,7 @@ func (h *Handler) Replace(c *gin.Context) {
 	}
 	d, svcErr := h.svc.Update(id, req.toUpdate())
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, d)
@@ -206,7 +205,7 @@ func (h *Handler) Replace(c *gin.Context) {
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if svcErr := h.svc.Delete(id); svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteNoContent(c.Writer)
@@ -232,7 +231,7 @@ func (h *Handler) Action(c *gin.Context) {
 	}
 	d, svcErr := h.svc.ApplyAction(id, req.Action)
 	if svcErr != nil {
-		writeAPIError(c.Writer, svcErr)
+		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, d)
@@ -292,14 +291,3 @@ func parseListFilter(c *gin.Context) (ListFilter, *contracts.APIError) {
 // writeAPIError is a small adapter so we can pass an
 // `error` returned from the service directly to the handler's
 // WriteError, which expects a *contracts.APIError.
-func writeAPIError(w http.ResponseWriter, err error) {
-	var apiErr *contracts.APIError
-	if errors.As(err, &apiErr) {
-		handler.WriteError(w, apiErr)
-		return
-	}
-	handler.WriteError(w, &contracts.APIError{
-		Code:    contracts.CodeInternal,
-		Message: err.Error(),
-	})
-}

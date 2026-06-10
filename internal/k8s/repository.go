@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"github.com/devops-toolkit/backend/internal/database"
 )
 
 // ErrNotFound is the typed sentinel returned by every
@@ -51,9 +52,7 @@ func (r *Repository) Create(c *Cluster) error {
 func (r *Repository) Get(id string) (*Cluster, error) {
 	var c Cluster
 	if err := r.db.First(&c, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNotFound
-		}
+		return nil, database.MapNotFound(err, ErrNotFound)
 		return nil, fmt.Errorf("k8s.Get: %w", err)
 	}
 	return &c, nil
@@ -65,9 +64,7 @@ func (r *Repository) Get(id string) (*Cluster, error) {
 func (r *Repository) FindByName(name string) (*Cluster, error) {
 	var c Cluster
 	if err := r.db.First(&c, "name = ?", name).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNotFound
-		}
+		return nil, database.MapNotFound(err, ErrNotFound)
 		return nil, fmt.Errorf("k8s.FindByName: %w", err)
 	}
 	return &c, nil
@@ -106,9 +103,7 @@ func (r *Repository) Update(c *Cluster) error {
 	var existing Cluster
 	err := r.db.First(&existing, "id = ?", c.ID).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrNotFound
-		}
+		return database.MapNotFound(err, ErrNotFound)
 		return fmt.Errorf("k8s.Update lookup: %w", err)
 	}
 	if err := r.db.Save(c).Error; err != nil {

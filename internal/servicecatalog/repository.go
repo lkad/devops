@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"github.com/devops-toolkit/backend/internal/database"
 )
 
 // ErrNotFound is the typed sentinel returned when a row
@@ -66,9 +67,7 @@ func (r *Repository) Create(s *Service) error {
 func (r *Repository) Get(id string) (*Service, error) {
 	var s Service
 	if err := r.db.First(&s, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNotFound
-		}
+		return nil, database.MapNotFound(err, ErrNotFound)
 		return nil, fmt.Errorf("servicecatalog.Get: %w", err)
 	}
 	return &s, nil

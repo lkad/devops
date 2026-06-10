@@ -308,7 +308,7 @@ func (h *Handler) GetLogs(c *gin.Context) {
 	req.Follow = false
 	lines, err := h.svc.GetHistorical(c.Request.Context(), req)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": lines})
@@ -337,17 +337,6 @@ func mustJSON(v any) string {
 // writeAPIError is the same adapter used by the rest of the
 // codebase: an arbitrary error → the standard ErrorResponse
 // envelope.
-func writeAPIError(w http.ResponseWriter, err error) {
-	var apiErr *contracts.APIError
-	if errors.As(err, &apiErr) {
-		handler.WriteError(w, apiErr)
-		return
-	}
-	handler.WriteError(w, &contracts.APIError{
-		Code:    contracts.CodeInternal,
-		Message: err.Error(),
-	})
-}
 
 // =============================================================================
 // Log level inference. The k8s log stream is raw text — the

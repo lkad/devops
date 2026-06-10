@@ -7,7 +7,6 @@ package logs
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -111,7 +110,7 @@ func (h *Handler) Query(c *gin.Context) {
 	}
 	res, err := h.svc.Query(c.Request.Context(), q)
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	// Per the spec scenario "Backend unavailable": set Retry-After
@@ -126,7 +125,7 @@ func (h *Handler) Query(c *gin.Context) {
 func (h *Handler) Streams(c *gin.Context) {
 	streams, err := h.svc.Streams(c.Request.Context())
 	if err != nil {
-		writeAPIError(c.Writer, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": streams})
@@ -230,17 +229,6 @@ func splitFilterValue(s string) (string, string) {
 // writeAPIError is a small adapter so we can pass an `error`
 // returned from the service directly to the handler's WriteError,
 // which expects a *contracts.APIError.
-func writeAPIError(w http.ResponseWriter, err error) {
-	var apiErr *contracts.APIError
-	if errors.As(err, &apiErr) {
-		handler.WriteError(w, apiErr)
-		return
-	}
-	handler.WriteError(w, &contracts.APIError{
-		Code:    contracts.CodeInternal,
-		Message: fmt.Sprintf("internal error: %s", err.Error()),
-	})
-}
 
 // =============================================================================
 // Extra HTTP handlers — retention, statistics, saved filters, alert rules.
