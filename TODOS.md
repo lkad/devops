@@ -8,87 +8,289 @@ Add new items at the top. Move done items to `## Completed` with a date.
 Tracks deferred work that's clear but intentionally not done now.
 Add new items at the top. Move done items to `## Completed` with a date.
 
+The post-v0.2.0.0 audit (4 reports at `.context/audits/2026-06-10-*.md`)
+identified a long backlog. Items below are sorted by
+**production-readiness priority** (🔴 = blocker) → operator
+value → polish. Source report is named in each item so the
+audit context is recoverable.
+
 ## Open
 
-### P3 — Run promtool check rules pre-merge on alert YAMLs
+### P0 — Auth + RBAC middleware on `/api/v1` (audit #3, item 1)
 
-**What:** `deploy/prometheus/rules/catalog-degraded.yml` was
-not run through `promtool check rules` in the audit.
-PromQL silently accepts typoes; a CI gate would catch
-"reference an undefined recording rule" before the rule
-file ships.
+Currently every business endpoint is anonymous. The
+middleware constructors are never called in `main.go`.
+`internal/middleware/chain.go:12` even says "Auth and RBAC
+are injected by their respective owners (Phase 2)".
 
-**Estimate:** 15 min CC (install promtool in CI, add the
-step).
+Wire `auth.NewAuthMiddleware` and `rbac.RequirePermission`
+on the `/api/v1` group, with per-module permission keys.
+Tests: assert the production wiring rejects anonymous
+requests with 401, and RBAC denies return 403. Source:
+`.context/audits/2026-06-10-3-production-readiness.md` item 1.
+Estimate: 1-2 days.
+
+---
+
+### P0 — Cross-tenant project-scope enforcement (audit #3, item 2)
+
+A Developer-role user in project A can read/modify/delete
+any project's resources. `internal/project/service.go:130-141`
+`GetProjectWithRelations` returns everything regardless of
+membership. Even with the auth middleware wired (#1 above),
+the role matrix is global — needs a `rbac.HasPermissionInProject`
+lookup in each service layer.
+
+Source: `.context/audits/2026-06-10-3-production-readiness.md`
+item 2. Estimate: 3-5 days.
+
+---
+
+### P0 — Audit log coverage across all mutating modules (audit #3, item 3)
+
+Only `physicalhost.EnterMaintenance` / `ExitMaintenance`
+call `audit.Service.RecordAction`. Project CRUD, member
+grant/revoke, device CRUD, k8s cluster CRUD, pipeline
+runs, alert rules, log saved-filters, discovery runs —
+none audited.
+
+Wire `audit.Service.RecordAction` from each service layer
+with the caller's `ActorID` from the JWT subject (not
+from the request body). Source: `.context/audits/2026-06-10-3-production-readiness.md`
+item 3. Estimate: 2-3 days.
+
+---
+
+### P0 — `APP_JWT_SECRET` mandatory in production (audit #3, item 4)
+
+`cmd/devops-toolkit/main.go:352-356` and again at 926
+(WS hub signer) use a hard-coded dev fallback with only
+`log.Warn`. `config.Validate` does not refuse to start when
+unset. Same for `K8S_CRYPTO_KEY` at main.go:643.
+
+Fix `internal/config/config.go:213` `Validate` to:
+- refuse to boot when `APP_JWT_SECRET` is unset in `env == "production"`
+- refuse to boot when `K8S_CRYPTO_KEY` is unset in prod
+- refuse to boot when `ldap.dev_bypass: true` and
+  `env == "production"`
+
+Source: `.context/audits/2026-06-10-3-production-readiness.md`
+item 4. Estimate: 2 hr.
+
+---
+
+### P0 — Deep `/health` (audit #3, item 5)
+
+`cmd/devops-toolkit/main.go:230-232` returns 200 regardless
+of DB, LDAP, K8s, Redis, InfluxDB state. Split into
+`/live` (process up) and `/ready` (deps up). `/ready` fans
+out to DB ping, LDAP ping, K8s clientset ping; returns
+503 with per-dependency breakdown on any failure. Add
+`healthcheck:` block to `deploy/docker-compose.yml:24-48`.
+Source: `.context/audits/2026-06-10-3-production-readiness.md`
+item 5. Estimate: 1 day.
+
+---
+
+### P0 — `deploy/docker-compose.yml` maturity (audit #3, item 6)
+
+Add `mem_limit` / `cpus` on every service. Add `healthcheck:`
+on the app container. Move hard-coded creds to env-var-only
+(`LDAP_ADMIN_PASSWORD`, `APP__JWT_SECRET`). Enable mTLS
+by default in prod. Add `scripts/backup-postgres.sh`
+that does `pg_dump` to a dated file plus an S3 upload
++ restore drill. Source: `.context/audits/2026-06-10-3-production-readiness.md`
+item 6. Estimate: 1 day compose + 1 day backup script.
+
+---
+
+### P1 — Service catalog on-call + runbook write UI (audit #2, item 11)
+
+Backend models, repository, and CurrentOnCall/ListRunbook
+all exist. **No HTTP routes are registered** for the
+writes. Services.tsx renders the embedded oncall +
+runbook read-only. This is a real product gap; on-call
+rotation is a feature headline.
+
+Add `POST/DELETE /api/v1/services/:id/oncall` and
+`POST/DELETE /api/v1/services/:id/runbook` + UI buttons.
+Source: `.context/audits/2026-06-10-2-frontend-backend-gaps.md`
+item 11. Estimate: 1 day.
+
+---
+
+### P1 — K8s pod log streaming inside the cluster modal (audit #2, item 3)
+
+`/api/v1/k8s/clusters/:id/pods/:namespace/:pod/logs[/{stream,sse}]`
+endpoints exist (WS + SSE + one-shot). K8sClusters.tsx
+shows pods but no "Logs" action. Drill-in from pod row →
+log viewer. Source: `.context/audits/2026-06-10-2-frontend-backend-gaps.md`
+item 3. Estimate: 2 days for WS panel; SSE version faster.
+
+---
+
+### P1 — K8s pod exec ("Shell into pod") UI (audit #2, item 1)
+
+`POST /api/v1/k8s/clusters/:id/namespaces/:ns/pods/:pod/exec`
+endpoints exist end-to-end. No frontend page calls it.
+K8sClusters.tsx renders pods but no row has a "Shell" or
+"Exec" action. xterm.js terminal widget. Source:
+`.context/audits/2026-06-10-2-frontend-backend-gaps.md`
+item 1. Estimate: 2-3 days.
+
+---
+
+### P1 — K8s log persistence (audit #1, item 1)
+
+`k8s-pod-log-streaming` requires every K8s pod line to
+land in `log_entries` via `logsService.CreateLogEntry`.
+Not implemented. Operators lose every K8s log line the
+moment it scrolls past the WS buffer.
+
+Wire `internal/k8s/logstream/service.go:Stream` to call
+`logsService.CreateLogEntry`. Source: `.context/audits/2026-06-10-1-spec-coverage.md`
+item 1. Estimate: 1-2 days.
+
+---
+
+### P1 — Middleware chain order + CORS (audit #4, item 1, audit #1 item 3)
+
+`CORS → Recovery → Logging → Metrics → Auth → RBAC` order
+mandated by the spec; current runtime is
+`Recovery → Tracing → Metrics → Auth` (no CORS at all
+in the chain). X-Trace-Id missing on 404 paths because
+the NoRoute handler runs outside the tracing middleware.
+Source: `.context/audits/2026-06-10-4-architecture.md`
+and `.context/audits/2026-06-10-1-spec-coverage.md`.
+Estimate: 1 day.
+
+---
+
+### P1 — `monitor_loop.go` graceful shutdown (audit #4, item 1)
+
+`internal/physicalhost/monitor_loop.go:56-72` is started
+with `context.Background()` in `main.go:542`. On SIGTERM
+the loop is not cancelled before `srv.Shutdown(ctx)`
+returns. On a 200-host fleet the per-host 5s sequential
+check holds for 1000s+ after shutdown. No rate limiting
+beyond per-host 5s. No Prometheus metric for
+`loop_iterations_total`, `loop_errors_total`.
+
+Move to `signal.NotifyContext` shared with the HTTP
+server. Add a single Counter + Gauge to
+`internal/observability/metrics.go`. Source:
+`.context/audits/2026-06-10-4-architecture.md` item 1.
+Estimate: 1 day.
+
+---
+
+### P2 — `writeAPIError` consolidation (audit #4, item 5)
+
+Eight near-identical `writeAPIError` helpers across
+modules. Move into `internal/handler/response.go` as
+`handler.WriteAPIError(w, err)`. Source:
+`.context/audits/2026-06-10-4-architecture.md` item 5.
+Estimate: 1 hr.
+
+---
+
+### P2 — `database.MapNotFound` helper (audit #4, item 5)
+
+11 places do `if errors.Is(err, gorm.ErrRecordNotFound) { return nil, ErrNotFound }`.
+One helper. Source: `.context/audits/2026-06-10-4-architecture.md`
+item 5. Estimate: 30 min.
+
+---
+
+### P2 — Dev-default secrets → single const block (audit #4, item 6)
+
+`APP_JWT_SECRET` default at main.go:354, 926 (TWO
+places), `K8S_CRYPTO_KEY` at 643, `INFLUX_*` at 506-518,
+`LOG_STORAGE_DIR` at 870, `PROBER_*` at 288-319. Extract
+to one const block + `envOrWarn` helper. Source:
+`.context/audits/2026-06-10-4-architecture.md` item 6.
+Estimate: 1 file, ~30 lines.
+
+---
+
+### P2 — K8s `Client` interface split (audit #4, item 3)
+
+`internal/k8s/client.go:139-178` — 6 methods, all
+consumed by the same Service. The `servicecatalog`
+walker already narrows via inline adapter. Split into
+`Lister` (List* + Ping), `LogReader` (GetLogsBySelector),
+`Exec` (ExecInPod). Source: `.context/audits/2026-06-10-4-architecture.md`
+item 3. Estimate: 2-3 hr + test updates.
+
+---
+
+### P2 — Layering cracks in 3 packages (audit #4, item 2)
+
+`internal/servicecatalog/handler.go:183,190` reaches
+`h.cat.repo` directly (2 sites, 30 min). `internal/project/handler.go:198`
+reaches `h.repo` once (15 min). `internal/physicalhost/handler.go`
+reaches `h.repo` 8 times (1 day for a Service).
+Source: `.context/audits/2026-06-10-4-architecture.md` item 2.
+Estimate: 3-5 days for the full sweep, or 1 hr to document
+the exception.
+
+---
+
+### P3 — `/devops-toolkit` 49 MB binary in repo (audit #4, item 7)
+
+Add to `.gitignore`, `git rm`. Source: `.context/audits/2026-06-10-4-architecture.md`
+item 7. Estimate: 1 min.
+
+---
+
+### P3 — Untracked `internal/k8s/registry.go` (audit #4 stray files)
+
+`registry.go` and `registry_test.go` are referenced from
+`main.go` but untracked. `git add` them. Estimate: 1 min.
+
+---
+
+### P3 — Dashboard `?status=open` silently ignored (audit #2 small bug)
+
+`alerts/handler.go:344-372` reads `state` not `status`.
+The "open alerts" count on the dashboard is always 0.
+5-min fix. Source: `.context/audits/2026-06-10-2-frontend-backend-gaps.md`
+end-of-list small bug.
+
+---
+
+### P3 — Concurrency bugs (audit #4 smaller findings)
+
+- `Hub.Publish` TOCTOU on second channel send (hub.go:202-216).
+  30 min.
+- `BufferedEmitter` drain race (emitter.go:177-201). 2 hr.
+- No concurrent-access test for `defaultRegistry`. 30 min.
+
+---
+
+### P3 — Configuration secrets masking list incomplete (audit #4 config)
+
+`(*Config).String()` masks only `password`; misses
+`kubeconfig`, `bind_password`, `token`, `secret`. Move the
+set of names to `pkg/logger`. 1 hr.
+
+---
+
+### P3 — Run promtool check rules pre-merge on alert YAMLs (audit #1)
+
+`deploy/prometheus/rules/catalog-degraded.yml` was not run
+through `promtool check rules`. PromQL silently accepts
+typoes. 15 min CC (install promtool in CI).
+
+---
 
 ## Completed
 
-### P2 — Wire KubeClient.GetLogsBySelector + ExecInPod to HTTP layer
+### Audit reports persisted 2026-06-10
 
-**Completed:** 2026-06-10 (commit `9382c56d`)
-
-**Shipped (single atomic commit, two parallel subagents):**
-- `GET /api/v1/k8s/clusters/:clusterID/namespaces/:ns/logs`
-  route that fans out via `KubeClient.GetLogsBySelector`.
-  Required `labelSelector`, optional `container` / `tail`
-  (1-1000, default 100) / `since` (RFC3339, capped at
-  30d via `logstream.MaxSinceWindow`). 10 new tests in
-  `internal/k8s/logs_handler_test.go`.
-- `POST /api/v1/k8s/clusters/:clusterID/namespaces/:ns/pods/:pod/exec`
-  route that calls `KubeClient.ExecInPod`. Spec wire shape
-  `{command, container, timeout_seconds?}` ->
-  `{exit_code, stdout_lines, stderr_lines, duration_ms}`.
-  Replaces the 403 stub. The `feature_k8s_exec` flag,
-  `Service.Exec` stub, and `ExecResult` legacy type are
-  retired. 9 new handler tests + 3 new service tests.
-- 6 new `contracts.ErrorCode` constants for the spec's
-  error code surface.
-- `:id` -> `:clusterID` URL param rename across all k8s
-  routes (non-API-breaking; URL param names are not part
-  of the HTTP contract; required by Gin's same-name-
-  wildcard conflict check).
-
-**Coordination note:** the two subagents ran in parallel
-and their changes interlocked — Agent 2 (ExecInPod) had
-to rename the existing `:id` to `:clusterID` to satisfy
-Gin so Agent 1 (GetLogsBySelector) could add its new
-route under the same prefix. The rename is in
-`internal/k8s/handler.go` (param + 4 handler bodies).
-
----
-
-### P3 — Run the load test against a live binary, capture baseline numbers
-
-**Completed:** 2026-06-10 (short `2d650276`)
-
-**Shipped:** `tests/load/baseline.md` with three run levels
-(50/100/200 VUs) against a fresh sqlite binary. **p95 list
-never exceeds 11ms** (SLO is 500ms — 45-80x headroom), zero
-errors across 20,000 requests. Reproducer command in the
-baseline file's "How to reproduce" section.
-
-**Side correction:** the earlier P3-ExecInPod item was
-miswritten — the `k8s-pod-log-streaming` spec does NOT
-actually mention exec. ExecInPod is a separate operator
-capability (kubectl exec) that would belong in its own spec;
-not v0.2 work. Removed from the TODO list rather than
-silently dropped.
-
----
-
-### P2 — Service health gauge metric + dashboard panel
-
-**Completed:** 2026-06-10 (commit `2d650276`)
-
-**Shipped:** `internal/servicecatalog/metrics.go` (gauge +
-counter + Record + Reset), wired into `Handler.Health()` after
-every rollup and `Handler.Delete()` to drop stale series.
-`main.go`: `buildRouter` now returns the observability Metrics
-so `registerServiceCatalogRoutes` can register the catalog
-gauges on the same /metrics endpoint. 10 unit tests covering
-the enum mapping, nil-safety, gauge overwrite, counter
-accumulation, partial-delete, and gather-payload health. 3
-new Grafana panels: per-service status (color-coded
-gray/green/red), rollup rate by status, rollup rate by signal
-source.
+`/mnt/devops/.context/audits/2026-06-10-{1,2,3,4}-*.md` —
+4 full audit reports (spec coverage, frontend/backend gaps,
+production-readiness, architecture). Captured 2026-06-10
+as the v0.2.0.0 baseline; future /retro runs should
+sample the open-item list to measure progress.
 
