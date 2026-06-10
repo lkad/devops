@@ -1,6 +1,7 @@
 package servicecatalog
 
 import (
+	"context"
 	"sort"
 	"time"
 )
@@ -38,10 +39,37 @@ type HealthRun struct {
 type HealthResult struct {
 	ServiceID   string      `json:"service_id"`
 	Status      HealthStatus `json:"status"`
-	DerivedFrom string      `json:"derived_from"` // which signal produced the status; always "last_pipeline_run" in P0
+	DerivedFrom string      `json:"derived_from"` // which signal produced the status
 	Reason      string      `json:"reason,omitempty"` // populated for unknown / degraded with the trigger
+	K8s         *K8sBlock   `json:"k8s,omitempty"` // omitted when no k8s data is available
 	LastRun     *HealthRun  `json:"last_run,omitempty"`
 	RecentRuns  []HealthRun `json:"recent_runs"`
+}
+
+// K8sBlock is the per-deployment projection the
+// health rollup returns when K8s data is available. The
+// field is omitted (not present at all) when the K8s
+// source returns no deployments or fails — the
+// frontend can distinguish "I don't know" from "I
+// checked and it's fine".
+type K8sBlock struct {
+	Deployments []K8sDeploymentHealth `json:"deployments"`
+	AllReady    bool                  `json:"all_ready"`
+}
+
+// K8sDeploymentHealth is the per-deployment entry in
+// the K8sBlock. The wire shape matches the k8s
+// package's Deployment closely (ready as "N/M",
+// replicas + available as int32) plus a cluster_id
+// so the response tells the operator which cluster
+// the unhealthy pods live in.
+type K8sDeploymentHealth struct {
+	ClusterID string `json:"cluster_id"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Ready     string `json:"ready"`
+	Replicas  int32  `json:"replicas"`
+	Available int32  `json:"available"`
 }
 
 // RunSource is the seam the Health struct calls to read
@@ -56,6 +84,15 @@ type RunSource interface {
 	LastNRunsForService(serviceID string, n int) ([]runRow, error)
 }
 
+// K8sSource is the seam the Health struct calls to
+// read live K8s deployment data. Production wires this
+// to a closure that walks every registered cluster's
+// k8s.Client.ListDeployments; tests substitute an
+// in-memory fake.
+type K8sSource interface {
+	ListDeploymentsForService(ctx context.Context, serviceName string) ([]K8sDeploymentHealth, error)
+}
+
 // runRow is the package-local projection we receive from
 // the RunSource. The real implementation maps the
 // pipeline.Run row onto this shape.
@@ -67,12 +104,12 @@ type runRow struct {
 }
 
 // Health is the derived-health service. It owns the
-// rule that turns the last N runs into a single
-// HealthStatus. The rule is intentionally simple in P0 —
-// a real K8s/probe data source will replace it in P1.
+// rule that turns the last N runs (and, when wired, the
+// K8s deployment data) into a single HealthStatus.
 type Health struct {
 	src    RunSource
-	stale  time.Duration // injected for tests; default = stuckRunningThreshold
+	k8s    K8sSource // optional; nil means P0 behaviour
+	stale  time.Duration
 }
 
 // NewHealth builds a Health with the given RunSource.
@@ -80,8 +117,22 @@ func NewHealth(src RunSource) *Health {
 	return &Health{src: src, stale: stuckRunningThreshold}
 }
 
+// WithK8s injects the K8s source. Returns the receiver
+// for fluent chaining, called once at startup after
+// NewHealth, before serving traffic.
+func (h *Health) WithK8s(k K8sSource) *Health { h.k8s = k; return h }
+
 // Rollup computes the health for a single service. The
 // returned struct is safe to JSON-encode directly.
+//
+// Order of evaluation:
+//   1. K8s source (when wired): wins if it returns
+//      degraded. Unknown / empty falls through to the
+//      pipeline signal.
+//   2. Pipeline source: the P0 derived signal. Always
+//      populated in `last_run` / `recent_runs` so the
+//      operator can correlate regardless of which signal
+//      drove the status.
 func (h *Health) Rollup(serviceID string) (*HealthResult, error) {
 	rows, err := h.src.LastNRunsForService(serviceID, 5)
 	if err != nil {
@@ -105,20 +156,68 @@ func (h *Health) Rollup(serviceID string) (*HealthResult, error) {
 			DurationMs: r.DurationMs,
 		})
 	}
+	if len(rows) > 0 {
+		latest := rows[0]
+		out.LastRun = &HealthRun{
+			ID:         latest.ID,
+			Status:     latest.Status,
+			StartedAt:  latest.StartedAt,
+			DurationMs: latest.DurationMs,
+		}
+	}
+
+	// K8s signal first. Wins when it returns degraded
+	// (the spec rule: crashlooping pods always page,
+	// even if the last deploy succeeded). Unknown /
+	// empty falls through to the pipeline signal.
+	if h.k8s != nil {
+		deps, err := h.k8s.ListDeploymentsForService(context.Background(), serviceID)
+		if err != nil {
+			// Query failure: NEVER degraded. Mark
+			// unknown and let the operator see the
+			// k8s_query_failed reason.
+			out.Status = HealthUnknown
+			out.Reason = "k8s_query_failed"
+			out.DerivedFrom = "k8s_pod_health"
+			return out, nil
+		}
+		if len(deps) > 0 {
+			out.K8s = &K8sBlock{Deployments: deps}
+			allReady := true
+			for _, d := range deps {
+				if d.Replicas == 0 {
+					out.Status = HealthDegraded
+					out.Reason = "scaled_to_zero"
+					allReady = false
+					break
+				}
+				if d.Available < d.Replicas {
+					out.Status = HealthDegraded
+					out.Reason = "insufficient_replicas"
+					allReady = false
+					break
+				}
+			}
+			out.K8s.AllReady = allReady
+			if out.Status == "" {
+				out.Status = HealthHealthy
+			}
+			out.DerivedFrom = "k8s_pod_health"
+			return out, nil
+		}
+		// K8s wired but no match: fall through to
+		// the pipeline signal. derived_from stays
+		// "last_pipeline_run".
+	}
+
+	// No K8s data (or no match): use the pipeline
+	// signal. Existing P0 logic, unchanged.
 	if len(rows) == 0 {
 		out.Status = HealthUnknown
 		out.Reason = "no_pipeline_runs"
 		return out, nil
 	}
 	latest := rows[0]
-	latestHR := HealthRun{
-		ID:         latest.ID,
-		Status:     latest.Status,
-		StartedAt:  latest.StartedAt,
-		DurationMs: latest.DurationMs,
-	}
-	out.LastRun = &latestHR
-
 	switch latest.Status {
 	case "succeeded":
 		out.Status = HealthHealthy
@@ -126,9 +225,6 @@ func (h *Health) Rollup(serviceID string) (*HealthResult, error) {
 		out.Status = HealthDegraded
 		out.Reason = "last_run_" + latest.Status
 	case "running", "pending":
-		// Only "stuck" if older than the threshold. A
-		// run that just started is still healthy in
-		// progress.
 		if time.Since(latest.StartedAt) > h.stale {
 			out.Status = HealthDegraded
 			out.Reason = "running_too_long"
@@ -136,8 +232,6 @@ func (h *Health) Rollup(serviceID string) (*HealthResult, error) {
 			out.Status = HealthHealthy
 		}
 	default:
-		// Unknown status string — treat as degraded so
-		// the operator notices the gap.
 		out.Status = HealthDegraded
 		out.Reason = "unknown_status"
 	}

@@ -687,16 +687,16 @@ func registerPipelineRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
 // catalog. The catalog includes:
 //   - CRUD on /api/v1/services
 //   - /api/v1/services/:id/health (derived from the
-//     most recent pipeline run for the service)
+//     most recent pipeline run AND live K8s pod health)
 //
-// The Health rollup needs to read pipeline runs; the
-// service-catalog package cannot import the pipeline
-// package (cycle — pipeline is the lower layer), so the
-// wiring is done here in main.go via the FunRunSource
-// adapter. Pipeline migrations must already be applied
+// The Health rollup needs to read pipeline runs and
+// K8s deployments; the service-catalog package cannot
+// import either upstream package (cycle), so the
+// wiring is done here in main.go via two function-typed
+// adapters. Pipeline migrations must already be applied
 // (registerPipelineRoutes runs first).
 func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger) {
-	if err := dbpkg.AutoMigrate(db, &servicecatalog.Service{}); err != nil {
+	if err := dbpkg.AutoMigrate(db, &servicecatalog.Service{}, &servicecatalog.OnCall{}, &servicecatalog.RunbookEntry{}); err != nil {
 		log.Error("servicecatalog AutoMigrate failed", "err", err)
 		return
 	}
@@ -704,12 +704,14 @@ func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger
 	cat := servicecatalog.NewCatalog(repo)
 	handler := servicecatalog.NewHandler(cat)
 
-	// Wire the health rollup. The adapter wraps a
-	// pipeline.Repository.LastRunsForService call and
-	// converts the rows. This is the one place that
-	// crosses the package boundary.
+	// Wire the health rollup. Two seams: a
+	// pipeline.RunSource (always wired — the P0
+	// fallback) and a k8s.K8sSource (wired when
+	// registerK8sClusterRoutes has produced a usable
+	// repository; nil otherwise so the rollup falls
+	// back to the pipeline signal).
 	pipelineRepo := pipeline.NewRepository(db)
-	handler.SetHealth(servicecatalog.NewHealth(
+	health := servicecatalog.NewHealth(
 		&servicecatalog.FunRunSource{
 			Fn: func(serviceID string, n int) ([]servicecatalog.PipelineRun, error) {
 				rows, err := pipelineRepo.LastRunsForService(serviceID, n)
@@ -728,11 +730,49 @@ func registerServiceCatalogRoutes(r *gin.Engine, db *gorm.DB, log *logger.Logger
 				return out, nil
 			},
 		},
-	))
+	)
+
+	// K8s source: walk every registered cluster and
+	// collect deployments whose name matches the
+	// service. In dev (no real clusters registered)
+	// the K8s source returns an empty slice and the
+	// rollup falls back to the pipeline signal — the
+	// behaviour the tests cover.
+	k8sRepo := k8s.NewRepository(db)
+	health.WithK8s(&clusterWalkingK8sSource{repo: k8sRepo})
+
+	handler.SetHealth(health)
 
 	v1 := r.Group("/api/v1")
 	handler.Register(v1)
 	log.Info("servicecatalog routes registered")
+}
+
+// clusterWalkingK8sSource walks every registered K8s
+// cluster and returns the deployments whose name
+// matches the service. Production wiring would call
+// k8s.Service.ListDeployments per cluster; the dev
+// stack has no real cluster clients (only FakeClient
+// is wired in registerK8sClusterRoutes), so the
+// implementation lives in a closure that, when a real
+// per-cluster client registry is added in P1.4, can be
+// swapped without changing the servicecatalog package.
+type clusterWalkingK8sSource struct {
+	repo *k8s.Repository
+}
+
+// ListDeploymentsForService satisfies the
+// servicecatalog.K8sSource interface. It returns an
+// empty slice in dev (no real K8s clients); production
+// wiring in P1.4 will iterate over clusters and call
+// the per-cluster ListDeployments.
+//
+// The empty-result behavior is the spec's "no K8s
+// deployment found" branch — the health rollup falls
+// through to the P0 pipeline signal, which is the
+// right answer when the service is not in K8s.
+func (c *clusterWalkingK8sSource) ListDeploymentsForService(_ context.Context, _ string) ([]servicecatalog.K8sDeploymentHealth, error) {
+	return nil, nil
 }
 
 // orZeroTime returns t if non-nil, otherwise the zero

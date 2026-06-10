@@ -18,12 +18,19 @@ import (
 // with a Fake executor. The engine exposes the pipeline
 // routes directly; auth / RBAC is tested in a separate layer
 // where it can be exercised against rbac.RequirePermission.
+//
+// The service-catalog validator is wired with a permissive
+// pass-through (any non-empty service_id is accepted) so
+// legacy / unit tests that predate the catalog keep
+// working. The catalog FK rule is exercised in its own
+// test (TestService_Create_RejectsUnknownServiceID).
 func pipelineHandlerFixture(t *testing.T) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	db := openPipelineDB(t)
 	repo := NewRepository(db)
-	svc := NewService(repo, &Fake{})
+	svc := NewService(repo, &Fake{}).
+		WithServiceValidator(func(string) error { return nil })
 	h := NewHandler(svc)
 	r := gin.New()
 	api := r.Group("/api/v1")
@@ -41,7 +48,8 @@ func pipelineHandlerFixtureWithFake(t *testing.T) (*gin.Engine, *Fake) {
 	db := openPipelineDB(t)
 	repo := NewRepository(db)
 	fake := &Fake{}
-	svc := NewService(repo, fake)
+	svc := NewService(repo, fake).
+		WithServiceValidator(func(string) error { return nil })
 	h := NewHandler(svc)
 	r := gin.New()
 	api := r.Group("/api/v1")

@@ -34,7 +34,7 @@ func openTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("db.DB: %v", err)
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&Service{}); err != nil {
+	if err := db.AutoMigrate(&Service{}, &OnCall{}, &RunbookEntry{}); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })

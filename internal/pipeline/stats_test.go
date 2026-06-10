@@ -17,7 +17,8 @@ func sharedFixture(t *testing.T) (*gin.Engine, *Repository) {
 	gin.SetMode(gin.TestMode)
 	db := openPipelineDB(t)
 	repo := NewRepository(db)
-	svc := NewService(repo, &Fake{})
+	svc := NewService(repo, &Fake{}).
+		WithServiceValidator(func(string) error { return nil })
 	h := NewHandler(svc)
 	r := gin.New()
 	api := r.Group("/api/v1")
