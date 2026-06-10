@@ -1,0 +1,95 @@
+# Prometheus alert rules for DevOps Toolkit.
+#
+# Four baseline rules covering the highest-value signals:
+#   - high 5xx rate on the backend
+#   - pipeline failure rate spike
+#   - physical host offline
+#   - alertmanager itself unreachable (the "who watches
+#     the watchers" rule)
+#
+# Every rule carries the contract labels the alertmanager
+# route tree (deploy/alertmanager/alertmanager.yml) keys
+# on:
+#   service   = the devops-toolkit service name
+#   severity  = page | log
+#   alertname = the rule id, also used by group_by
+#
+# Mount into the prometheus container:
+#   volumes:
+#     - ./deploy/prometheus/rules:/etc/prometheus/rules:ro
+
+groups:
+  - name: devops-toolkit.http
+    interval: 30s
+    rules:
+      - alert: high_5xx_rate
+        expr: |
+          sum by (instance) (
+            rate(devops_toolkit_http_requests_total{status=~"5.."}[2m])
+          ) > 1
+        for: 2m
+        labels:
+          service: devops-toolkit
+          severity: page
+        annotations:
+          summary: "high 5xx rate on {{ $labels.instance }}"
+          description: |
+            Backend is serving more than 1 5xx/sec for 2
+            minutes on {{ $labels.instance }}. Check the
+            /metrics endpoint and the recent deploys on
+            the affected service.
+
+  - name: devops-toolkit.pipeline
+    interval: 1m
+    rules:
+      - alert: pipeline_failure_rate
+        expr: |
+          (
+            sum by (pipeline) (increase(pipeline_runs_total{status="failed"}[15m]))
+            /
+            clamp_min(sum by (pipeline) (increase(pipeline_runs_total[15m])), 1)
+          ) > 0.5
+        for: 5m
+        labels:
+          service: devops-toolkit
+          severity: page
+        annotations:
+          summary: "pipeline {{ $labels.pipeline }} failing > 50% of runs"
+          description: |
+            More than half of pipeline runs in the last
+            15 minutes failed. Open the Pipelines page
+            and check the latest run status / logs.
+
+  - name: devops-toolkit.physicalhost
+    interval: 30s
+    rules:
+      - alert: host_offline
+        expr: devops_toolkit_physicalhost_state{state="offline"} == 1
+        for: 5m
+        labels:
+          service: devops-toolkit
+          severity: page
+        annotations:
+          summary: "physical host {{ $labels.host_id }} offline"
+          description: |
+            Probe has been failing for 5 minutes. The host
+            is likely unreachable. Check the PhysicalHosts
+            page and try a manual probe.
+
+  - name: devops-toolkit.meta
+    interval: 30s
+    rules:
+      - alert: alertmanager_down
+        expr: up{job="alertmanager"} == 0
+        for: 2m
+        labels:
+          service: devops-toolkit
+          severity: log
+        annotations:
+          summary: "alertmanager is not reachable from Prometheus"
+          description: |
+            Prometheus has not seen alertmanager for 2
+            minutes. The alertmanager container may be
+            down or network-blocked. This alert itself
+            does not page (a self-page would be a cycle)
+            but should be investigated in business hours.

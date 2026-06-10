@@ -88,9 +88,12 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=7d
+      # Auto-reload on rules change. Takes ~30s.
+      - --web.enable-lifecycle
     ports: ["9090:9090"]
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
 
   # Grafana: dashboards for Loki + Prometheus. Default admin/admin.
   grafana:
@@ -114,7 +117,14 @@ services:
   # config-ci.yaml. Empty receivers by default.
   alertmanager:
     image: prom/alertmanager:latest
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
     ports: ["9093:9093"]
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    environment:
+      # Set in compose override to enable PagerDuty routing.
+      PAGERDUTY_SERVICE_KEY: ${PAGERDUTY_SERVICE_KEY:-}
 
   # LDAP: bitnami/openldap, bootstrap via tests/fixtures/ldap/00-users.ldif.
   ldap:

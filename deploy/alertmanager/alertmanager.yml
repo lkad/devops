@@ -1,0 +1,70 @@
+# alertmanager config for DevOps Toolkit.
+#
+# One global route, one catch-all receiver ("log"), and a
+# PagerDuty stub. Severity labels (set by Prometheus rules
+# in deploy/prometheus/rules/) drive routing:
+#   severity=page -> PagerDuty if PAGERDUTY_SERVICE_KEY is set
+#                  else falls through to log
+#   severity=log  -> the "log" receiver (always on)
+#
+# Mount into the alertmanager container:
+#   volumes:
+#     - ./deploy/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: ""
+  smtp_from: ""
+  smtp_require_tls: false
+
+# Route tree: every alert enters here. group_by is the
+# alerts subsystem's existing label set so dedup works
+# without re-keying in Prometheus.
+route:
+  receiver: log
+  group_by: [service, alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Page-worthy alerts go to PagerDuty when the
+    # operator has set PAGERDUTY_SERVICE_KEY; otherwise
+    # the catch-all (log) catches them.
+    - matchers:
+        - severity = "page"
+      receiver: pagerduty
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 1h
+      continue: false
+    # Log-only alerts (e.g. alertmanager_down) get a
+    # quieter retry cadence.
+    - matchers:
+        - severity = "log"
+      receiver: log
+      repeat_interval: 24h
+
+receivers:
+  # The dev receiver: dump the alert payload to
+  # alertmanager's stdout, visible via
+  # `docker compose logs -f alertmanager`.
+  - name: log
+    webhook_configs:
+      - url: http://localhost:5001/log
+        send_resolved: true
+        max_alerts: 0
+
+  # PagerDuty stub. The service key is left blank in
+  # dev; set PAGERDUTY_SERVICE_KEY in compose to enable.
+  # The stub is intentionally safe to fail to send (no
+  # URL when the key is empty) so dev can boot without
+  # 500s on every alert.
+  - name: pagerduty
+    pagerduty_configs:
+      - routing_key: ""
+        send_resolved: true
+        severity: '{{ .CommonLabels.severity }}'
+        description: '{{ .CommonAnnotations.summary }}'
+        details:
+          service: '{{ .CommonLabels.service }}'
+          alertname: '{{ .CommonLabels.alertname }}'
