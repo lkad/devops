@@ -313,8 +313,26 @@ func buildRouter(log *logger.Logger, _ *health.Checker, corsOrigins []string) (h
 	// Recovery — catches panics in everything downstream
 	// (including the CORS short-circuit and the metrics
 	// middleware). Wraps the rest of the chain so a panic
-	// renders the standard 500 envelope.
-	r.Use(gin.Recovery())
+	// renders the standard 500 envelope. Uses the
+	// project's middleware.Recovery (not stock
+	// gin.Recovery) so the panic value + stack trace
+	// land in the structured log with the same format
+	// as every other request line. The project's
+	// Recovery is nil-log safe so passing log here is
+	// the canonical pattern.
+	r.Use(middleware.Recovery(log))
+
+	// Logger — emits one structured log line per
+	// request (method, path, status, duration_ms,
+	// client_ip, bytes, request_id when set). Must
+	// run AFTER Recovery (so a panic in the handler
+	// chain is still caught) and BEFORE Metrics (so
+	// the Prometheus request-duration histogram
+	// observation includes the Logger's own
+	// measurement time). This matches the spec
+	// ordering CORS → Recovery → Logging → Metrics
+	// → Tracing → Auth.
+	r.Use(middleware.Logger(log))
 
 	// Prometheus instrumentation. The middleware counts every
 	// request by route template + status; the /metrics endpoint
