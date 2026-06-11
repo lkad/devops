@@ -234,6 +234,21 @@ func (c *Config) Validate() error {
 // field whose name matches a sensitive pattern. It is not exhaustive;
 // new sensitive fields must be added here (and to logger.MaskValue's
 // patterns) when introduced.
+//
+// Sensitive fields (audit item: Config.String() masking list
+// incomplete):
+//
+//	Database.Password    → logger.MaskValue("password", ...)
+//	Redis.Password       → logger.MaskValue("password", ...)
+//	Elasticsearch.Password → logger.MaskValue("password", ...)
+//	DevUserEntry.Password  → logger.MaskValue("password", ...)
+//	LDAP.BindPassword    → logger.MaskValue("bind_password", ...)
+//	K8s.KubeconfigPath   → "set" / "unset" (the path itself can
+//	                       leak the operator's home directory).
+//
+// LDAP.BindDN is rendered in cleartext: it is a public-ish identifier
+// (similar to a database user name), not a secret. Operators who want
+// it redacted can rotate the bind DN to a placeholder.
 func (c *Config) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "app={name=%s env=%s host=%s port=%d log_level=%s}\n",
@@ -241,16 +256,46 @@ func (c *Config) String() string {
 	fmt.Fprintf(&b, "database={driver=%s host=%s port=%d user=%s password=%s dbname=%s}\n",
 		c.Database.Driver, c.Database.Host, c.Database.Port, c.Database.User,
 		logger.MaskValue("password", c.Database.Password), c.Database.DBName)
-	fmt.Fprintf(&b, "logs={backend=%s}\n", c.Logs.Backend)
-	fmt.Fprintf(&b, "ldap={url=%s dev_bypass=%v users=%d}\n",
-		c.LDAP.URL, c.LDAP.DevBypass, len(c.LDAP.DevUsers))
+	fmt.Fprintf(&b, "redis={host=%s port=%d password=%s db=%d}\n",
+		c.Redis.Host, c.Redis.Port,
+		logger.MaskValue("password", c.Redis.Password), c.Redis.DB)
+	fmt.Fprintf(&b, "logs={backend=%s elasticsearch.password=%s loki.url=%s}\n",
+		c.Logs.Backend,
+		logger.MaskValue("password", c.Logs.Elasticsearch.Password),
+		c.Logs.Loki.URL)
+	fmt.Fprintf(&b, "ldap={url=%s bind_dn=%s bind_password=%s base_dn=%s dev_bypass=%v users=%d}\n",
+		c.LDAP.URL, c.LDAP.BindDN,
+		logger.MaskValue("bind_password", c.LDAP.BindPassword),
+		c.LDAP.BaseDN, c.LDAP.DevBypass, len(c.LDAP.DevUsers))
 	fmt.Fprintf(&b, "alerts={channels=%d suppression.enable_in_maintenance=%v}\n",
 		len(c.Alerts.Channels), c.Alerts.Suppression.EnableInMaintenance)
-	fmt.Fprintf(&b, "k8s={default_namespace=%s in_cluster=%v}\n",
-		c.K8s.DefaultNamespace, c.K8s.InCluster)
+	// KubeconfigPath is rendered as set/unset rather than the path
+	// itself — the path can leak the operator's $HOME or contain
+	// cluster nicknames they would rather not expose in shared log
+	// aggregators. Operators needing the actual path can read it
+	// off the YAML / env override.
+	kubeconfigState := "unset"
+	if c.K8s.KubeconfigPath != "" {
+		kubeconfigState = "set"
+	}
+	fmt.Fprintf(&b, "k8s={default_namespace=%s in_cluster=%v kubeconfig_path=%s}\n",
+		c.K8s.DefaultNamespace, c.K8s.InCluster, kubeconfigState)
 	fmt.Fprintf(&b, "physicalhost={monitoring_interval=%d ssh_timeout=%d}\n",
 		c.PhysicalHost.MonitoringInterval, c.PhysicalHost.SSHTimeout)
 	fmt.Fprintf(&b, "websocket={ping=%d write=%d read=%d}\n",
 		c.WebSocket.PingInterval, c.WebSocket.WriteTimeout, c.WebSocket.ReadTimeout)
+	// DevUsers is rendered with password masked for each entry. The
+	// username + role are diagnostic; the password is the only field
+	// that must be redacted. The order in the dev_users slice is
+	// preserved so the operator can correlate log lines with the
+	// config file.
+	if len(c.LDAP.DevUsers) > 0 {
+		fmt.Fprintf(&b, "ldap.dev_users=[\n")
+		for _, u := range c.LDAP.DevUsers {
+			fmt.Fprintf(&b, "  {username=%s password=%s role=%s}\n",
+				u.Username, logger.MaskValue("password", u.Password), u.Role)
+		}
+		fmt.Fprintf(&b, "]\n")
+	}
 	return b.String()
 }

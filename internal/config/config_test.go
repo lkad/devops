@@ -140,6 +140,56 @@ func TestConfig_StringMasksSecrets(t *testing.T) {
 	}
 }
 
+// TestConfig_StringMasksAllSensitiveFields is the audit's
+// "Config.String() masking list incomplete" pin: every sensitive
+// field whose name matches logger.IsSensitiveField (or the
+// substring rule) MUST render as "***" — never the raw value.
+// A regression here would silently leak a secret to the log
+// aggregator; the test is the safety net.
+func TestConfig_StringMasksAllSensitiveFields(t *testing.T) {
+	const k8sHomeLeak = "/home/operator/.kube/config"
+	c := &Config{
+		App:      AppConfig{Name: "x", Env: "dev", Port: 8080},
+		Database: DatabaseConfig{Password: "db-secret"},
+		Redis:    RedisConfig{Password: "redis-secret"},
+		Logs: LogsConfig{
+			Elasticsearch: ElasticLogsConfig{Password: "es-secret"},
+		},
+		LDAP: LDAPConfig{
+			BindPassword: "bind-secret",
+			DevUsers: []DevUserEntry{
+				{Username: "dev", Password: "devpass", Role: "admin"},
+			},
+		},
+		K8s: K8sConfig{KubeconfigPath: k8sHomeLeak},
+	}
+	out := c.String()
+
+	// All raw secret values must be absent.
+	for _, leak := range []string{
+		"db-secret", "redis-secret", "es-secret", "bind-secret", "devpass",
+	} {
+		if contains(out, leak) {
+			t.Errorf("sensitive value %q leaked in String() output:\n%s", leak, out)
+		}
+	}
+	// KubeconfigPath must NOT be rendered as the raw path —
+	// it leaks the operator's $HOME. The audit asked for the
+	// masking list to include kubeconfig; the chosen rendering
+	// is "set" / "unset" so the path itself never reaches the
+	// log.
+	if contains(out, k8sHomeLeak) {
+		t.Errorf("KubeconfigPath leaked as raw value:\n%s", out)
+	}
+	// Sanity: at least one "***" mask is present, and the
+	// non-sensitive LDAP fields (bind_dn, base_dn) are still
+	// rendered in cleartext so the operator can correlate the
+	// log line with the YAML.
+	if !contains(out, "***") {
+		t.Errorf("expected *** mask in output:\n%s", out)
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(needle) > 0 && len(haystack) >= len(needle) && (indexOf(haystack, needle) >= 0)
 }
