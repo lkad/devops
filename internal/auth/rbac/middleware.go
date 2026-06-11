@@ -59,6 +59,50 @@ func NewProjectAccessFactory(svc *Service, m caller.MembershipChecker) ProjectAc
 	}
 }
 
+// AnyProjectAccessFactory is the multi-project variant
+// of ProjectAccessFactory. It is the seam the
+// physicalhost module uses for routes whose resource
+// may be linked to any of N projects (e.g. a host
+// linked to multiple host_project_links rows).
+//
+// The factory builds a caller.RequireAnyProjectAccess
+// middleware pre-bound to the membership + permission
+// checkers, and accepts a projectIDsFn that returns
+// the set of candidate project IDs for the request.
+type AnyProjectAccessFactory func(Permission, func(*gin.Context) []string) gin.HandlerFunc
+
+// NewAnyProjectAccessFactory returns an
+// AnyProjectAccessFactory pre-bound to a
+// MembershipChecker and the supplied rbac service.
+// Usage in a handler is symmetric with
+// NewProjectAccessFactory:
+//
+//	projectAny := rbac.NewAnyProjectAccessFactory(
+//	    rbacSvc, projectSvc.MembershipChecker())
+//	r.GET("/physical-hosts/:id",
+//	    viewP, projectAny(rbac.PermissionViewPhysicalHosts,
+//	        func(c *gin.Context) []string { return idsForHost(c) }),
+//	    h.Get)
+func NewAnyProjectAccessFactory(svc *Service, m caller.MembershipChecker) AnyProjectAccessFactory {
+	return func(perm Permission, projectIDsFn func(*gin.Context) []string) gin.HandlerFunc {
+		checker := func(user *contracts.User, projectID string) bool {
+			return svc.HasPermissionInProject(user, projectID, perm)
+		}
+		return caller.RequireAnyProjectAccess(m, checker, projectIDsFn)
+	}
+}
+
+// NoopAnyProjectAccessFactory is the no-op equivalent
+// of NoopProjectAccessFactory. Used in unit tests that
+// build a *Handler.Register on a plain *gin.RouterGroup
+// without exercising the membership / permission check
+// for the multi-project route family.
+func NoopAnyProjectAccessFactory() AnyProjectAccessFactory {
+	return func(Permission, func(*gin.Context) []string) gin.HandlerFunc {
+		return func(c *gin.Context) { c.Next() }
+	}
+}
+
 // NoopProjectAccessFactory is the no-op equivalent of
 // NoopPermFactory for the per-project access seam. It
 // returns a pass-through middleware; useful in unit tests

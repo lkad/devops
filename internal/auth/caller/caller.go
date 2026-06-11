@@ -313,6 +313,68 @@ func RequireProjectAccess(m MembershipChecker, p PermissionChecker, projectIDFn 
 	}
 }
 
+// RequireAnyProjectAccess is the multi-project variant
+// of RequireProjectAccess. It is used by routes whose
+// resource is linked to a SET of projects (e.g. a
+// physical host that may be in any of N projects via
+// the host_project_links table) and where the caller
+// only needs to be a member of ONE of them to be
+// allowed access.
+//
+// projectIDsFn returns the set of project IDs the
+// resource is linked to. An empty slice is treated as
+// "no project links" and 403s the request — the rule
+// is fail-closed: a host that is not linked to any
+// project is invisible to non-SuperAdmin callers.
+//
+// The permission check is the same as
+// RequireProjectAccess: the caller must hold `p` in
+// the resolved project. Membership in a project where
+// the caller does not have the permission is not
+// sufficient.
+//
+// Wiring pattern:
+//
+//	projectAny := caller.RequireAnyProjectAccess(m, p, projectIDsFromHost)
+//	r.GET("/physical-hosts/:id", viewP, projectAny, h.Get)
+func RequireAnyProjectAccess(m MembershipChecker, p PermissionChecker, projectIDsFn func(*gin.Context) []string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cl, ok := FromGin(c)
+		if !ok || cl == nil {
+			abortForbidden(c, "authentication required")
+			return
+		}
+		if cl.IsSuperAdmin() {
+			c.Next()
+			return
+		}
+		var ids []string
+		if projectIDsFn != nil {
+			ids = projectIDsFn(c)
+		}
+		if len(ids) == 0 {
+			abortForbidden(c, "resource is not linked to any project")
+			return
+		}
+		// First match wins: walk the candidate set,
+		// return on the first project the caller is a
+		// member of AND has the required permission.
+		// The membership cache is per-request so this
+		// is one DB round trip, not N.
+		for _, pid := range ids {
+			if !cl.IsMemberOf(c.Request.Context(), pid, m) {
+				continue
+			}
+			if p == nil || !p(cl.User, pid) {
+				continue
+			}
+			c.Next()
+			return
+		}
+		abortForbidden(c, "not a member of any project linked to the resource")
+	}
+}
+
 // fromContextGin is a small adapter so CheckProjectAccess
 // can be called with a *gin.Context's underlying
 // context.Context (which the middleware does NOT expose
