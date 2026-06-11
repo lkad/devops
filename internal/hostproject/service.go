@@ -1,12 +1,15 @@
 package hostproject
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	devicepkg "github.com/devops-toolkit/backend/internal/device"
 	projectpkg "github.com/devops-toolkit/backend/internal/project"
 	"github.com/devops-toolkit/backend/pkg/contracts"
+
+	"github.com/devops-toolkit/backend/internal/audit"
 )
 
 // Service is the business-logic layer for host-project
@@ -18,6 +21,7 @@ import (
 type Service struct {
 	repo       *Repository
 	projectSvc *projectpkg.Service
+	audit      *audit.Service
 	// deviceGetter is a function used to verify a device
 	// exists before linking. We accept a function rather
 	// than a *devicepkg.Repository so the service is
@@ -28,11 +32,19 @@ type Service struct {
 // NewService returns a Service wired with the supplied
 // repository and project service. The deviceGetter is
 // optional; when nil the service falls back to a GORM
-// lookup using the repository's underlying DB.
-func NewService(repo *Repository, projectSvc *projectpkg.Service) *Service {
+// lookup using the repository's underlying DB. The
+// audit service is optional (nil means "no audit
+// emission"); production always wires a real service so
+// v0.2.0.0 P0 #3 audit-trail coverage holds.
+func NewService(repo *Repository, projectSvc *projectpkg.Service, auditSvc ...*audit.Service) *Service {
+	var a *audit.Service
+	if len(auditSvc) > 0 {
+		a = auditSvc[0]
+	}
 	return &Service{
 		repo:       repo,
 		projectSvc: projectSvc,
+		audit:      a,
 	}
 }
 
@@ -50,8 +62,16 @@ func (s *Service) SetDeviceGetter(getter func(id string) (*devicepkg.Device, err
 // Link persists a single (device, project) link. The
 // existence of both the device and the project is checked
 // before the write so a missing row yields a 404, not a
-// 500. A duplicate pair returns a 409.
-func (s *Service) Link(deviceID, projectID, linkedBy string) (HostProjectLink, error) {
+// 500. A duplicate pair returns a 409. The audit emission
+// (resource_link.create) records the (device, project)
+// pair; the linkedBy parameter is the actor (sourced
+// from the JWT in production). The context is variadic so
+// existing callers (which pre-date the audit hooks) keep
+// compiling; production callers should pass the request
+// context so the audit emission carries the right
+// request-scoped values.
+func (s *Service) Link(deviceID, projectID, linkedBy string, ctxArg ...context.Context) (HostProjectLink, error) {
+	ctx := s.ctxOrBackground(ctxArg)
 	if err := s.validateLinkInputs(deviceID, projectID, linkedBy); err != nil {
 		return HostProjectLink{}, err
 	}
@@ -67,13 +87,36 @@ func (s *Service) Link(deviceID, projectID, linkedBy string) (HostProjectLink, e
 		LinkedBy:  linkedBy,
 		LinkedAt:  time.Now().UTC(),
 	}
-	return s.repo.Create(link)
+	created, err := s.repo.Create(link)
+	if err != nil {
+		return HostProjectLink{}, err
+	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionCreate,
+		ResourceType: audit.ResourceResourceLink,
+		ResourceID:   created.DeviceID + ":" + created.ProjectID,
+		ActorID:      linkedBy,
+		Metadata:     audit.JSONMap{"device_id": created.DeviceID, "project_id": created.ProjectID},
+	})
+	return created, nil
 }
 
 // Unlink removes the active (device, project) link. A
-// missing link returns a 404.
-func (s *Service) Unlink(deviceID, projectID string) error {
-	return s.repo.DeleteByDeviceAndProject(deviceID, projectID)
+// missing link returns a 404. The audit emission
+// (resource_link.delete) is best-effort. The context is
+// variadic so existing callers keep compiling.
+func (s *Service) Unlink(deviceID, projectID string, ctxArg ...context.Context) error {
+	ctx := s.ctxOrBackground(ctxArg)
+	if err := s.repo.DeleteByDeviceAndProject(deviceID, projectID); err != nil {
+		return err
+	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionDelete,
+		ResourceType: audit.ResourceResourceLink,
+		ResourceID:   deviceID + ":" + projectID,
+		Metadata:     audit.JSONMap{"device_id": deviceID, "project_id": projectID},
+	})
+	return nil
 }
 
 // BulkLink creates many links in a single call. Duplicate
@@ -81,8 +124,12 @@ func (s *Service) Unlink(deviceID, projectID string) error {
 // device or any missing project aborts the whole call
 // (the caller can split the batch if it wants partial
 // success). Existing (device, project) pairs are silently
-// skipped (idempotent) so retries are safe.
-func (s *Service) BulkLink(deviceID string, projectIDs []string, linkedBy string) ([]HostProjectLink, error) {
+// skipped (idempotent) so retries are safe. Each created
+// link triggers an audit emission (resource_link.create).
+// The context is variadic so existing callers keep
+// compiling.
+func (s *Service) BulkLink(deviceID string, projectIDs []string, linkedBy string, ctxArg ...context.Context) ([]HostProjectLink, error) {
+	ctx := s.ctxOrBackground(ctxArg)
 	if err := s.validateLinkInputs(deviceID, "", linkedBy); err != nil {
 		return nil, err
 	}
@@ -123,14 +170,26 @@ func (s *Service) BulkLink(deviceID string, projectIDs []string, linkedBy string
 			return nil, err
 		}
 		out = append(out, link)
+		s.emitAudit(ctx, audit.RecordActionInput{
+			Action:       audit.ActionCreate,
+			ResourceType: audit.ResourceResourceLink,
+			ResourceID:   link.DeviceID + ":" + link.ProjectID,
+			ActorID:      linkedBy,
+			Metadata:     audit.JSONMap{"device_id": link.DeviceID, "project_id": link.ProjectID, "bulk": true},
+		})
 	}
 	return out, nil
 }
 
 // BulkUnlink removes a set of (device, project) links.
 // Missing pairs are silently skipped (idempotent) so
-// retries after a partial failure are safe.
-func (s *Service) BulkUnlink(deviceID string, projectIDs []string) error {
+// retries after a partial failure are safe. The audit
+// emission (resource_link.delete) covers every removed
+// link so the audit log can replay the full unlink
+// intent. The context is variadic so existing callers
+// keep compiling.
+func (s *Service) BulkUnlink(deviceID string, projectIDs []string, ctxArg ...context.Context) error {
+	ctx := s.ctxOrBackground(ctxArg)
 	for _, pid := range projectIDs {
 		if pid == "" {
 			continue
@@ -141,6 +200,12 @@ func (s *Service) BulkUnlink(deviceID string, projectIDs []string) error {
 			}
 			return err
 		}
+		s.emitAudit(ctx, audit.RecordActionInput{
+			Action:       audit.ActionDelete,
+			ResourceType: audit.ResourceResourceLink,
+			ResourceID:   deviceID + ":" + pid,
+			Metadata:     audit.JSONMap{"device_id": deviceID, "project_id": pid, "bulk": true},
+		})
 	}
 	return nil
 }
@@ -329,4 +394,33 @@ func (s *Service) assertProjectExists(id string) error {
 		return err
 	}
 	return nil
+}
+
+// emitAudit is the single seam between this package and
+// the cross-module audit subsystem. The actor is read
+// from the request context (set by the auth middleware)
+// so the audit trail is forgery-proof; a caller-supplied
+// ActorID is honoured when present (e.g. Link's
+// linkedBy is recorded as ActorID; the JWT subject is
+// the alternate source). A nil audit service is a no-op
+// so unit tests can wire a Service without an audit row
+// in the DB. The emission is best-effort: a failure to
+// record does not roll back the mutation.
+func (s *Service) emitAudit(ctx context.Context, in audit.RecordActionInput) {
+	if s.audit == nil {
+		return
+	}
+	s.audit.RecordAction(ctx, in)
+}
+
+// ctxOrBackground returns the first supplied context, or
+// context.Background() when none was supplied. The
+// variadic-ctx pattern keeps the existing test API
+// (which never passed a context) compiling while still
+// letting production callers pass the request context.
+func (s *Service) ctxOrBackground(args []context.Context) context.Context {
+	if len(args) > 0 && args[0] != nil {
+		return args[0]
+	}
+	return context.Background()
 }

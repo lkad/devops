@@ -165,13 +165,16 @@ func run() error {
 		// inside each module's Register.
 		v1 := eng.Group("/api/v1", authMW.RequireAuth())
 
-		registerProjectRoutes(v1, db, log, perms, rbacSvc)
+		// Audit must be registered before any module that
+		// emits RecordAction so the same audit svc + repo
+		// (one DB table, one emitter, no double writes) is
+		// shared across modules. P0 #3 wires it into
+		// project, hostproject, device, k8s, alerts, logs,
+		// discovery, and servicecatalog.
+		auditSvc, auditRepo := registerAuditRoutes(v1, db, log, perms)
+		registerProjectRoutes(v1, db, log, perms, rbacSvc, auditSvc)
 		registerDeviceRoutes(v1, db, log, perms)
 		wsHub := registerWsHubRoutes(v1, cfg, log, perms)
-		// Audit must be registered before physicalhost so the
-		// physical-host module can share the same audit svc +
-		// repo (one DB table, one emitter, no double writes).
-		auditSvc, auditRepo := registerAuditRoutes(v1, db, log, perms)
 		var hubPublisher realtime.Publisher
 		if wsHub != nil {
 			hubPublisher = realtime.NewHubPublisher(wsHubAdapter{wsHub})
@@ -180,7 +183,7 @@ func run() error {
 		registerAlertsRoutes(v1, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance}, perms)
 		registerDiscoveryRoutes(v1, db, log, perms)
 		k8sSvc := registerK8sClusterRoutes(v1, db, log, perms)
-		registerHostProjectLinkRoutes(v1, db, log, perms, rbacSvc)
+		registerHostProjectLinkRoutes(v1, db, log, perms, rbacSvc, auditSvc)
 		registerPipelineRoutes(v1, db, log, perms)
 		registerServiceCatalogRoutes(v1, db, log, k8sSvc, obs, perms)
 		registerLogsRoutes(v1, db, log, perms)
@@ -609,7 +612,7 @@ func devRoleToGroups(role string) []string {
 // factory is wired from the project service's
 // MembershipChecker (project_pkg.Repository.ListProjectIDsForUser)
 // and the rbac service's HasPermissionInProject.
-func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service) {
+func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service, auditSvc *audit.Service) {
 	if err := dbpkg.AutoMigrate(db,
 		&projectpkg.ProjectType{},
 		&projectpkg.Project{},
@@ -620,7 +623,7 @@ func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger,
 	}
 	repo := projectpkg.NewRepository(db)
 	svc := projectpkg.NewService(repo)
-	h := projectpkg.NewHandler(svc, repo)
+	h := projectpkg.NewHandler(svc, repo, auditSvc)
 	projectAccess := rbacpkg.NewProjectAccessFactory(rbacSvc, svc.MembershipChecker())
 	h.Register(v1, perms, projectAccess)
 	log.Info("project routes registered")
@@ -863,7 +866,7 @@ func registerK8sClusterRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logg
 // for a project. The per-project access factory uses the same
 // MembershipChecker as the project module so a Developer cannot link
 // a device to a project they do not belong to.
-func registerHostProjectLinkRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service) {
+func registerHostProjectLinkRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service, auditSvc *audit.Service) {
 	if err := dbpkg.AutoMigrate(db, hostproject.AllModels()...); err != nil {
 		log.Error("hostproject AutoMigrate failed", "err", err)
 		return
@@ -871,7 +874,7 @@ func registerHostProjectLinkRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger
 	repo := hostproject.NewRepository(db)
 	projectRepo := projectpkg.NewRepository(db)
 	projectSvc := projectpkg.NewService(projectRepo)
-	svc := hostproject.NewService(repo, projectSvc)
+	svc := hostproject.NewService(repo, projectSvc, auditSvc)
 	projectAccess := rbacpkg.NewProjectAccessFactory(rbacSvc, projectSvc.MembershipChecker())
 	hostproject.NewHandler(svc).Register(v1, perms, projectAccess)
 	log.Info("hostproject routes registered")

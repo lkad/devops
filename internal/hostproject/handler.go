@@ -171,7 +171,7 @@ func (h *Handler) linkDeviceProject(c *gin.Context) {
 	// cross-tenant fix replaces in.LinkedBy with the
 	// authenticated user's id.
 	actor := callerFromGin(c)
-	link, err := h.svc.Link(c.Param("id"), in.ProjectID, actor)
+	link, err := h.svc.Link(c.Param("id"), in.ProjectID, actor, c.Request.Context())
 	if err != nil {
 		h.writeAPIError(c, err)
 		return
@@ -183,7 +183,7 @@ func (h *Handler) linkDeviceProject(c *gin.Context) {
 // /devices/:id/projects/:project_id. 204 on success;
 // 404 if the link is missing.
 func (h *Handler) unlinkDeviceProject(c *gin.Context) {
-	if err := h.svc.Unlink(c.Param("id"), c.Param("project_id")); err != nil {
+	if err := h.svc.Unlink(c.Param("id"), c.Param("project_id"), c.Request.Context()); err != nil {
 		h.writeAPIError(c, err)
 		return
 	}
@@ -202,7 +202,7 @@ func (h *Handler) bulkLinkDeviceProjects(c *gin.Context) {
 	// Audit-trail attribution MUST come from the JWT —
 	// see linkDeviceProject for the full rationale.
 	actor := callerFromGin(c)
-	links, err := h.svc.BulkLink(c.Param("id"), in.ProjectIDs, actor)
+	links, err := h.svc.BulkLink(c.Param("id"), in.ProjectIDs, actor, c.Request.Context())
 	if err != nil {
 		h.writeAPIError(c, err)
 		return
