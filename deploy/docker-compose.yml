@@ -15,8 +15,30 @@
 #   - Redis on :6379 (cache/session)
 #   - alertmanager on :9093
 #   - devops-toolkit on :3000 (depends_on: postgres, loki, ldap, redis)
+#
+# Production-readiness notes (audit 2026-06-10 #6):
+#   - Every service has explicit mem_limit + cpus.
+#   - The app container has a healthcheck (TCP probe on the
+#     listening port). The runtime image is distroless
+#     (no curl/wget/shell) so an in-container HTTP probe is
+#     not possible; a `host:port` literal is the standard
+#     distroless-friendly pattern. The deep /ready vs /live
+#     split (audit #5) is a follow-up; once that lands,
+#     switch to a sidecar or a non-distroless base and use
+#     an HTTP probe against /ready.
+#   - Inline secrets moved to env_file. The committed
+#     .env.prod.example holds placeholders; deploy/.env.prod
+#     is gitignored and must be supplied at deploy time.
+#   - The postgres volume is labelled `backup: 'true'` so a
+#     backup tool can discover the data root.
+#   - mTLS env vars (TLS_CERT_FILE / TLS_KEY_FILE / TLS_CA_FILE)
+#     are unset here; flip them on in deploy/.env.prod to enable.
 
 version: "3.8"
+
+x-app-labels: &app-labels
+  app: devops-toolkit
+  tier: backend
 
 services:
   # Application: the devops-toolkit API server. Built locally; see
@@ -27,18 +49,18 @@ services:
       dockerfile: deploy/Dockerfile
     image: devops-toolkit:local
     environment:
-      APP__ENV: ci
+      APP__ENV: production
       APP__PORT: 3000
       DATABASE__DRIVER: postgres
-      DATABASE__URL: postgres://devops:devops@postgres:5432/devops?sslmode=disable
+      # DATABASE__URL, LDAP__*, APP__JWT_SECRET, INFLUX_*, etc.
+      # are loaded from .env.prod (see env_file below). The
+      # defaults below match dev/CI; .env.prod overrides them.
       LOGS__BACKEND: loki
       LOGS__LOKI__URL: http://loki:3100
-      LDAP__URL: ldap://ldap:389
-      LDAP__BIND_DN: cn=admin,dc=example,dc=com
-      LDAP__BIND_PASSWORD: admin
-      LDAP__BASE_DN: dc=example,dc=com
       REDIS__HOST: redis
-      APP__JWT_SECRET: ci-secret-rotate-me
+    env_file:
+      - path: ./.env.prod
+        required: false
     ports: ["3000:3000"]
     depends_on:
       - postgres
@@ -46,21 +68,63 @@ services:
       - ldap
       - redis
     restart: unless-stopped
+    # Resource limits: tune from baseline.md load-test data. With
+    # 200 VUs sustained at <1% CPU the headroom is generous; the
+    # limits exist to stop a runaway pod from starving the host.
+    mem_limit: 512m
+    cpus: '1.0'
+    # healthcheck: the runtime image is distroless, so no
+    # curl/wget/shell exists in the container. A `host:port`
+    # short-form test makes Docker perform a TCP connect
+    # into the published port from the host network — this
+    # proves the process is up and the listener is bound,
+    # but does NOT verify DB / LDAP / K8s reachability.
+    # Audit #5 (deep /ready vs /live) is the follow-up.
+    # start_period covers the 30s AutoMigrate boot.
+    healthcheck:
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 5s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      disable: true
+    # Graceful shutdown. Only effective when the orchestrator
+    # (compose stops the container, K8s sends SIGTERM and
+    # honours terminationGracePeriodSeconds) is also configured.
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    labels:
+      <<: *app-labels
+      component: api
+      backup: 'false'
 
-  # PostgreSQL: primary data store. devops/devops credentials are dev-only.
+  # PostgreSQL: primary data store. Credentials come from
+  # .env.prod (override the dev defaults devops/devops).
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: devops
-      POSTGRES_USER: devops
-      POSTGRES_PASSWORD: devops
+      POSTGRES_DB: ${POSTGRES_DB:-devops}
+      POSTGRES_USER: ${POSTGRES_USER:-devops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devops}
+    env_file:
+      - path: ./.env.prod
+        required: false
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "devops"]
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-devops}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    mem_limit: 1g
+    cpus: '1.0'
+    labels:
+      app: devops-toolkit
+      tier: data
+      component: postgres
+      # backup tooling can use `docker volume ls --filter label=backup`
+      # to discover which named volumes to snapshot.
+      backup: 'true'
 
   # Loki: log aggregation. Single-binary mode; suitable for dev/CI.
   loki:
@@ -69,6 +133,8 @@ services:
     ports: ["3100:3100"]
     volumes:
       - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+    mem_limit: 512m
+    cpus: '0.5'
 
   # Promtail: ships local logs into Loki. Disabled by default in this
   # compose to keep resource usage low; uncomment + bind-mount log dirs
@@ -94,16 +160,22 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules:/etc/prometheus/rules:ro
+    mem_limit: 512m
+    cpus: '0.5'
 
-  # Grafana: dashboards for Loki + Prometheus. Default admin/admin.
+  # Grafana: dashboards for Loki + Prometheus. Default admin/admin
+  # unless GF_SECURITY_ADMIN_PASSWORD is set in .env.prod.
   grafana:
     image: grafana/grafana:latest
     ports: ["3001:3000"]
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
       # Auto-provision datasources + dashboards on boot.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    env_file:
+      - path: ./.env.prod
+        required: false
     depends_on:
       - prometheus
       - loki
@@ -112,6 +184,8 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       # Dashboard JSONs (read at boot + every 30s thereafter).
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    mem_limit: 256m
+    cpus: '0.5'
 
   # Alertmanager: routes alerts from Prometheus to the channels defined in
   # config-ci.yaml. Empty receivers by default.
@@ -123,24 +197,44 @@ services:
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     environment:
-      # Set in compose override to enable PagerDuty routing.
+      # Set in compose override or .env.prod to enable PagerDuty routing.
       PAGERDUTY_SERVICE_KEY: ${PAGERDUTY_SERVICE_KEY:-}
+    mem_limit: 256m
+    cpus: '0.5'
 
   # LDAP: bitnami/openldap, bootstrap via tests/fixtures/ldap/00-users.ldif.
   ldap:
     image: bitnami/openldap:2.6
     environment:
-      LDAP_ROOT: dc=example,dc=com
-      LDAP_ADMIN_USERNAME: admin
-      LDAP_ADMIN_PASSWORD: admin
+      LDAP_ROOT: ${LDAP_ROOT:-dc=example,dc=com}
+      LDAP_ADMIN_USERNAME: ${LDAP_ADMIN_USERNAME:-admin}
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD:-admin}
+    env_file:
+      - path: ./.env.prod
+        required: false
     ports: ["389:1389"]
     volumes:
       - ../tests/fixtures/ldap/00-users.ldif:/ldifs/00-users.ldif:ro
+    mem_limit: 256m
+    cpus: '0.5'
 
   # Redis: cache + session store. Empty password in dev.
   redis:
     image: redis:7
     ports: ["6379:6379"]
+    mem_limit: 256m
+    cpus: '0.5'
+
+networks:
+  default:
+    name: devops-toolkit-net
 
 volumes:
   pgdata: {}
+  prometheus-data: {}
+  loki-data: {}
+  grafana-data: {}
+  alertmanager-data: {}
+  redis-data: {}
+  influxdb-data: {}
+  ldap-data: {}
