@@ -80,22 +80,77 @@ func NewHandler(cfg HandlerConfig) *Handler {
 //
 // perms is the per-route permission factory; pass a no-op
 // factory in unit tests that don't exercise auth.
-func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+//
+// projectAny is the multi-project access factory (built by
+// rbac.NewAnyProjectAccessFactory at route-registration
+// time). The host is project-scoped via the host_project_links
+// table (one or more project IDs); the caller passes if they
+// hold the relevant permission in ANY of those projects. A
+// host that is not linked to any project is fail-closed (the
+// resolver returns []). The list + create routes
+// (/physical-hosts and POST /physical-hosts) are NOT gated
+// here because the URL/body has no host ID at the middleware
+// level; a future iteration can apply list-time filtering in
+// the service layer.
+//
+// The variadic pattern keeps the single-arg call site used by
+// early unit tests compiling unchanged; production wiring
+// passes the real factory.
+func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc, projectAny ...rbac.AnyProjectAccessFactory) {
 	viewP := perms(rbac.PermissionViewPhysicalHosts)
 	writeP := perms(rbac.PermissionWritePhysicalHosts)
 	probeP := perms(rbac.PermissionProbePhysicalHost)
 	maintP := perms(rbac.PermissionMaintenancePhysical)
 	auditP := perms(rbac.PermissionViewAuditLog)
+	// Build the per-permission gates from the factory
+	// closure. The factory itself is `rbac.NewAnyProjectAccessFactory(rbacSvc, m)`
+	// and is wired in main.go; the handler closes over it
+	// to keep the Register signature symmetric with the
+	// other modules' projectAccess gates.
+	var (
+		viewHost, writeHost, probeHost, maintHost, auditHistoryHost gin.HandlerFunc
+	)
+	if len(projectAny) > 0 && projectAny[0] != nil {
+		idsFn := h.hostProjectIDs
+		viewHost = projectAny[0](rbac.PermissionViewPhysicalHosts, idsFn)
+		writeHost = projectAny[0](rbac.PermissionWritePhysicalHosts, idsFn)
+		probeHost = projectAny[0](rbac.PermissionProbePhysicalHost, idsFn)
+		maintHost = projectAny[0](rbac.PermissionMaintenancePhysical, idsFn)
+		auditHistoryHost = projectAny[0](rbac.PermissionViewAuditLog, idsFn)
+	}
 	r.GET("/physical-hosts", viewP, h.List)
 	r.POST("/physical-hosts", writeP, h.Create)
-	r.GET("/physical-hosts/:id", viewP, h.Get)
-	r.PUT("/physical-hosts/:id", writeP, h.Replace)
-	r.DELETE("/physical-hosts/:id", writeP, h.Delete)
-	r.POST("/physical-hosts/:id/probe", probeP, h.Probe)
-	r.GET("/physical-hosts/:id/metrics", viewP, h.Metrics)
-	r.POST("/physical-hosts/:id/maintenance", maintP, h.EnterMaintenance)
-	r.POST("/physical-hosts/:id/maintenance/exit", maintP, h.ExitMaintenance)
-	r.GET("/physical-hosts/:id/maintenance-history", auditP, h.MaintenanceHistory)
+	r.GET("/physical-hosts/:id", viewP, viewHost, h.Get)
+	r.PUT("/physical-hosts/:id", writeP, writeHost, h.Replace)
+	r.DELETE("/physical-hosts/:id", writeP, writeHost, h.Delete)
+	r.POST("/physical-hosts/:id/probe", probeP, probeHost, h.Probe)
+	r.GET("/physical-hosts/:id/metrics", viewP, viewHost, h.Metrics)
+	r.POST("/physical-hosts/:id/maintenance", maintP, maintHost, h.EnterMaintenance)
+	r.POST("/physical-hosts/:id/maintenance/exit", maintP, maintHost, h.ExitMaintenance)
+	r.GET("/physical-hosts/:id/maintenance-history", auditP, auditHistoryHost, h.MaintenanceHistory)
+}
+
+// hostProjectIDs is the projectIDsFn closure the
+// multi-project access middleware uses. It extracts the
+// host id from the URL and delegates to the service's
+// ProjectIDsForHost resolver (which delegates to
+// hostproject.Service.ProjectIDsForDevice). An empty
+// host id or a nil service returns nil so the middleware
+// can fail-closed (the RequireAnyProjectAccess middleware
+// 403s on empty slice).
+func (h *Handler) hostProjectIDs(c *gin.Context) []string {
+	hostID := c.Param("id")
+	if hostID == "" || h.svc == nil {
+		return nil
+	}
+	ids, err := h.svc.ProjectIDsForHost(c.Request.Context(), hostID)
+	if err != nil {
+		// A misconfigured resolver should not silently
+		// grant access. Returning nil trips the
+		// fail-closed path in RequireAnyProjectAccess.
+		return nil
+	}
+	return ids
 }
 
 // hostRequest is the wire shape for POST/PUT /physical-hosts.

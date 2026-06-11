@@ -17,6 +17,19 @@ import (
 type ServiceConfig struct {
 	Repo      *Repository
 	AuditRepo *AuditRepo
+	// ProjectIDsForHost is the optional seam the
+	// per-project access middleware uses to resolve a
+	// host's project set (the host is project-scoped
+	// via the host_project_links table — see
+	// internal/hostproject.Service.ProjectIDsForDevice
+	// for the canonical implementation). A nil
+	// resolver means "per-project access is not
+	// configured"; the handler's middleware treats
+	// that as fail-closed (every host-scoped route
+	// returns 403 for non-SuperAdmin callers) so a
+	// misconfigured deploy does not accidentally
+	// expose cross-tenant host data.
+	ProjectIDsForHost func(hostID string) ([]string, error)
 }
 
 // Service is the framework-agnostic orchestration layer for
@@ -36,20 +49,42 @@ type ServiceConfig struct {
 // handler.go's Handler struct). Service is the
 // "list-with-joins and basic CRUD" companion to those.
 type Service struct {
-	repo      *Repository
-	auditRepo *AuditRepo
+	repo               *Repository
+	auditRepo          *AuditRepo
+	projectIDsForHost  func(hostID string) ([]string, error)
 }
 
 // NewService builds a Service. A nil AuditRepo is tolerated —
 // the maintenance-history route returns 500 only at call time
 // so a misconfigured deploy fails loudly at the route, not at
 // boot. This mirrors the original handler's optional-dep
-// semantics.
+// semantics. A nil ProjectIDsForHost is also tolerated: the
+// per-project access middleware in handler.Register reads it
+// and refuses every host-scoped request in that mode
+// (fail-closed).
 func NewService(cfg ServiceConfig) *Service {
 	return &Service{
-		repo:      cfg.Repo,
-		auditRepo: cfg.AuditRepo,
+		repo:              cfg.Repo,
+		auditRepo:         cfg.AuditRepo,
+		projectIDsForHost: cfg.ProjectIDsForHost,
 	}
+}
+
+// ProjectIDsForHost returns the set of project IDs the host
+// is currently linked to. It is a thin pass-through to the
+// ProjectIDsForHost resolver wired into ServiceConfig; the
+// handler's per-project access middleware calls this once
+// per request (the membership cache in the caller package
+// keeps the actual membership check cheap).
+//
+// A nil resolver returns nil, []. The middleware treats
+// nil/empty as "host is not linked to any project" and
+// fail-closes (403).
+func (s *Service) ProjectIDsForHost(ctx context.Context, hostID string) ([]string, error) {
+	if s.projectIDsForHost == nil {
+		return nil, nil
+	}
+	return s.projectIDsForHost(hostID)
 }
 
 // ListWithDevice returns a page of HostListItem (PhysicalHost
