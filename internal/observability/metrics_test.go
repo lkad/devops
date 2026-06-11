@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -86,4 +87,35 @@ func TestMetrics_UnknownRouteLabelled(t *testing.T) {
 // doesn't depend on the unexported field.
 func promHandlerFor(m *Metrics) http.Handler {
 	return m.Handler()
+}
+
+// TestMetrics_MonitorLoopInstruments asserts the 3 new
+// monitor_loop_* instruments are exposed on /metrics and
+// reflect the loop's "I tried / I errored / I ticked"
+// semantics (audit item 1 follow-up).
+func TestMetrics_MonitorLoopInstruments(t *testing.T) {
+	m := New()
+	m.IncMonitorLoopIteration()
+	m.IncMonitorLoopIteration()
+	m.IncMonitorLoopError("host-42")
+	m.IncMonitorLoopError("host-42")
+	m.IncMonitorLoopError("host-7")
+	m.SetMonitorLoopLastTick(time.Unix(1_700_000_000, 0))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	m.Handler().ServeHTTP(w, req)
+	body := w.Body.String()
+
+	wantSubstrings := []string{
+		`devops_toolkit_monitor_loop_iterations_total 2`,
+		`devops_toolkit_monitor_loop_errors_total{host_id="host-42"} 2`,
+		`devops_toolkit_monitor_loop_errors_total{host_id="host-7"} 1`,
+		`devops_toolkit_monitor_loop_last_tick_timestamp_seconds 1.7e+09`,
+	}
+	for _, s := range wantSubstrings {
+		if !strings.Contains(body, s) {
+			t.Errorf("metrics body missing %q\n--- body ---\n%s", s, body)
+		}
+	}
 }

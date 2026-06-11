@@ -209,3 +209,52 @@ func (r *Repository) ListRunbook(serviceID string) ([]RunbookEntry, error) {
 	}
 	return rows, nil
 }
+// (additional methods appended below)
+
+// DeleteOnCall removes an on-call rotation row by ID.
+// Returns ErrNotFound (possibly wrapped) when the row is
+// missing. The handler maps that to a 404.
+func (r *Repository) DeleteOnCall(id string) error {
+	res := r.db.Delete(&OnCall{}, "id = ?", id)
+	if res.Error != nil {
+		return fmt.Errorf("servicecatalog.DeleteOnCall: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// HasOverlappingOnCall reports whether any existing
+// on-call row for serviceID overlaps [start, end). The
+// overlap rule is the standard interval test:
+// existing.start < new.end AND existing.end > new.start.
+// The service layer wraps a true return in ErrConflict
+// so the handler can return 409.
+func (r *Repository) HasOverlappingOnCall(serviceID string, start, end time.Time) (bool, error) {
+	if !end.After(start) {
+		return false, fmt.Errorf("servicecatalog.HasOverlappingOnCall: end <= start")
+	}
+	var count int64
+	if err := r.db.Model(&OnCall{}).
+		Where("service_id = ?", serviceID).
+		Where("shift_start < ? AND shift_end > ?", end, start).
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("servicecatalog.HasOverlappingOnCall: %w", err)
+	}
+	return count > 0, nil
+}
+
+// DeleteRunbook removes a runbook entry by ID. Returns
+// ErrNotFound (possibly wrapped) when the row is missing;
+// the handler maps that to a 404.
+func (r *Repository) DeleteRunbook(id string) error {
+	res := r.db.Delete(&RunbookEntry{}, "id = ?", id)
+	if res.Error != nil {
+		return fmt.Errorf("servicecatalog.DeleteRunbook: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

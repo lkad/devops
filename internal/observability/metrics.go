@@ -1,8 +1,11 @@
 // Package observability provides Prometheus export for the
-// DevOps Toolkit backend. It exports three signals:
+// DevOps Toolkit backend. It exports five signals:
 //
 //   - http_requests_total  (counter, by route + status)
 //   - http_request_duration_seconds (histogram, by route)
+//   - monitor_loop_iterations_total (counter)
+//   - monitor_loop_errors_total (counter, by host_id)
+//   - monitor_loop_last_tick_timestamp_seconds (gauge)
 //   - go runtime metrics   (default collectors, goroutines, memstats, etc.)
 //
 // The package is intentionally minimal: callers wire the
@@ -26,9 +29,21 @@ import (
 // Metrics is the registry + instruments. The zero value is
 // not usable; construct with New.
 type Metrics struct {
-	reg              *prometheus.Registry
-	requestsTotal    *prometheus.CounterVec
-	requestDuration  *prometheus.HistogramVec
+	reg             *prometheus.Registry
+	requestsTotal   *prometheus.CounterVec
+	requestDuration *prometheus.HistogramVec
+	// monitorLoopIterations: total number of monitor-loop
+	// ticks (one per periodic pass over the host set).
+	monitorLoopIterations prometheus.Counter
+	// monitorLoopErrors: per-host check failures, labelled by
+	// host_id so an operator can see WHICH host is flapping.
+	// host_id has bounded cardinality (one row per physical
+	// host) so this is safe to keep as a label.
+	monitorLoopErrors *prometheus.CounterVec
+	// monitorLoopLastTick: unix-seconds of the start of the
+	// most recent tick. A stale value (older than 2*Tick)
+	// means the loop is wedged.
+	monitorLoopLastTick prometheus.Gauge
 }
 
 // New builds a Metrics with a fresh registry (default Go
@@ -62,8 +77,33 @@ func New() *Metrics {
 			},
 			[]string{"route", "method"},
 		),
+		monitorLoopIterations: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "devops_toolkit",
+				Subsystem: "monitor_loop",
+				Name:      "iterations_total",
+				Help:      "Total number of physical-host monitor-loop ticks.",
+			},
+		),
+		monitorLoopErrors: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "devops_toolkit",
+				Subsystem: "monitor_loop",
+				Name:      "errors_total",
+				Help:      "Total physical-host monitor-loop check failures, labelled by host_id.",
+			},
+			[]string{"host_id"},
+		),
+		monitorLoopLastTick: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Namespace: "devops_toolkit",
+				Subsystem: "monitor_loop",
+				Name:      "last_tick_timestamp_seconds",
+				Help:      "Unix-seconds of the start of the most recent physical-host monitor-loop tick.",
+			},
+		),
 	}
-	reg.MustRegister(m.requestsTotal, m.requestDuration)
+	reg.MustRegister(m.requestsTotal, m.requestDuration, m.monitorLoopIterations, m.monitorLoopErrors, m.monitorLoopLastTick)
 	return m
 }
 
@@ -105,4 +145,25 @@ func (m *Metrics) Middleware() gin.HandlerFunc {
 		m.requestsTotal.WithLabelValues(route, c.Request.Method, status).Inc()
 		m.requestDuration.WithLabelValues(route, c.Request.Method).Observe(time.Since(start).Seconds())
 	}
+}
+
+// IncMonitorLoopIteration bumps the per-tick counter. Called
+// at the START of every monitor-loop pass so the counter
+// reflects "ticks attempted" not "ticks completed".
+func (m *Metrics) IncMonitorLoopIteration() {
+	m.monitorLoopIterations.Inc()
+}
+
+// SetMonitorLoopLastTick records the wall-clock of the most
+// recent tick. A stale value (older than 2*Tick) is the
+// signal that the loop is wedged.
+func (m *Metrics) SetMonitorLoopLastTick(t time.Time) {
+	m.monitorLoopLastTick.Set(float64(t.Unix()))
+}
+
+// IncMonitorLoopError bumps the per-host error counter. The
+// host_id label keeps cardinality bounded (one row per
+// physical host in physical_hosts).
+func (m *Metrics) IncMonitorLoopError(hostID string) {
+	m.monitorLoopErrors.WithLabelValues(hostID).Inc()
 }

@@ -14,7 +14,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
-import { apiPost, apiDelete } from '../api/client';
+import { apiPost, apiDelete, apiGet } from '../api/client';
 import { formatApiError } from '../api/errors';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
@@ -137,6 +137,11 @@ export function Services() {
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // detailTick bumps whenever the detail's embedded
+  // oncall + runbook need a fresh fetch (after a
+  // write). Passed down to ServiceDetail so it can
+  // re-key its useApi on the GET /services/:id call.
+  const [detailTick, setDetailTick] = useState(0);
   const { push: toast } = useToast();
 
   // Auto-select first service.
@@ -245,6 +250,17 @@ export function Services() {
                 setSelectedId(null);
                 reload();
               }}
+              onChanged={() => {
+                // Re-fetch the list so the embedded
+                // oncall + runbook in the cached GET
+                // response is current. reload() refires
+                // the list query; we additionally
+                // re-fetch the single service so the
+                // detail's useApi cache is in sync.
+                reload();
+                setDetailTick((n) => n + 1);
+              }}
+              tick={detailTick}
             />
           ) : (
             <EmptyState
@@ -326,16 +342,37 @@ function ServiceRow({
 function ServiceDetail({
   svc,
   onDeleted,
+  onChanged,
+  tick,
 }: {
   svc: Service;
   onDeleted: () => void;
+  onChanged: () => void;
+  tick: number;
 }) {
   const { data: health, loading, error } = useApi<HealthResult>(
     `services/${svc.id}/health`,
   );
+  // Re-fetch the single service so the embedded
+  // oncall + runbook are current after a write.
+  // The tick prop bumps on each write; append it to
+  // the path so useApi sees a "new" URL and refires.
+  const { data: detail, reload: reloadDetail } = useApi<Service>(
+    `services/${svc.id}?tick=${tick}`,
+  );
+  const live: Service = detail ?? svc;
   const { push: toast } = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Oncall + runbook modals. Split state so the two
+  // forms can be open independently — the modal for
+  // adding an on-call shift and the one for adding a
+  // runbook entry are distinct, so a single
+  // `creating` would be a footgun.
+  const [addingOnCall, setAddingOnCall] = useState(false);
+  const [addingRunbook, setAddingRunbook] = useState(false);
+  const [confirmDeleteShift, setConfirmDeleteShift] = useState<string | null>(null);
+  const [confirmDeleteEntry, setConfirmDeleteEntry] = useState<string | null>(null);
 
   async function handleDelete() {
     setDeleting(true);
@@ -426,12 +463,24 @@ function ServiceDetail({
         )}
       </div>
 
-      <OnCallBlock oncall={svc.oncall ?? null} />
+      <OnCallBlock
+        oncall={live.oncall ?? null}
+        onAdd={() => setAddingOnCall(true)}
+        onDelete={async (shiftId) => {
+          setConfirmDeleteShift(shiftId);
+        }}
+      />
 
       <h3 style={{ fontSize: 'var(--fs-h3)', marginBottom: 'var(--sp-3)', marginTop: 'var(--sp-5)' }}>
         Runbook
       </h3>
-      <RunbookBlock entries={svc.runbook ?? []} />
+      <RunbookBlock
+        entries={live.runbook ?? []}
+        onAdd={() => setAddingRunbook(true)}
+        onDelete={async (entryId) => {
+          setConfirmDeleteEntry(entryId);
+        }}
+      />
 
       <h3 style={{ fontSize: 'var(--fs-h3)', marginBottom: 'var(--sp-3)', marginTop: 'var(--sp-5)' }}>
         Recent deploys
@@ -466,6 +515,65 @@ function ServiceDetail({
           </div>
         )}
       </div>
+
+      {addingOnCall && (
+        <AddOnCallModal
+          serviceId={svc.id}
+          onClose={() => setAddingOnCall(false)}
+          onCreated={() => {
+            setAddingOnCall(false);
+            toast('On-call shift added', 'success');
+            onChanged();
+          }}
+        />
+      )}
+      {addingRunbook && (
+        <AddRunbookModal
+          serviceId={svc.id}
+          onClose={() => setAddingRunbook(false)}
+          onCreated={() => {
+            setAddingRunbook(false);
+            toast('Runbook entry added', 'success');
+            onChanged();
+          }}
+        />
+      )}
+      {confirmDeleteShift && (
+        <ConfirmDeleteModal
+          title="Delete on-call shift?"
+          message="The shift will be removed from the rotation. Anyone currently on call will lose their shift immediately."
+          onCancel={() => setConfirmDeleteShift(null)}
+          onConfirm={async () => {
+            const id = confirmDeleteShift;
+            setConfirmDeleteShift(null);
+            try {
+              await apiDelete(`services/${svc.id}/oncall/${id}`);
+              toast('On-call shift removed', 'success');
+              onChanged();
+            } catch (e: any) {
+              toast(formatApiError('Delete shift failed', e), 'error');
+            }
+          }}
+        />
+      )}
+      {confirmDeleteEntry && (
+        <ConfirmDeleteModal
+          title="Delete runbook entry?"
+          message="The runbook entry will be removed permanently."
+          onCancel={() => setConfirmDeleteEntry(null)}
+          onConfirm={async () => {
+            const id = confirmDeleteEntry;
+            setConfirmDeleteEntry(null);
+            try {
+              await apiDelete(`services/${svc.id}/runbook/${id}`);
+              toast('Runbook entry removed', 'success');
+              onChanged();
+            } catch (e: any) {
+              toast(formatApiError('Delete entry failed', e), 'error');
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -605,92 +713,407 @@ function NewServiceModal({
   );
 }
 
-function OnCallBlock({ oncall }: { oncall: OnCall | null }) {
-  if (!oncall) {
-    return (
+function OnCallBlock({
+  oncall,
+  onAdd,
+  onDelete,
+}: {
+  oncall: OnCall | null;
+  onAdd: () => void;
+  onDelete: (shiftId: string) => void;
+}) {
+  return (
+    <div>
       <div
         style={{
-          padding: 'var(--sp-3) var(--sp-4)',
-          background: 'var(--color-surface-elevated)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-md)',
-          color: 'var(--color-text-muted)',
-          fontSize: 'var(--fs-small)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 'var(--sp-2)',
         }}
       >
-        No one is on call for this service right now.
+        <h3 style={{ fontSize: 'var(--fs-h3)' }}>On-call</h3>
+        <Button variant="secondary" onClick={onAdd}>
+          +
+        </Button>
       </div>
-    );
-  }
-  return (
-    <div
-      style={{
-        padding: 'var(--sp-3) var(--sp-4)',
-        background: 'var(--color-surface-elevated)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-md)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--sp-3)',
-      }}
-    >
-      <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--color-text-muted)' }}>
-        Currently on call:
-      </span>
-      <span className="mono" style={{ fontWeight: 600 }}>
-        {oncall.user}
-      </span>
-      <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--color-text-secondary)' }}>
-        until {relative(oncall.shift_end)}
-      </span>
+      {!oncall ? (
+        <div
+          style={{
+            padding: 'var(--sp-3) var(--sp-4)',
+            background: 'var(--color-surface-elevated)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--color-text-muted)',
+            fontSize: 'var(--fs-small)',
+          }}
+        >
+          No one is on call for this service right now.
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: 'var(--sp-3) var(--sp-4)',
+            background: 'var(--color-surface-elevated)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--sp-3)',
+          }}
+        >
+          <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--color-text-muted)' }}>
+            Currently on call:
+          </span>
+          <span className="mono" style={{ fontWeight: 600 }}>
+            {oncall.user}
+          </span>
+          <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--color-text-secondary)' }}>
+            until {relative(oncall.shift_end)}
+          </span>
+          {/* The × deletes the currently-displayed shift
+              (which is the only shift the block has
+              state about). Future iterations may want
+              a "rotation timeline" view that lists
+              upcoming shifts; for now the wire response
+              only carries the current one. */}
+          <span style={{ flex: 1 }} />
+          <Button
+            variant="secondary"
+            onClick={() => onDelete(oncall.id)}
+          >
+            ×
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
-function RunbookBlock({ entries }: { entries: RunbookEntry[] }) {
-  if (entries.length === 0) {
-    return (
+function RunbookBlock({
+  entries,
+  onAdd,
+  onDelete,
+}: {
+  entries: RunbookEntry[];
+  onAdd: () => void;
+  onDelete: (entryId: string) => void;
+}) {
+  return (
+    <div>
       <div
         style={{
-          padding: 'var(--sp-3) var(--sp-4)',
-          border: '1px dashed var(--color-border)',
-          borderRadius: 'var(--radius-md)',
-          color: 'var(--color-text-muted)',
-          fontSize: 'var(--fs-small)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 'var(--sp-2)',
         }}
       >
-        No runbook entries yet. Add a procedure the on-call
-        should follow when this service is on fire.
+        <div /> {/* placeholder so the h3 above aligns with the + button on the right */}
+        <Button variant="secondary" onClick={onAdd}>
+          +
+        </Button>
       </div>
-    );
-  }
-  return (
-    <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-      {entries.map((e) => (
-        <li
-          key={e.id}
+      {entries.length === 0 ? (
+        <div
           style={{
-            background: 'var(--color-surface-elevated)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-sm)',
             padding: 'var(--sp-3) var(--sp-4)',
-            marginBottom: 'var(--sp-2)',
+            border: '1px dashed var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--color-text-muted)',
+            fontSize: 'var(--fs-small)',
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 'var(--sp-1)' }}>{e.title}</div>
-          <pre
-            style={{
-              margin: 0,
-              whiteSpace: 'pre-wrap',
-              fontFamily: 'inherit',
-              fontSize: 'var(--fs-small)',
-              color: 'var(--color-text-secondary)',
-            }}
+          No runbook entries yet. Add a procedure the on-call
+          should follow when this service is on fire.
+        </div>
+      ) : (
+        <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+          {entries.map((e) => (
+            <li
+              key={e.id}
+              style={{
+                background: 'var(--color-surface-elevated)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                padding: 'var(--sp-3) var(--sp-4)',
+                marginBottom: 'var(--sp-2)',
+                position: 'relative',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--sp-2)' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 'var(--sp-1)' }}>{e.title}</div>
+                  <pre
+                    style={{
+                      margin: 0,
+                      whiteSpace: 'pre-wrap',
+                      fontFamily: 'inherit',
+                      fontSize: 'var(--fs-small)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                  >
+                    {e.body}
+                  </pre>
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={() => onDelete(e.id)}
+                >
+                  ×
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+// AddOnCallModal — POST a new on-call shift.
+//
+// Date inputs use `datetime-local`, which the browser
+// renders as the operator's local timezone. The
+// toISOString conversion below treats the input as
+// local time and emits an RFC3339 UTC string for the
+// backend. If the field is blank the conversion skips
+// the field entirely (the server-side validator
+// returns 400).
+function AddOnCallModal({
+  serviceId,
+  onClose,
+  onCreated,
+}: {
+  serviceId: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [userEmail, setUserEmail] = useState('');
+  const [shiftStart, setShiftStart] = useState('');
+  const [shiftEnd, setShiftEnd] = useState('');
+  const [scope, setScope] = useState<'service' | 'global'>('service');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const { push: toast } = useToast();
+
+  // Convert a "datetime-local" string (e.g. "2026-06-11T08:00")
+  // to an RFC3339 UTC string. The browser's
+  // datetime-local input does not carry a timezone, so
+  // the value is interpreted as the operator's local
+  // time — which is what the operator expects.
+  function toRFC3339(local: string): string {
+    if (!local) return '';
+    const d = new Date(local);
+    if (Number.isNaN(d.getTime())) return local;
+    return d.toISOString();
+  }
+
+  async function submit() {
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await apiPost(`services/${serviceId}/oncall`, {
+        user_email: userEmail,
+        shift_start: toRFC3339(shiftStart),
+        shift_end: toRFC3339(shiftEnd),
+        scope,
+      });
+      onCreated();
+    } catch (e: any) {
+      setErr(formatApiError('Add on-call failed', e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Add on-call shift"
+      width={520}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            onClick={submit}
+            disabled={submitting || !userEmail || !shiftStart || !shiftEnd}
           >
-            {e.body}
-          </pre>
-        </li>
-      ))}
-    </ol>
+            {submitting ? 'Adding…' : 'Add shift'}
+          </Button>
+        </>
+      }
+    >
+      {err && (
+        <div style={{ color: 'var(--color-error)', marginBottom: 'var(--sp-3)' }}>
+          {err}
+        </div>
+      )}
+      <FormField label="User email">
+        {(s) => (
+          <input
+            style={s}
+            type="email"
+            value={userEmail}
+            onChange={(e) => setUserEmail(e.target.value)}
+            placeholder="alice@example.com"
+          />
+        )}
+      </FormField>
+      <FormField label="Shift start">
+        {(s) => (
+          <input
+            style={s}
+            type="datetime-local"
+            value={shiftStart}
+            onChange={(e) => setShiftStart(e.target.value)}
+          />
+        )}
+      </FormField>
+      <FormField label="Shift end">
+        {(s) => (
+          <input
+            style={s}
+            type="datetime-local"
+            value={shiftEnd}
+            onChange={(e) => setShiftEnd(e.target.value)}
+          />
+        )}
+      </FormField>
+      <FormField label="Scope">
+        {(s) => (
+          <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-small)' }}>
+              <input
+                type="radio"
+                name="oncall-scope"
+                value="service"
+                checked={scope === 'service'}
+                onChange={() => setScope('service')}
+              />
+              Per-service
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-small)' }}>
+              <input
+                type="radio"
+                name="oncall-scope"
+                value="global"
+                checked={scope === 'global'}
+                onChange={() => setScope('global')}
+              />
+              Global fallback
+            </label>
+          </div>
+        )}
+      </FormField>
+    </Modal>
+  );
+}
+
+// AddRunbookModal — POST a new runbook entry.
+function AddRunbookModal({
+  serviceId,
+  onClose,
+  onCreated,
+}: {
+  serviceId: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const { push: toast } = useToast();
+
+  async function submit() {
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await apiPost(`services/${serviceId}/runbook`, { title, body });
+      onCreated();
+    } catch (e: any) {
+      setErr(formatApiError('Add runbook entry failed', e));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Add runbook entry"
+      width={520}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={submit} disabled={submitting || !title}>
+            {submitting ? 'Adding…' : 'Add entry'}
+          </Button>
+        </>
+      }
+    >
+      {err && (
+        <div style={{ color: 'var(--color-error)', marginBottom: 'var(--sp-3)' }}>
+          {err}
+        </div>
+      )}
+      <FormField label="Title">
+        {(s) => (
+          <input
+            style={s}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Restart procedure"
+          />
+        )}
+      </FormField>
+      <FormField label="Body">
+        {(s) => (
+          <textarea
+            style={{ ...s, minHeight: 120, fontFamily: 'inherit' }}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder={'1. ssh in\n2. systemctl restart'}
+          />
+        )}
+      </FormField>
+    </Modal>
+  );
+}
+
+// ConfirmDeleteModal — a tiny generic confirm
+// dialog. Reused by the on-call + runbook delete
+// buttons. The footer uses the danger variant; the
+// caller's onConfirm is the action.
+function ConfirmDeleteModal({
+  title,
+  message,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      title={title}
+      width={420}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>Cancel</Button>
+          <Button variant="danger" onClick={onConfirm}>Delete</Button>
+        </>
+      }
+    >
+      <div style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--fs-small)' }}>
+        {message}
+      </div>
+    </Modal>
   );
 }

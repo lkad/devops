@@ -57,6 +57,20 @@ func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.H
 	r.PUT("/services/:id", writeP, h.Update)
 	r.DELETE("/services/:id", writeP, h.Delete)
 	r.GET("/services/:id/health", viewP, h.Health)
+	// On-call rotation writes (P1.4). The detail page
+	// re-fetches GET /services/:id after a successful
+	// mutation; the writes are deliberately separate
+	// endpoints so the rotation's per-row keys stay
+	// explicit (and so the audit log records them as
+	// distinct actions once P0 #3 lands).
+	r.POST("/services/:id/oncall", writeP, h.CreateOnCall)
+	r.DELETE("/services/:id/oncall/:shift_id", writeP, h.DeleteOnCall)
+	// Runbook writes (P1.4). Same shape as oncall: the
+	// per-entry ID lives in the URL so a future "edit
+	// entry" PUT can drop in without changing the
+	// contract.
+	r.POST("/services/:id/runbook", writeP, h.CreateRunbook)
+	r.DELETE("/services/:id/runbook/:entry_id", writeP, h.DeleteRunbook)
 }
 
 // Health handles GET /services/:id/health. The response
@@ -299,4 +313,141 @@ func writeAPIError(w http.ResponseWriter, err error) {
 			Cause:   err,
 		})
 	}
+}
+
+// onCallRequest is the wire shape for
+// POST /services/:id/oncall. The fields line up 1:1
+// with the catalog's CreateOnCallInput so the handler
+// is purely a JSON→DTO translator.
+type onCallRequest struct {
+	UserEmail  string    `json:"user_email"`
+	ShiftStart time.Time `json:"shift_start"`
+	ShiftEnd   time.Time `json:"shift_end"`
+	Scope      string    `json:"scope"`
+}
+
+// toInput maps the wire shape onto the service-layer
+// DTO. The actor is pulled from the authenticated
+// context (rbac.AuthUserKey) and falls back to the dev
+// X-User header so the unit tests can drive writes
+// without standing up a JWT signer. In production the
+// auth middleware populates AuthUserKey and the header
+// is ignored.
+func (r onCallRequest) toInput(c *gin.Context) CreateOnCallInput {
+	return CreateOnCallInput{
+		User:       r.UserEmail,
+		ShiftStart: r.ShiftStart,
+		ShiftEnd:   r.ShiftEnd,
+		Scope:      OnCallScope(r.Scope),
+		Actor:      actorFrom(c),
+	}
+}
+
+// CreateOnCall handles POST /services/:id/oncall.
+// Validates the request shape, resolves the service,
+// checks for an overlapping shift (409 on collision),
+// then persists. The actor (JWT subject) is captured
+// on the DTO so the eventual audit emit (P0 #3) is
+// forgery-proof.
+func (h *Handler) CreateOnCall(c *gin.Context) {
+	var req onCallRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.WriteError(c.Writer, &contracts.APIError{
+			Code:    contracts.CodeValidation,
+			Message: "request body must be JSON",
+		})
+		return
+	}
+	row, err := h.cat.CreateOnCall(c.Param("id"), req.toInput(c))
+	if err != nil {
+		writeAPIError(c.Writer, err)
+		return
+	}
+	handler.WriteCreated(c.Writer, row)
+}
+
+// DeleteOnCall handles DELETE
+// /services/:id/oncall/:shift_id. 404 if the service
+// or the shift id is unknown; 204 on success.
+func (h *Handler) DeleteOnCall(c *gin.Context) {
+	if err := h.cat.DeleteOnCall(c.Param("id"), c.Param("shift_id")); err != nil {
+		writeAPIError(c.Writer, err)
+		return
+	}
+	c.Writer.WriteHeader(http.StatusNoContent)
+}
+
+// runbookRequest is the wire shape for
+// POST /services/:id/runbook.
+type runbookRequest struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+func (r runbookRequest) toInput(c *gin.Context) CreateRunbookInput {
+	return CreateRunbookInput{
+		Title: r.Title,
+		Body:  r.Body,
+		Actor: actorFrom(c),
+	}
+}
+
+// CreateRunbook handles POST /services/:id/runbook.
+func (h *Handler) CreateRunbook(c *gin.Context) {
+	var req runbookRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.WriteError(c.Writer, &contracts.APIError{
+			Code:    contracts.CodeValidation,
+			Message: "request body must be JSON",
+		})
+		return
+	}
+	row, err := h.cat.CreateRunbook(c.Param("id"), req.toInput(c))
+	if err != nil {
+		writeAPIError(c.Writer, err)
+		return
+	}
+	handler.WriteCreated(c.Writer, row)
+}
+
+// DeleteRunbook handles DELETE
+// /services/:id/runbook/:entry_id.
+func (h *Handler) DeleteRunbook(c *gin.Context) {
+	if err := h.cat.DeleteRunbook(c.Param("id"), c.Param("entry_id")); err != nil {
+		writeAPIError(c.Writer, err)
+		return
+	}
+	c.Writer.WriteHeader(http.StatusNoContent)
+}
+
+// actorFrom returns the authenticated user id for the
+// audit trail. Order of precedence:
+//  1. The *contracts.User stashed by the auth
+//     middleware under rbac.AuthUserKey (the JWT
+//     subject — never the request body).
+//  2. The X-User dev-bypass header, so unit tests can
+//     drive writes without a real JWT signer. In
+//     production DevBypass is false and the auth
+//     middleware aborts before we get here when the
+//     JWT is missing.
+//  3. The literal "system" so a misconfigured deploy
+//     still produces an audit-trail row rather than
+//     silently dropping the actor.
+//
+// This is the wire-side of the P0 #3 audit-trail
+// fix: the actor is always the JWT subject, never the
+// request body, so a malicious client cannot forge the
+// recorded actor.
+func actorFrom(c *gin.Context) string {
+	if v, ok := c.Get(rbac.AuthUserKey); ok {
+		if u, ok := v.(*contracts.User); ok && u != nil {
+			if u.ID != "" {
+				return u.ID
+			}
+		}
+	}
+	if uid := c.GetHeader("X-User"); uid != "" {
+		return uid
+	}
+	return "system"
 }

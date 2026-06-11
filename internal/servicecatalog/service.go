@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -232,4 +233,176 @@ func apiErrFrom(err error) *contracts.APIError {
 			Cause:   err,
 		}
 	}
+}
+
+// OnCallScope selects whether an on-call rotation entry
+// is per-service or a global fallback. Empty scope
+// defaults to "service" so the common case is a single
+// keystroke less.
+type OnCallScope string
+
+const (
+	OnCallScopeService OnCallScope = "service"
+	OnCallScopeGlobal  OnCallScope = "global"
+)
+
+// CreateOnCallInput is the DTO for new on-call rotation
+// rows. User is the rotation participant (the LDAP
+// account the on-call is paged to); it is the on-call's
+// identity, not the actor creating the row — the actor
+// is captured separately from the JWT subject so the
+// audit trail is forgery-proof (P0 #3).
+type CreateOnCallInput struct {
+	User       string
+	ShiftStart time.Time
+	ShiftEnd   time.Time
+	Scope      OnCallScope
+	// Actor is the authenticated user creating the row.
+	// Held in the input so the service layer can pass it
+	// to the eventual audit emit (P0 #3); the on-call row
+	// itself has no created_by column today, so Actor is
+	// not persisted on the entity.
+	Actor string
+}
+
+// CreateRunbookInput is the DTO for new runbook entries.
+// The body is plain text; the frontend renders newlines
+// verbatim (see OnCallBlock / RunbookBlock in
+// Services.tsx).
+type CreateRunbookInput struct {
+	Title string
+	Body  string
+	// Actor follows the same JWT-subject rule as
+	// CreateOnCallInput.Actor.
+	Actor string
+}
+
+// CreateOnCall validates in, resolves the scope (global
+// rotations leave ServiceID empty so CurrentOnCall's
+// fallback branch picks them up), and persists. Returns
+// 404 when the service is unknown, 400 on bad shape, 409
+// on an overlapping shift for the same service.
+//
+// TODO(audit): emit audit.Service.RecordAction here once
+// P0 #3's audit wiring lands. The Actor field is the
+// authenticated subject (never the request body) so the
+// emit will be forgery-proof.
+func (s *Catalog) CreateOnCall(serviceID string, in CreateOnCallInput) (*OnCall, error) {
+	if err := validateOnCall(in); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.Get(serviceID); err != nil {
+		return nil, err
+	}
+	overlap, err := s.repo.HasOverlappingOnCall(effectiveServiceID(in.Scope, serviceID), in.ShiftStart, in.ShiftEnd)
+	if err != nil {
+		return nil, err
+	}
+	if overlap {
+		return nil, fmt.Errorf("%w: shift overlaps an existing on-call rotation", ErrConflict)
+	}
+	row := &OnCall{
+		ServiceID:  effectiveServiceID(in.Scope, serviceID),
+		User:       strings.TrimSpace(in.User),
+		ShiftStart: in.ShiftStart,
+		ShiftEnd:   in.ShiftEnd,
+	}
+	if err := s.repo.CreateOnCall(row); err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// DeleteOnCall removes a rotation row. Returns 404 if
+// either the service is missing or the row id is unknown;
+// the handler does not distinguish the two.
+func (s *Catalog) DeleteOnCall(serviceID, shiftID string) error {
+	if _, err := s.repo.Get(serviceID); err != nil {
+		return err
+	}
+	return s.repo.DeleteOnCall(shiftID)
+}
+
+// CreateRunbook validates in, then persists. Returns
+// 404 on unknown service, 400 on bad shape.
+func (s *Catalog) CreateRunbook(serviceID string, in CreateRunbookInput) (*RunbookEntry, error) {
+	if err := validateRunbook(in); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.Get(serviceID); err != nil {
+		return nil, err
+	}
+	row := &RunbookEntry{
+		ServiceID: serviceID,
+		Title:     strings.TrimSpace(in.Title),
+		Body:      in.Body,
+	}
+	if err := s.repo.CreateRunbook(row); err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// DeleteRunbook removes a runbook entry. Returns 404 on
+// unknown service or unknown entry id.
+func (s *Catalog) DeleteRunbook(serviceID, entryID string) error {
+	if _, err := s.repo.Get(serviceID); err != nil {
+		return err
+	}
+	return s.repo.DeleteRunbook(entryID)
+}
+
+// validateOnCall enforces the request shape:
+//   - User must be non-empty after trim
+//   - ShiftStart and ShiftEnd must be valid timestamps
+//   - ShiftStart < ShiftEnd
+//   - Scope, if non-empty, must be "service" or "global"
+func validateOnCall(in CreateOnCallInput) error {
+	if strings.TrimSpace(in.User) == "" {
+		return fmt.Errorf("%w: user_email is required", ErrValidation)
+	}
+	if in.ShiftStart.IsZero() {
+		return fmt.Errorf("%w: shift_start is required", ErrValidation)
+	}
+	if in.ShiftEnd.IsZero() {
+		return fmt.Errorf("%w: shift_end is required", ErrValidation)
+	}
+	if !in.ShiftStart.Before(in.ShiftEnd) {
+		return fmt.Errorf("%w: shift_start must be before shift_end", ErrValidation)
+	}
+	if in.Scope != "" && in.Scope != OnCallScopeService && in.Scope != OnCallScopeGlobal {
+		return fmt.Errorf("%w: scope %q is not valid", ErrValidation, in.Scope)
+	}
+	return nil
+}
+
+// validateRunbook enforces the request shape:
+//   - Title is non-empty after trim and <= 256 chars
+//   - Body is optional (empty allowed) but capped at
+//     64 KiB to keep the page responsive
+func validateRunbook(in CreateRunbookInput) error {
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		return fmt.Errorf("%w: title is required", ErrValidation)
+	}
+	if len(title) > 256 {
+		return fmt.Errorf("%w: title exceeds 256 chars", ErrValidation)
+	}
+	if len(in.Body) > 64*1024 {
+		return fmt.Errorf("%w: body exceeds 64 KiB", ErrValidation)
+	}
+	return nil
+}
+
+// effectiveServiceID returns the value that ends up in
+// the row's service_id column: the URL param for a
+// per-service shift, the empty string for a global
+// rotation. The overlap check and the eventual INSERT
+// both feed through this helper so the two stay in
+// sync.
+func effectiveServiceID(scope OnCallScope, urlParam string) string {
+	if scope == OnCallScopeGlobal {
+		return ""
+	}
+	return urlParam
 }
