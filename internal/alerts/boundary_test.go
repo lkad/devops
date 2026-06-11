@@ -22,7 +22,7 @@ func TestBoundary_Channel_LogTypeWithEmptyConfigIsAccepted(t *testing.T) {
 	// just records to slog. Rejecting empty config would force the
 	// caller to fabricate a key.
 	svc, _, _, _ := newServiceWithDB(t)
-	c, err := svc.CreateChannel(CreateChannelInput{
+	c, err := svc.CreateChannel(context.Background(), CreateChannelInput{
 		Type:    ChannelTypeLog,
 		Enabled: true,
 	})
@@ -36,7 +36,7 @@ func TestBoundary_Channel_LogTypeWithEmptyConfigIsAccepted(t *testing.T) {
 
 func TestBoundary_Channel_UnknownTypeIsRejected(t *testing.T) {
 	svc, _, _, _ := newServiceWithDB(t)
-	_, err := svc.CreateChannel(CreateChannelInput{
+	_, err := svc.CreateChannel(context.Background(), CreateChannelInput{
 		Type:    "pagerfax", // not a real channel type
 		Enabled: true,
 	})

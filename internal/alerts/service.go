@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -18,6 +19,11 @@ type ServiceConfig struct {
 	Dispatcher  Dispatcher
 	Suppression SuppressionChecker
 	Logger      *slog.Logger
+	// Audit is the cross-module audit service. Optional
+	// (nil means "no audit emission"); production wires
+	// a real service so v0.2.0.0 P0 #3 audit-trail
+	// coverage holds.
+	Audit *audit.Service
 	// Now is the clock the service uses to stamp FiredAt /
 	// ResolvedAt / AcknowledgedAt. Defaults to time.Now when
 	// nil so unit tests can substitute a fixed clock.
@@ -29,12 +35,14 @@ type ServiceConfig struct {
 // decision, and the channel-dispatch orchestration. The
 // repository is GORM-only; the dispatcher is the seam for
 // notification delivery; the suppression checker is the seam for
-// maintenance-mode awareness.
+// maintenance-mode awareness; the audit service is the seam for
+// cross-module RecordAction calls.
 type Service struct {
 	repo        *Repository
 	dispatcher  Dispatcher
 	suppression SuppressionChecker
 	log         *slog.Logger
+	audit       *audit.Service
 	now         func() time.Time
 }
 
@@ -64,6 +72,7 @@ func NewService(cfg ServiceConfig) *Service {
 		dispatcher:  disp,
 		suppression: supp,
 		log:         log,
+		audit:       cfg.Audit,
 		now:         now,
 	}
 }
@@ -125,8 +134,10 @@ type Stats struct {
 }
 
 // CreateAlert validates the input and persists the alert. The
-// returned Alert is the freshly-stored row.
-func (s *Service) CreateAlert(in CreateAlertInput) (*Alert, error) {
+// returned Alert is the freshly-stored row. The audit emission
+// (alert.create) records the alert for the audit log; a
+// failure to record does not roll back the mutation.
+func (s *Service) CreateAlert(ctx context.Context, in CreateAlertInput) (*Alert, error) {
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, &contracts.APIError{
 			Code:    contracts.CodeValidation,
@@ -169,6 +180,14 @@ func (s *Service) CreateAlert(in CreateAlertInput) (*Alert, error) {
 	}
 	// Dispatch to the supplied channels unless suppressed.
 	s.dispatchChannels(a, in.ChannelIDs)
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionCreate,
+			ResourceType: audit.ResourceAlert,
+			ResourceID:   a.ID,
+			Metadata:     audit.JSONMap{"name": a.Name, "severity": string(a.Severity), "source_type": string(a.SourceType), "source_id": a.SourceID},
+		})
+	}
 	return a, nil
 }
 
@@ -207,8 +226,9 @@ func (s *Service) List(f AlertFilter) ([]Alert, int64, error) {
 // Acknowledge flips the alert into the acknowledged state and
 // stamps the user id / timestamp. The userID argument is
 // supplied by the handler (from the X-User-Id header in tests,
-// from the JWT context in production).
-func (s *Service) Acknowledge(id, userID string) (*Alert, error) {
+// from the JWT context in production). The audit emission
+// (alert.acknowledge) records the ack for the audit log.
+func (s *Service) Acknowledge(ctx context.Context, id, userID string) (*Alert, error) {
 	if _, err := s.GetAlert(id); err != nil {
 		return nil, err
 	}
@@ -231,12 +251,21 @@ func (s *Service) Acknowledge(id, userID string) (*Alert, error) {
 			Cause:   err,
 		}
 	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionAcknowledge,
+			ResourceType: audit.ResourceAlert,
+			ResourceID:   id,
+			ActorID:      userID,
+		})
+	}
 	return s.GetAlert(id)
 }
 
-// Resolve flips the alert into the resolved state and stamps the
-// timestamp.
-func (s *Service) Resolve(id string) (*Alert, error) {
+// Resolve flips the alert into the resolved state and stamps
+// the timestamp. The audit emission (alert.resolve) records
+// the resolution for the audit log.
+func (s *Service) Resolve(ctx context.Context, id string) (*Alert, error) {
 	if _, err := s.GetAlert(id); err != nil {
 		return nil, err
 	}
@@ -257,6 +286,13 @@ func (s *Service) Resolve(id string) (*Alert, error) {
 			Message: "failed to resolve alert",
 			Cause:   err,
 		}
+	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionResolve,
+			ResourceType: audit.ResourceAlert,
+			ResourceID:   id,
+		})
 	}
 	return s.GetAlert(id)
 }
@@ -286,8 +322,9 @@ func (s *Service) MarkSuppressed(id, reason string) (*Alert, error) {
 	return s.GetAlert(id)
 }
 
-// Delete soft-deletes an alert.
-func (s *Service) Delete(id string) error {
+// Delete soft-deletes an alert. The audit emission
+// (alert.delete) records the deletion for the audit log.
+func (s *Service) Delete(ctx context.Context, id string) error {
 	if err := s.repo.DeleteAlert(id); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return &contracts.APIError{
@@ -301,6 +338,13 @@ func (s *Service) Delete(id string) error {
 			Cause:   err,
 		}
 	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionDelete,
+			ResourceType: audit.ResourceAlert,
+			ResourceID:   id,
+		})
+	}
 	return nil
 }
 
@@ -310,7 +354,7 @@ func (s *Service) Delete(id string) error {
 // alert in one step. Suppression is applied to external
 // channels when the source is a physical host in maintenance.
 func (s *Service) Fire(ctx context.Context, in FireInput) (*Alert, error) {
-	a, err := s.CreateAlert(CreateAlertInput{
+	a, err := s.CreateAlert(ctx, CreateAlertInput{
 		Name:       in.Name,
 		Severity:   in.Severity,
 		SourceType: in.SourceType,
@@ -425,7 +469,10 @@ func (s *Service) Stats() (Stats, error) {
 }
 
 // CreateChannel validates the input and persists the channel.
-func (s *Service) CreateChannel(in CreateChannelInput) (*Channel, error) {
+// The audit emission (alert.create_channel / alert.create
+// with metadata kind=channel) records the new channel for
+// the audit log.
+func (s *Service) CreateChannel(ctx context.Context, in CreateChannelInput) (*Channel, error) {
 	if !in.Type.Valid() {
 		return nil, &contracts.APIError{
 			Code:    contracts.CodeValidation,
@@ -443,6 +490,14 @@ func (s *Service) CreateChannel(in CreateChannelInput) (*Channel, error) {
 			Message: "failed to create channel",
 			Cause:   err,
 		}
+	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionCreate,
+			ResourceType: audit.ResourceAlert,
+			ResourceID:   c.ID,
+			Metadata:     audit.JSONMap{"kind": "channel", "type": string(c.Type)},
+		})
 	}
 	return c, nil
 }
@@ -479,8 +534,10 @@ func (s *Service) ListChannels() ([]Channel, error) {
 	return rows, nil
 }
 
-// UpdateChannel applies a partial update.
-func (s *Service) UpdateChannel(id string, in UpdateChannelInput) error {
+// UpdateChannel applies a partial update. The audit emission
+// (alert.update_channel) records the change for the audit
+// log.
+func (s *Service) UpdateChannel(ctx context.Context, id string, in UpdateChannelInput) error {
 	if _, err := s.GetChannel(id); err != nil {
 		return err
 	}
@@ -519,11 +576,21 @@ func (s *Service) UpdateChannel(id string, in UpdateChannelInput) error {
 			Cause:   err,
 		}
 	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionUpdate,
+			ResourceType: audit.ResourceAlert,
+			ResourceID:   id,
+			Metadata:     audit.JSONMap{"kind": "channel"},
+		})
+	}
 	return nil
 }
 
-// DeleteChannel soft-deletes a channel.
-func (s *Service) DeleteChannel(id string) error {
+// DeleteChannel soft-deletes a channel. The audit emission
+// (alert.delete_channel) records the deletion for the audit
+// log.
+func (s *Service) DeleteChannel(ctx context.Context, id string) error {
 	if err := s.repo.DeleteChannel(id); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return &contracts.APIError{
@@ -536,6 +603,14 @@ func (s *Service) DeleteChannel(id string) error {
 			Message: "failed to delete channel",
 			Cause:   err,
 		}
+	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionDelete,
+			ResourceType: audit.ResourceAlert,
+			ResourceID:   id,
+			Metadata:     audit.JSONMap{"kind": "channel"},
+		})
 	}
 	return nil
 }

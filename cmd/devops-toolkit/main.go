@@ -182,7 +182,7 @@ func run() error {
 		phMaintenance := registerPhysicalHostRoutes(ctx, v1, db, log, obs, hubPublisher, auditSvc, auditRepo, perms)
 		registerAlertsRoutes(v1, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance}, perms)
 		registerDiscoveryRoutes(v1, db, log, perms)
-		k8sSvc := registerK8sClusterRoutes(v1, db, log, perms)
+		k8sSvc := registerK8sClusterRoutes(v1, db, log, perms, auditSvc)
 		registerHostProjectLinkRoutes(v1, db, log, perms, rbacSvc, auditSvc)
 		registerPipelineRoutes(v1, db, log, perms)
 		registerServiceCatalogRoutes(v1, db, log, k8sSvc, obs, perms)
@@ -836,7 +836,7 @@ func registerDiscoveryRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logge
 // The AES-256 key is loaded from K8S_CRYPTO_KEY env var; in dev a
 // deterministic 32-byte key is used with a warning, mirroring the
 // JWT-secret pattern.
-func registerK8sClusterRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) *k8s.Service {
+func registerK8sClusterRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, auditSvc *audit.Service) *k8s.Service {
 	if err := dbpkg.AutoMigrate(db, k8s.AllModels()...); err != nil {
 		log.Error("k8s AutoMigrate failed", "err", err)
 		return nil
@@ -848,7 +848,7 @@ func registerK8sClusterRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logg
 		key = h[:]
 	}
 	repo := k8s.NewRepository(db)
-	svc := k8s.NewService(repo, &k8s.FakeClient{}, key)
+	svc := k8s.NewService(repo, &k8s.FakeClient{}, key, auditSvc)
 	// Wire the per-cluster ClientRegistry so Handler.Exec can
 	// resolve clusterID → KubeClient. The registry walks every
 	// cluster row, decrypts the kubeconfig on first use, and

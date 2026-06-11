@@ -39,7 +39,7 @@ func newServiceWithDB(t *testing.T) (*Service, *Repository, *FakeDispatcher, *Fa
 // is persisted and dispatched.
 func TestService_CreateAlert(t *testing.T) {
 	svc, _, disp, _ := newServiceWithDB(t)
-	a, err := svc.CreateAlert(CreateAlertInput{
+	a, err := svc.CreateAlert(context.Background(), CreateAlertInput{
 		Name:       "high_cpu",
 		Severity:   SeverityWarning,
 		SourceType: SourceTypeCustom,
@@ -66,7 +66,7 @@ func TestService_CreateAlert(t *testing.T) {
 func TestService_Fire_DispatchesByDefault(t *testing.T) {
 	svc, _, disp, _ := newServiceWithDB(t)
 	// Seed a channel.
-	ch, err := svc.CreateChannel(CreateChannelInput{
+	ch, err := svc.CreateChannel(context.Background(), CreateChannelInput{
 		Type:    ChannelTypeSlack,
 		Enabled: true,
 	})
@@ -110,8 +110,8 @@ func TestService_Fire_SuppressedByMaintenance(t *testing.T) {
 	svc, _, disp, supp := newServiceWithDB(t)
 	supp.SetMaintenance("host-1", true)
 	// Seed one external + one log channel.
-	ext, _ := svc.CreateChannel(CreateChannelInput{Type: ChannelTypeSlack, Enabled: true})
-	log, _ := svc.CreateChannel(CreateChannelInput{Type: ChannelTypeLog, Enabled: true})
+	ext, _ := svc.CreateChannel(context.Background(), CreateChannelInput{Type: ChannelTypeSlack, Enabled: true})
+	log, _ := svc.CreateChannel(context.Background(), CreateChannelInput{Type: ChannelTypeLog, Enabled: true})
 	in := FireInput{
 		Name:       "x",
 		Severity:   SeverityCritical,
@@ -146,7 +146,7 @@ func TestService_Fire_SuppressedByMaintenance(t *testing.T) {
 func TestService_Fire_NotSuppressedForNonPhysicalHost(t *testing.T) {
 	svc, _, disp, supp := newServiceWithDB(t)
 	supp.SetMaintenance("host-1", true) // unrelated host
-	ch, _ := svc.CreateChannel(CreateChannelInput{Type: ChannelTypeSlack, Enabled: true})
+	ch, _ := svc.CreateChannel(context.Background(), CreateChannelInput{Type: ChannelTypeSlack, Enabled: true})
 	_, err := svc.Fire(context.Background(), FireInput{
 		Name:       "pipeline_fail",
 		Severity:   SeverityCritical,
@@ -180,7 +180,7 @@ func TestService_Fire_NotSuppressedForNonPhysicalHost(t *testing.T) {
 func TestService_Fire_AlertResumesAfterMaintenanceExit(t *testing.T) {
 	svc, _, disp, supp := newServiceWithDB(t)
 	supp.SetMaintenance("host-1", true)
-	ch, _ := svc.CreateChannel(CreateChannelInput{Type: ChannelTypeSlack, Enabled: true})
+	ch, _ := svc.CreateChannel(context.Background(), CreateChannelInput{Type: ChannelTypeSlack, Enabled: true})
 	// While in maintenance: only the audit log is dispatched.
 	_, _ = svc.Fire(context.Background(), FireInput{
 		Name: "x", Severity: SeverityWarning,
@@ -214,11 +214,11 @@ func TestService_Fire_AlertResumesAfterMaintenanceExit(t *testing.T) {
 // because the auth middleware is not in the path).
 func TestService_Acknowledge(t *testing.T) {
 	svc, _, _, _ := newServiceWithDB(t)
-	a, _ := svc.CreateAlert(CreateAlertInput{
+	a, _ := svc.CreateAlert(context.Background(), CreateAlertInput{
 		Name: "x", Severity: SeverityInfo,
 		SourceType: SourceTypeCustom, SourceID: "s",
 	})
-	acked, err := svc.Acknowledge(a.ID, "alice")
+	acked, err := svc.Acknowledge(context.Background(), a.ID, "alice")
 	if err != nil {
 		t.Fatalf("ack: %v", err)
 	}
@@ -238,11 +238,11 @@ func TestService_Acknowledge(t *testing.T) {
 // is set.
 func TestService_Resolve(t *testing.T) {
 	svc, _, _, _ := newServiceWithDB(t)
-	a, _ := svc.CreateAlert(CreateAlertInput{
+	a, _ := svc.CreateAlert(context.Background(), CreateAlertInput{
 		Name: "x", Severity: SeverityInfo,
 		SourceType: SourceTypeCustom, SourceID: "s",
 	})
-	resolved, err := svc.Resolve(a.ID)
+	resolved, err := svc.Resolve(context.Background(), a.ID)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestService_Resolve(t *testing.T) {
 func TestService_List(t *testing.T) {
 	svc, _, _, _ := newServiceWithDB(t)
 	for i := 0; i < 3; i++ {
-		_, _ = svc.CreateAlert(CreateAlertInput{
+		_, _ = svc.CreateAlert(context.Background(), CreateAlertInput{
 			Name: "x", Severity: SeverityInfo,
 			SourceType: SourceTypeCustom, SourceID: "s",
 		})
@@ -280,7 +280,7 @@ func TestService_List(t *testing.T) {
 func TestService_Stats(t *testing.T) {
 	svc, _, _, _ := newServiceWithDB(t)
 	for _, sev := range []Severity{SeverityInfo, SeverityInfo, SeverityCritical} {
-		_, _ = svc.CreateAlert(CreateAlertInput{
+		_, _ = svc.CreateAlert(context.Background(), CreateAlertInput{
 			Name: "x", Severity: sev,
 			SourceType: SourceTypeCustom, SourceID: "s",
 		})
@@ -305,7 +305,7 @@ func TestService_Stats(t *testing.T) {
 // allowed sets.
 func TestService_ValidateAlert(t *testing.T) {
 	svc, _, _, _ := newServiceWithDB(t)
-	_, err := svc.CreateAlert(CreateAlertInput{
+	_, err := svc.CreateAlert(context.Background(), CreateAlertInput{
 		Name:       "x",
 		Severity:   Severity("bogus"),
 		SourceType: SourceTypeCustom,
@@ -323,7 +323,7 @@ func TestService_ValidateAlert(t *testing.T) {
 // methods: create / list / update / delete.
 func TestService_Channel_CRUD(t *testing.T) {
 	svc, _, _, _ := newServiceWithDB(t)
-	c, err := svc.CreateChannel(CreateChannelInput{Type: ChannelTypeEmail, Enabled: true, Config: JSONMap{"recipients": []any{"a@x"}}})
+	c, err := svc.CreateChannel(context.Background(), CreateChannelInput{Type: ChannelTypeEmail, Enabled: true, Config: JSONMap{"recipients": []any{"a@x"}}})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -338,10 +338,10 @@ func TestService_Channel_CRUD(t *testing.T) {
 		t.Errorf("list: got %d", len(rows))
 	}
 	enabled := false
-	if err := svc.UpdateChannel(c.ID, UpdateChannelInput{Enabled: &enabled}); err != nil {
+	if err := svc.UpdateChannel(context.Background(), c.ID, UpdateChannelInput{Enabled: &enabled}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if err := svc.DeleteChannel(c.ID); err != nil {
+	if err := svc.DeleteChannel(context.Background(), c.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	rows, _ = svc.ListChannels()
@@ -379,7 +379,7 @@ func newHandlerRouter(t *testing.T) (*gin.Engine, *Service, *FakeDispatcher) {
 // configured log channel.
 func TestHandler_CreateAlert(t *testing.T) {
 	r, svc, disp := newHandlerRouter(t)
-	ch, _ := svc.CreateChannel(CreateChannelInput{Type: ChannelTypeLog, Enabled: true})
+	ch, _ := svc.CreateChannel(context.Background(), CreateChannelInput{Type: ChannelTypeLog, Enabled: true})
 	body := `{"name":"high_cpu","severity":"warning","source_type":"custom","source_id":"src-1","channel_ids":["` + ch.ID + `"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -426,7 +426,7 @@ func TestHandler_ListAlerts(t *testing.T) {
 // production the JWT middleware would set it from the token).
 func TestHandler_Acknowledge(t *testing.T) {
 	r, svc, _ := newHandlerRouter(t)
-	a, _ := svc.CreateAlert(CreateAlertInput{
+	a, _ := svc.CreateAlert(context.Background(), CreateAlertInput{
 		Name: "x", Severity: SeverityInfo,
 		SourceType: SourceTypeCustom, SourceID: "s",
 	})
@@ -450,7 +450,7 @@ func TestHandler_Acknowledge(t *testing.T) {
 // scenario: a 200 is returned and the alert is resolved.
 func TestHandler_Resolve(t *testing.T) {
 	r, svc, _ := newHandlerRouter(t)
-	a, _ := svc.CreateAlert(CreateAlertInput{
+	a, _ := svc.CreateAlert(context.Background(), CreateAlertInput{
 		Name: "x", Severity: SeverityInfo,
 		SourceType: SourceTypeCustom, SourceID: "s",
 	})
@@ -470,7 +470,7 @@ func TestHandler_Resolve(t *testing.T) {
 // A 204 is returned on success.
 func TestHandler_DeleteAlert(t *testing.T) {
 	r, svc, _ := newHandlerRouter(t)
-	a, _ := svc.CreateAlert(CreateAlertInput{
+	a, _ := svc.CreateAlert(context.Background(), CreateAlertInput{
 		Name: "x", Severity: SeverityInfo,
 		SourceType: SourceTypeCustom, SourceID: "s",
 	})
@@ -530,7 +530,7 @@ func TestHandler_Channel_CRUD(t *testing.T) {
 // endpoint redacts api_token / password / secret fields.
 func TestHandler_MasksSensitiveOnGet(t *testing.T) {
 	r, svc, _ := newHandlerRouter(t)
-	c, _ := svc.CreateChannel(CreateChannelInput{
+	c, _ := svc.CreateChannel(context.Background(), CreateChannelInput{
 		Type:    ChannelTypeSlack,
 		Enabled: true,
 		Config:  JSONMap{"api_token": "very-secret", "channel": "#a"},
@@ -600,13 +600,13 @@ func TestHandler_HistoryFilterByName(t *testing.T) {
 func TestHandler_SuppressedList(t *testing.T) {
 	r, svc, _ := newHandlerRouter(t)
 	// Seed an alert that was suppressed.
-	a, _ := svc.CreateAlert(CreateAlertInput{
+	a, _ := svc.CreateAlert(context.Background(), CreateAlertInput{
 		Name: "suppressed", Severity: SeverityWarning,
 		SourceType: SourceTypePhysicalHost, SourceID: "host-1",
 	})
 	_, _ = svc.MarkSuppressed(a.ID, "host_in_maintenance")
 	// And one not suppressed.
-	_, _ = svc.CreateAlert(CreateAlertInput{
+	_, _ = svc.CreateAlert(context.Background(), CreateAlertInput{
 		Name: "not-suppressed", Severity: SeverityInfo,
 		SourceType: SourceTypeCustom, SourceID: "s",
 	})

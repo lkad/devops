@@ -241,7 +241,7 @@ func (h *Handler) Update(c *gin.Context) {
 // Delete handles DELETE /alerts/:id.
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
-	if err := h.svc.Delete(id); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
 	}
@@ -257,7 +257,7 @@ func (h *Handler) Acknowledge(c *gin.Context) {
 	if userID == "" {
 		userID = "system"
 	}
-	a, err := h.svc.Acknowledge(id, userID)
+	a, err := h.svc.Acknowledge(c.Request.Context(), id, userID)
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
@@ -268,7 +268,7 @@ func (h *Handler) Acknowledge(c *gin.Context) {
 // Resolve handles POST /alerts/:id/resolve.
 func (h *Handler) Resolve(c *gin.Context) {
 	id := c.Param("id")
-	a, err := h.svc.Resolve(id)
+	a, err := h.svc.Resolve(c.Request.Context(), id)
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
@@ -299,7 +299,7 @@ func (h *Handler) CreateChannel(c *gin.Context) {
 		writeValidationError(c.Writer, "request body must be JSON")
 		return
 	}
-	ch, err := h.svc.CreateChannel(req.toCreate())
+	ch, err := h.svc.CreateChannel(c.Request.Context(), req.toCreate())
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
@@ -326,7 +326,7 @@ func (h *Handler) UpdateChannel(c *gin.Context) {
 		writeValidationError(c.Writer, "request body must be JSON")
 		return
 	}
-	if err := h.svc.UpdateChannel(id, req.toUpdate()); err != nil {
+	if err := h.svc.UpdateChannel(c.Request.Context(), id, req.toUpdate()); err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
 	}
@@ -337,7 +337,7 @@ func (h *Handler) UpdateChannel(c *gin.Context) {
 // DeleteChannel handles DELETE /alerts/channels/:id.
 func (h *Handler) DeleteChannel(c *gin.Context) {
 	id := c.Param("id")
-	if err := h.svc.DeleteChannel(id); err != nil {
+	if err := h.svc.DeleteChannel(c.Request.Context(), id); err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
 	}
