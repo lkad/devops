@@ -1,4 +1,4 @@
-.PHONY: build test test-race test-cover vet lint run clean deps help ci-test ci-lint ci-build
+.PHONY: build test test-race test-cover vet lint lint-prometheus run clean deps help ci-test ci-lint ci-build
 
 GO        ?= /usr/local/go/bin/go
 PKG       := ./...
@@ -38,6 +38,29 @@ lint: ## Run basic linting (vet + gofmt)
 		if [ -n "$$out" ]; then echo "Unformatted files:"; echo "$$out"; exit 1; fi; \
 	fi
 	@echo "lint ok"
+
+# lint-prometheus runs `promtool check rules` over every rule file
+# in deploy/prometheus/rules/. PromQL silently accepts typoes
+# (catalog-degraded.yml had never been validated before this
+# landed), so a CI gate keeps a regression from sneaking in.
+#
+# Install: `brew install prometheus` (mac), `apt-get install
+# prometheus` (Debian), or use the promtool/promtool Docker image
+# (see .github/workflows/ci.yml for the CI variant).
+PROMTOOL ?= promtool
+PROM_RULES_DIR := deploy/prometheus/rules
+lint-prometheus: ## Validate Prometheus rule files with promtool
+	@command -v $(PROMTOOL) >/dev/null 2>&1 || { \
+		echo "promtool not found in PATH; install with 'brew install prometheus' or use the promtool/promtool Docker image"; \
+		exit 1; \
+	}
+	@for f in $(PROM_RULES_DIR)/*.yml $(PROM_RULES_DIR)/*.yaml; do \
+		if [ -f "$$f" ]; then \
+			echo "checking $$f"; \
+			$(PROMTOOL) check rules "$$f" || exit 1; \
+		fi; \
+	done
+	@echo "promtool ok"
 
 run: build ## Build and run the server (default port 18080; override with APP__PORT=NNNN)
 	CONFIG_PATH=configs/templates/config-dev.yaml LOG_FORMAT=text LOG_LEVEL=info APP__PORT=18080 ./$(BIN)

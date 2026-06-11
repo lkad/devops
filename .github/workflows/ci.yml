@@ -46,6 +46,36 @@ jobs:
           name: coverage
           path: coverage.out
 
+  prometheus-rules:
+    # Lint check on the alert/recording rules under
+    # deploy/prometheus/rules/. PromQL silently accepts
+    # typoes, so a CI gate prevents a broken rule from
+    # shipping. Runs in a container with promtool
+    # pre-installed (avoids the install step on every CI
+    # run; the prom/prometheus image ships /bin/promtool
+    # out of the box).
+    #
+    # The container's default entrypoint is the
+    # prometheus binary itself; override it to an empty
+    # string so /bin/promtool runs in the foreground
+    # without "unexpected <args>" parser errors from
+    # prometheus.
+    runs-on: ubuntu-latest
+    container:
+      image: prom/prometheus:latest
+      options: --entrypoint ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: promtool check rules
+        run: |
+          set -euo pipefail
+          for f in deploy/prometheus/rules/*.yml deploy/prometheus/rules/*.yaml; do
+            [ -f "$f" ] || continue
+            echo "checking $f"
+            /bin/promtool check rules "$f"
+          done
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
