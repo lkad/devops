@@ -49,6 +49,30 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// Dev-default constants. Centralised so the "rotate the
+// dev fallback" change has one home. Production startup
+// still refuses to start when these are in use (see
+// registerAuthRoutes + registerWsHubRoutes — the
+// `if cfg.App.Env == "production"` block).
+const (
+	// devDefaultJWTSecret is the APP_JWT_SECRET fallback
+	// when the env var is unset AND the app is not running
+	// in production. It is logged on startup ("no
+	// APP_JWT_SECRET configured; using dev-only fallback")
+	// so an operator can spot the misconfiguration in
+	// `kubectl logs`. Rotate in lockstep with the auth + WS
+	// hub routes (the two signers must agree).
+	devDefaultJWTSecret = "dev-secret-do-not-use-in-prod"
+
+	// devK8sCryptoKey is the K8S_CRYPTO_KEY fallback used
+	// by registerK8sClusterRoutes. The literal is 32 bytes
+	// (the AES-256 key size) so the SHA-256 derivation
+	// branch is not triggered in dev — the
+	// "len(key) != 32" check stays as a guard for prod
+	// misconfigurations.
+	devK8sCryptoKey = "dev-k8s-crypto-key-32-bytes-long-xx"
+)
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
@@ -400,7 +424,7 @@ func registerAuthRoutes(r *gin.Engine, cfg *config.Config, log *logger.Logger) (
 		if cfg.App.Env == "production" {
 			return nil, fmt.Errorf("APP_JWT_SECRET must be set when env=production (no dev fallback in prod)")
 		}
-		secret = "dev-secret-do-not-use-in-prod"
+		secret = devDefaultJWTSecret
 		log.Warn("no APP_JWT_SECRET configured; using dev-only fallback")
 	}
 
@@ -693,7 +717,7 @@ func registerK8sClusterRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logg
 		log.Error("k8s AutoMigrate failed", "err", err)
 		return nil
 	}
-	key := []byte(envOr("K8S_CRYPTO_KEY", "dev-k8s-crypto-key-32-bytes-long-xx"))
+	key := []byte(envOr("K8S_CRYPTO_KEY", devK8sCryptoKey))
 	if len(key) != 32 {
 		log.Warn("K8S_CRYPTO_KEY is not 32 bytes; deriving via SHA-256 (dev only)", "len", len(key))
 		h := sha256.Sum256(key)
@@ -973,7 +997,7 @@ func registerWsHubRoutes(v1 *gin.RouterGroup, cfg *config.Config, log *logger.Lo
 			log.Error("APP_JWT_SECRET must be set when env=production (no dev fallback); refusing to start WS hub with a known signer")
 			os.Exit(1)
 		}
-		secret = "dev-secret-do-not-use-in-prod"
+		secret = devDefaultJWTSecret
 	}
 	signer, err := auth.NewSigner(secret, time.Hour)
 	if err != nil {
