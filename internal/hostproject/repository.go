@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"github.com/devops-toolkit/backend/internal/database"
 
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -55,10 +56,7 @@ func (r *Repository) Create(l HostProjectLink) (HostProjectLink, error) {
 func (r *Repository) Get(id string) (HostProjectLink, error) {
 	var l HostProjectLink
 	if err := r.db.First(&l, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return HostProjectLink{}, notFound("host project link", id)
-		}
-		return HostProjectLink{}, err
+		return HostProjectLink{}, database.MapNotFound(err, notFound("host project link", id))
 	}
 	return l, nil
 }

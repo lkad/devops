@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"github.com/devops-toolkit/backend/internal/database"
 
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -86,10 +87,7 @@ func (r *Repository) Create(p Project) (Project, error) {
 func (r *Repository) Get(id string) (Project, error) {
 	var p Project
 	if err := r.db.First(&p, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return Project{}, notFound("project", id)
-		}
-		return Project{}, err
+		return Project{}, database.MapNotFound(err, notFound("project", id))
 	}
 	return p, nil
 }
