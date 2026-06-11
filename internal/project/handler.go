@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
@@ -24,16 +25,23 @@ import (
 // so the main entry point can mount them under /api/v1 alongside
 // other modules.
 type Handler struct {
-	svc  *Service
-	repo *Repository
+	svc   *Service
+	repo  *Repository
+	audit *audit.Service
 }
 
 // NewHandler returns a Handler bound to the supplied service and
 // repository. Both are required — the repository is consulted for
 // read-only paths (children, ancestors) where the service is a
-// pass-through.
-func NewHandler(svc *Service, repo *Repository) *Handler {
-	return &Handler{svc: svc, repo: repo}
+// pass-through. The audit service is optional (nil means
+// "no audit emission"); production wires a real service so
+// v0.2.0.0 P0 #3 audit-trail coverage holds.
+func NewHandler(svc *Service, repo *Repository, auditSvc ...*audit.Service) *Handler {
+	var a *audit.Service
+	if len(auditSvc) > 0 {
+		a = auditSvc[0]
+	}
+	return &Handler{svc: svc, repo: repo, audit: a}
 }
 
 // Register wires the project hierarchy routes onto the supplied
@@ -183,6 +191,12 @@ func (h *Handler) create(c *gin.Context) {
 		h.writeAPIError(c, err)
 		return
 	}
+	h.emitAudit(c, audit.RecordActionInput{
+		Action:       audit.ActionCreate,
+		ResourceType: audit.ResourceProject,
+		ResourceID:   p.ID,
+		Metadata:     audit.JSONMap{"code": p.Code, "name": p.Name, "type_id": p.TypeID},
+	})
 	handler.WriteCreated(c.Writer, p)
 }
 
@@ -212,6 +226,11 @@ func (h *Handler) update(c *gin.Context) {
 		h.writeAPIError(c, err)
 		return
 	}
+	h.emitAudit(c, audit.RecordActionInput{
+		Action:       audit.ActionUpdate,
+		ResourceType: audit.ResourceProject,
+		ResourceID:   p.ID,
+	})
 	handler.WriteJSON(c.Writer, http.StatusOK, p)
 }
 
@@ -222,6 +241,11 @@ func (h *Handler) delete(c *gin.Context) {
 		h.writeAPIError(c, err)
 		return
 	}
+	h.emitAudit(c, audit.RecordActionInput{
+		Action:       audit.ActionDelete,
+		ResourceType: audit.ResourceProject,
+		ResourceID:   c.Param("id"),
+	})
 	handler.WriteNoContent(c.Writer)
 }
 
@@ -314,6 +338,12 @@ func (h *Handler) addMember(c *gin.Context) {
 		h.writeAPIError(c, err)
 		return
 	}
+	h.emitAudit(c, audit.RecordActionInput{
+		Action:       audit.ActionMemberAdd,
+		ResourceType: audit.ResourceProjectMember,
+		ResourceID:   c.Param("id") + ":" + in.UserID,
+		Metadata:     audit.JSONMap{"project_id": c.Param("id"), "user_id": in.UserID, "role": in.Role},
+	})
 	handler.WriteCreated(c.Writer, gin.H{
 		"project_id": c.Param("id"),
 		"user_id":    in.UserID,
@@ -327,6 +357,12 @@ func (h *Handler) removeMember(c *gin.Context) {
 		h.writeAPIError(c, err)
 		return
 	}
+	h.emitAudit(c, audit.RecordActionInput{
+		Action:       audit.ActionMemberRemove,
+		ResourceType: audit.ResourceProjectMember,
+		ResourceID:   c.Param("id") + ":" + c.Param("user_id"),
+		Metadata:     audit.JSONMap{"project_id": c.Param("id"), "user_id": c.Param("user_id")},
+	})
 	handler.WriteNoContent(c.Writer)
 }
 
@@ -419,3 +455,24 @@ func readPagination(c *gin.Context) (int, int) {
 // exists so the handler can build the Filter struct without
 // declaring a temporary variable on every call.
 func ptr(s string) *string { return &s }
+
+// emitAudit is the single seam between the project HTTP layer
+// and the cross-module audit subsystem. The actor is read from
+// the gin context (stamped by the auth middleware) so the audit
+// trail is forgery-proof. A nil h.audit is a no-op so unit
+// tests can wire the handler without an audit sink. The
+// emission is best-effort: a failure to record does not roll
+// back the mutation.
+func (h *Handler) emitAudit(c *gin.Context, in audit.RecordActionInput) {
+	if h.audit == nil {
+		return
+	}
+	cl, _ := caller.FromGin(c)
+	if in.ActorID == "" {
+		in.ActorID = cl.UserID()
+	}
+	if in.ActorName == "" {
+		in.ActorName = cl.UserID()
+	}
+	h.audit.RecordAction(c.Request.Context(), in)
+}
