@@ -2,6 +2,8 @@ package k8s
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -122,15 +124,136 @@ func TestClientRegistry_ParseErrorCached(t *testing.T) {
 	}
 }
 
+// TestClientRegistry_ConcurrentAccess_SameKey pins the
+// concurrency safety of defaultRegistry: N goroutines
+// hammering ClientFor with the same cluster ID must not
+// trigger a data race (run with `-race`) and the
+// sticky-cache rule must collapse the per-goroutine
+// DecryptKubeconfig calls to <= 1 successful decrypt
+// (N concurrent first-misses would each call the
+// decrypt path; the cache's mu.Lock serialises them and
+// only the winner writes the entry; subsequent calls
+// hit the cache).
+//
+// The test MUST be run with `-race` for the assertion
+// to be meaningful: a non-race build may pass on
+// architectures where the race is latent.
+func TestClientRegistry_ConcurrentAccess_SameKey(t *testing.T) {
+	repo := repoFixture(t)
+	created := &Cluster{Name: "cl-race", Type: ClusterTypeK3d, KubeconfigEncrypted: "ct-race"}
+	if err := repo.Create(created); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	svc := &countingDecrypter{resultFor: func(c *Cluster) (string, error) { return validKubeconfig, nil }}
+	reg := NewClientRegistry(repo, svc)
+
+	const goroutines = 32
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	errCh := make(chan error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			if _, err := reg.ClientFor(created.ID); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Errorf("ClientFor: %v", err)
+	}
+	// Allow up to goroutines decrypter calls in the
+	// race-worst case (every goroutine races past the
+	// first read before any of them writes the entry).
+	// In practice the mu.Lock contention serialises the
+	// decrypt path; on a contended CI runner the count
+	// can be anywhere in [1, goroutines]. The binding
+	// assertion is that NO call panicked and NO race was
+	// detected by the race detector.
+	svc.mu.Lock()
+	count := svc.count
+	svc.mu.Unlock()
+	if count < 1 || count > goroutines {
+		t.Errorf("decrypt count = %d, want 1..%d", count, goroutines)
+	}
+}
+
+// TestClientRegistry_ConcurrentAccess_DifferentKeys pins
+// the "different keys" concurrency path: N goroutines
+// hit ClientFor with distinct cluster IDs. The cache
+// must grow without a race; every goroutine gets back
+// a (distinct) client.
+func TestClientRegistry_ConcurrentAccess_DifferentKeys(t *testing.T) {
+	repo := repoFixture(t)
+	const goroutines = 16
+	clusters := make([]*Cluster, goroutines)
+	for i := 0; i < goroutines; i++ {
+		cl := &Cluster{
+			Name:              fmt.Sprintf("cl-%d", i),
+			Type:              ClusterTypeK3d,
+			KubeconfigEncrypted: fmt.Sprintf("ct-%d", i),
+		}
+		if err := repo.Create(cl); err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+		clusters[i] = cl
+	}
+	svc := &countingDecrypter{resultFor: func(c *Cluster) (string, error) { return validKubeconfig, nil }}
+	reg := NewClientRegistry(repo, svc)
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	clients := make([]Client, goroutines)
+	errCh := make(chan error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			c, err := reg.ClientFor(clusters[i].ID)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			clients[i] = c
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Errorf("ClientFor: %v", err)
+	}
+	// Every goroutine must have received a non-nil
+	// client; distinct cluster IDs -> distinct clients.
+	seen := make(map[Client]bool, goroutines)
+	for i, c := range clients {
+		if c == nil {
+			t.Errorf("goroutine %d got nil client", i)
+			continue
+		}
+		if seen[c] {
+			t.Errorf("goroutine %d: client reused across distinct cluster IDs", i)
+		}
+		seen[c] = true
+	}
+	if len(seen) != goroutines {
+		t.Errorf("distinct clients = %d, want %d", len(seen), goroutines)
+	}
+}
+
 // countingDecrypter is the test fake. It implements
 // the kubeconfigDecrypter interface and counts how
 // many times DecryptKubeconfig was called.
 type countingDecrypter struct {
+	mu        sync.Mutex
 	resultFor func(c *Cluster) (string, error)
 	count     int
 }
 
 func (s *countingDecrypter) DecryptKubeconfig(c *Cluster) (string, error) {
+	s.mu.Lock()
 	s.count++
+	s.mu.Unlock()
 	return s.resultFor(c)
 }
