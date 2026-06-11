@@ -5,6 +5,23 @@ import (
 	"time"
 )
 
+// LogSink is the write-side seam for the log-aggregation
+// subsystem. Backends that can persist a single LogEntry
+// (e.g. the Local dev backend) implement it; read-only
+// backends (ES / Loki when wired without a writer) may
+// return an explicit "not supported" error. The interface
+// is intentionally narrow so the K8s log-stream path can
+// wire it with a single method.
+type LogSink interface {
+	// Append persists e. Implementations are expected to
+	// be concurrency-safe — the K8s log-stream pump
+	// fires one Append per line on a single drain
+	// goroutine, but the spec is "safe under
+	// concurrency" so future fan-outs do not have to
+	// renegotiate the contract.
+	Append(e LogEntry) error
+}
+
 // Capabilities describes what a LogBackend can do. The struct is
 // deliberately small — the spec scenario "Interface contract" only
 // asks for Query/Stats/Health/Capabilities, and the "Capabilities

@@ -46,6 +46,39 @@ func (s *Service) Streams(ctx context.Context) ([]Stream, error) {
 	return s.backend.Streams(ctx)
 }
 
+// CreateLogEntry persists a single LogEntry through the
+// configured backend. The method is the write-side of the
+// k8s-pod-log-streaming persistence requirement: every
+// pod log line the K8s streamer sees MUST land in
+// log_entries via this method (or, in tests, a fake
+// LogSink that records the call).
+//
+// The backend is type-asserted to LogSink; backends that
+// do not implement LogSink (e.g. a read-only ES client)
+// return a "not supported" error so a misconfiguration
+// is loud at wire-up time, not silent at 3am.
+//
+// The default Timestamp is set to now() when the caller
+// passes a zero value — K8s lines from the apiserver
+// already carry a Timestamp, so this branch is only
+// exercised in tests / dev echoes.
+func (s *Service) CreateLogEntry(ctx context.Context, e LogEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	sink, ok := s.backend.(LogSink)
+	if !ok {
+		return &contracts.APIError{
+			Code:    contracts.CodeInternal,
+			Message: "log backend does not support CreateLogEntry",
+		}
+	}
+	if e.Timestamp.IsZero() {
+		e.Timestamp = time.Now().UTC()
+	}
+	return sink.Append(e)
+}
+
 // Stats is the spec's "Log Statistics" surface: total
 // rows, by_level, by_source. Computed by walking the
 // underlying backend's stats. A backend that doesn't
