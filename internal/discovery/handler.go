@@ -32,6 +32,20 @@ func NewHandler(svc *Service) *Handler {
 //
 // perms is the per-route permission factory; pass a no-op
 // factory in unit tests that don't exercise auth.
+// Register attaches the network-discovery routes.
+//
+// Per-project access: DISCOVERY RUNS ARE GLOBAL — a
+// DiscoveryRun is a platform-level scan, not a per-tenant
+// resource. The PromoteHosts endpoint is the boundary:
+// the resulting Device rows are project-scoped via the
+// hostproject links table, and PromoteHosts must enforce
+// that the caller can write to the target project. Today
+// PromoteHosts reuses the global PermissionWriteDevices
+// only; a future iteration can add a project_id from the
+// request body and gate Promote on
+// rbac.HasPermissionInProject. Until then the global
+// rbac matrix is the only seam and the threat model is
+// "any Operator can promote any discovered host".
 func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
 	viewP := perms(rbac.PermissionViewDiscovery)
 	runP := perms(rbac.PermissionRunDiscovery)

@@ -215,6 +215,44 @@ func (s *Service) ListByDevice(deviceID string) ([]HostProjectLink, error) {
 	return s.repo.ListByDevice(deviceID)
 }
 
+// ProjectIDsForDevice returns the unique set of project IDs
+// the device is currently linked to (active links only —
+// OrphanedAt IS NULL). It is the seam the physicalhost
+// module's per-project access middleware uses: the host
+// :id resolves to a device_id (via the host row), and the
+// middleware needs the "membership in any of these
+// projects" check.
+//
+// An empty deviceID or a device with no links yields an
+// empty slice. The function does NOT consult the project
+// hierarchy: a link to a BusinessLine is considered
+// "membership in BusinessLine" — physicalhost routes are
+// host-scoped, not project-scoped, so the caller-side
+// hierarchy walk is not required for the per-project
+// access check.
+func (s *Service) ProjectIDsForDevice(deviceID string) ([]string, error) {
+	if deviceID == "" {
+		return nil, nil
+	}
+	links, err := s.repo.ListByDevice(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(links))
+	out := make([]string, 0, len(links))
+	for _, l := range links {
+		if l.OrphanedAt != nil {
+			continue
+		}
+		if _, ok := seen[l.ProjectID]; ok {
+			continue
+		}
+		seen[l.ProjectID] = struct{}{}
+		out = append(out, l.ProjectID)
+	}
+	return out, nil
+}
+
 // OrphanByDevice marks every active link for the device
 // as orphaned. This is the cascade hook called by the
 // wiring layer when a Device is soft-deleted. The
