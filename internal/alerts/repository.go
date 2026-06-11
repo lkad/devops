@@ -63,7 +63,6 @@ func (r *Repository) GetAlert(id string) (*Alert, error) {
 	var a Alert
 	if err := r.db.First(&a, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("alerts.GetAlert: %w", err)
 	}
 	return &a, nil
 }
@@ -153,7 +152,6 @@ func (r *Repository) GetChannel(id string) (*Channel, error) {
 	var c Channel
 	if err := r.db.First(&c, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("alerts.GetChannel: %w", err)
 	}
 	return &c, nil
 }
@@ -211,7 +209,6 @@ func (r *Repository) GetRule(id string) (*AlertRule, error) {
 	var rl AlertRule
 	if err := r.db.First(&rl, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("alerts.GetRule: %w", err)
 	}
 	return &rl, nil
 }
