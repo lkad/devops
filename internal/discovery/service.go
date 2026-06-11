@@ -8,6 +8,7 @@ import (
 	"time"
 
 	devicepkg "github.com/devops-toolkit/backend/internal/device"
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -55,19 +56,45 @@ type Service struct {
 	scnr   Scanner
 	probr  Prober
 	clock  func() time.Time
+	audit  *audit.Service
 }
 
 // NewService builds a Service. The scanner and prober are the
 // test seam — production wires the real implementations, tests
-// wire the fakes.
-func NewService(repo *Repository, devs *devicepkg.Repository, scnr Scanner, probr Prober) *Service {
+// wire the fakes. The audit service is optional (nil means
+// "no audit emission"); production wires a real service so
+// v0.2.0.0 P0 #3 audit-trail coverage holds.
+func NewService(repo *Repository, devs *devicepkg.Repository, scnr Scanner, probr Prober, auditSvc ...*audit.Service) *Service {
+	var a *audit.Service
+	if len(auditSvc) > 0 {
+		a = auditSvc[0]
+	}
 	return &Service{
 		repo:  repo,
 		devs:  devs,
 		scnr:  scnr,
 		probr: probr,
 		clock: func() time.Time { return time.Now().UTC() },
+		audit: a,
 	}
+}
+
+// emit is the small helper every mutating method calls after
+// the row lands. A nil audit service short-circuits so unit
+// tests do not need a fake. The context is background: the
+// discovery run is a long-running operation that survives the
+// HTTP request that started it; the audit row's OccurredAt
+// is set by the audit service.
+func (s *Service) emit(action audit.AuditAction, resourceType audit.AuditResourceType, resourceID string, metadata audit.JSONMap) {
+	if s.audit == nil {
+		return
+	}
+	s.audit.RecordAction(context.Background(), audit.RecordActionInput{
+		Action:       action,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Metadata:     metadata,
+	})
 }
 
 // apiErrorType is the canonical alias for *contracts.APIError
@@ -180,6 +207,11 @@ func (s *Service) StartRun(ctx context.Context, in StartRunInput) (*DiscoveryRun
 			Cause:   err,
 		}
 	}
+	s.emit(audit.ActionCreate, audit.ResourceDiscoveryRun, run.ID, audit.JSONMap{
+		"cidr":        run.CIDR,
+		"hosts_found": run.HostsFound,
+		"status":      string(run.Status),
+	})
 	return run, nil
 }
 
@@ -299,6 +331,11 @@ func (s *Service) PromoteHosts(ctx context.Context, in PromoteInput) ([]devicepk
 			}
 		}
 		created = append(created, *d)
+		s.emit(audit.ActionCreate, audit.ResourceDiscoveryHost, h.ID, audit.JSONMap{
+			"run_id":    run.ID,
+			"device_id": d.ID,
+			"ip":        h.IPAddress,
+		})
 	}
 	return created, nil
 }

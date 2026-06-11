@@ -5,6 +5,7 @@
 package logs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
@@ -31,6 +33,7 @@ type Handler struct {
 	local *Local     // nil if backend isn't Local; only needed for /_test/echo
 	extra *ExtraService
 	repo  *ExtraRepository
+	audit *audit.Service
 }
 
 // NewHandler builds a Handler. The local backend is used by the
@@ -51,9 +54,44 @@ func NewHandler(svc *Service, local LogBackend) *Handler {
 // retention / saved-filter / alert-rule routes. The
 // standard NewHandler keeps those fields nil so a
 // production deployment can opt out by simply not calling
-// this constructor.
-func NewHandlerWithExtra(svc *Service, extra *ExtraService, repo *ExtraRepository) *Handler {
-	return &Handler{svc: svc, extra: extra, repo: repo}
+// this constructor. The audit service is optional; a nil
+// value short-circuits the audit emission in the saved-filter
+// and alert-rule mutating handlers.
+func NewHandlerWithExtra(svc *Service, extra *ExtraService, repo *ExtraRepository, auditSvc ...*audit.Service) *Handler {
+	var a *audit.Service
+	if len(auditSvc) > 0 {
+		a = auditSvc[0]
+	}
+	return &Handler{svc: svc, extra: extra, repo: repo, audit: a}
+}
+
+// emitSavedFilter / emitAlertRule are the small audit helpers
+// for the saved-filter and alert-rule mutating handlers. A
+// nil audit service short-circuits so unit tests do not need
+// a fake. The context is background because the audit row is
+// a post-commit side effect; failures are best-effort.
+func (h *Handler) emitSavedFilter(action audit.AuditAction, id string, metadata audit.JSONMap) {
+	if h.audit == nil {
+		return
+	}
+	h.audit.RecordAction(context.Background(), audit.RecordActionInput{
+		Action:       action,
+		ResourceType: audit.ResourceSavedFilter,
+		ResourceID:   id,
+		Metadata:     metadata,
+	})
+}
+
+func (h *Handler) emitAlertRule(action audit.AuditAction, id string, metadata audit.JSONMap) {
+	if h.audit == nil {
+		return
+	}
+	h.audit.RecordAction(context.Background(), audit.RecordActionInput{
+		Action:       action,
+		ResourceType: audit.ResourceAlertRule,
+		ResourceID:   id,
+		Metadata:     metadata,
+	})
 }
 
 // Register attaches the log-aggregation routes to the supplied
@@ -341,6 +379,10 @@ func (h *Handler) CreateSavedFilter(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.emitSavedFilter(audit.ActionCreate, f.ID, audit.JSONMap{
+		"name":         f.Name,
+		"owner_user_id": f.OwnerUserID,
+	})
 	c.JSON(http.StatusCreated, f)
 }
 
@@ -370,7 +412,8 @@ func (h *Handler) GetSavedFilter(c *gin.Context) {
 
 // DeleteSavedFilter handles DELETE /logs/saved-filters/:id.
 func (h *Handler) DeleteSavedFilter(c *gin.Context) {
-	err := h.repo.DeleteSavedFilter(c.Param("id"))
+	id := c.Param("id")
+	err := h.repo.DeleteSavedFilter(id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
@@ -379,6 +422,7 @@ func (h *Handler) DeleteSavedFilter(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.emitSavedFilter(audit.ActionDelete, id, nil)
 	c.Status(http.StatusNoContent)
 }
 
@@ -454,6 +498,10 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.emitAlertRule(audit.ActionCreate, r.ID, audit.JSONMap{
+		"name":      r.Name,
+		"condition": r.Condition,
+	})
 	c.JSON(http.StatusCreated, r)
 }
 
@@ -469,7 +517,8 @@ func (h *Handler) ListAlertRules(c *gin.Context) {
 
 // DeleteAlertRule handles DELETE /logs/alert-rules/:id.
 func (h *Handler) DeleteAlertRule(c *gin.Context) {
-	err := h.repo.DeleteAlertRule(c.Param("id"))
+	id := c.Param("id")
+	err := h.repo.DeleteAlertRule(id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
@@ -478,6 +527,7 @@ func (h *Handler) DeleteAlertRule(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.emitAlertRule(audit.ActionDelete, id, nil)
 	c.Status(http.StatusNoContent)
 }
 

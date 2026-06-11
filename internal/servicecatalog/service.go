@@ -1,11 +1,13 @@
 package servicecatalog
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -59,13 +61,20 @@ type UpdateInput struct {
 // Named Catalog (not Service) to avoid colliding with the
 // data-model type also called Service in this package.
 type Catalog struct {
-	repo *Repository
+	repo  *Repository
+	audit *audit.Service
 }
 
 // NewCatalog builds a Catalog. The repository is the only
-// dependency.
-func NewCatalog(repo *Repository) *Catalog {
-	return &Catalog{repo: repo}
+// required dependency; the audit service is optional
+// (nil means "no audit emission"; production wires a real
+// service so v0.2.0.0 P0 #3 audit-trail coverage holds).
+func NewCatalog(repo *Repository, auditSvc ...*audit.Service) *Catalog {
+	var a *audit.Service
+	if len(auditSvc) > 0 {
+		a = auditSvc[0]
+	}
+	return &Catalog{repo: repo, audit: a}
 }
 
 // Create validates in, then persists it. Returns the
@@ -91,6 +100,7 @@ func (s *Catalog) Create(in CreateInput) (*Service, error) {
 		}
 		return nil, err
 	}
+	s.emit(audit.ActionCreate, "service", row.ID, audit.JSONMap{"name": row.Name, "tier": string(row.Tier)})
 	return row, nil
 }
 
@@ -142,12 +152,34 @@ func (s *Catalog) Update(id string, in UpdateInput) (*Service, error) {
 		}
 		return nil, err
 	}
+	s.emit(audit.ActionUpdate, "service", row.ID, audit.JSONMap{"name": row.Name})
 	return row, nil
 }
 
 // SoftDelete marks the row deleted. 404 on missing.
 func (s *Catalog) SoftDelete(id string) error {
-	return s.repo.SoftDelete(id)
+	if err := s.repo.SoftDelete(id); err != nil {
+		return err
+	}
+	s.emit(audit.ActionDelete, "service", id, audit.JSONMap{})
+	return nil
+}
+
+// emit is the small helper every mutating method calls after
+// the row lands. A nil audit service short-circuits so unit
+// tests do not need a fake. The helper is package-private; the
+// only public surface is the variadic auditSvc argument on
+// NewCatalog.
+func (s *Catalog) emit(action audit.AuditAction, resourceType string, resourceID string, metadata audit.JSONMap) {
+	if s.audit == nil {
+		return
+	}
+	s.audit.RecordAction(context.Background(), audit.RecordActionInput{
+		Action:       action,
+		ResourceType: audit.AuditResourceType(resourceType),
+		ResourceID:   resourceID,
+		Metadata:     metadata,
+	})
 }
 
 // validateCreate is the shared field-level rules.
@@ -310,6 +342,10 @@ func (s *Catalog) CreateOnCall(serviceID string, in CreateOnCallInput) (*OnCall,
 	if err := s.repo.CreateOnCall(row); err != nil {
 		return nil, err
 	}
+	s.emit(audit.ActionCreate, string(audit.ResourceOnCall), row.ID, audit.JSONMap{
+		"service_id": row.ServiceID,
+		"user":       row.User,
+	})
 	return row, nil
 }
 
@@ -320,7 +356,11 @@ func (s *Catalog) DeleteOnCall(serviceID, shiftID string) error {
 	if _, err := s.repo.Get(serviceID); err != nil {
 		return err
 	}
-	return s.repo.DeleteOnCall(shiftID)
+	if err := s.repo.DeleteOnCall(shiftID); err != nil {
+		return err
+	}
+	s.emit(audit.ActionDelete, string(audit.ResourceOnCall), shiftID, audit.JSONMap{"service_id": serviceID})
+	return nil
 }
 
 // CreateRunbook validates in, then persists. Returns
@@ -340,6 +380,10 @@ func (s *Catalog) CreateRunbook(serviceID string, in CreateRunbookInput) (*Runbo
 	if err := s.repo.CreateRunbook(row); err != nil {
 		return nil, err
 	}
+	s.emit(audit.ActionCreate, string(audit.ResourceRunbook), row.ID, audit.JSONMap{
+		"service_id": row.ServiceID,
+		"title":      row.Title,
+	})
 	return row, nil
 }
 
@@ -349,7 +393,11 @@ func (s *Catalog) DeleteRunbook(serviceID, entryID string) error {
 	if _, err := s.repo.Get(serviceID); err != nil {
 		return err
 	}
-	return s.repo.DeleteRunbook(entryID)
+	if err := s.repo.DeleteRunbook(entryID); err != nil {
+		return err
+	}
+	s.emit(audit.ActionDelete, string(audit.ResourceRunbook), entryID, audit.JSONMap{"service_id": serviceID})
+	return nil
 }
 
 // validateOnCall enforces the request shape:

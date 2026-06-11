@@ -70,6 +70,25 @@ const (
 	ResourceK8sCluster    AuditResourceType = "k8s_cluster"
 	ResourcePipeline      AuditResourceType = "pipeline"
 	ResourceProjectMember AuditResourceType = "project_member"
+	// SavedFilter / AlertRule live in the logs module but
+	// share the audit table; a saved filter and an alert rule
+	// are independent nouns so each gets its own resource
+	// type rather than collapsing into a generic "log_config".
+	ResourceSavedFilter   AuditResourceType = "log_saved_filter"
+	ResourceAlertRule     AuditResourceType = "log_alert_rule"
+	// OnCall / Runbook are sub-resources of a Service in
+	// the service-catalog module. The audit resource type
+	// identifies the sub-resource so the audit list view can
+	// filter by it; the parent service_id is captured in
+	// Metadata.
+	ResourceOnCall        AuditResourceType = "service_oncall"
+	ResourceRunbook       AuditResourceType = "service_runbook"
+	// DiscoveryRun / DiscoveryHost cover the network-discovery
+	// module. PromoteHosts emits two events (one for the run,
+	// one per host promoted) so a future "what was discovered"
+	// view can correlate.
+	ResourceDiscoveryRun  AuditResourceType = "discovery_run"
+	ResourceDiscoveryHost AuditResourceType = "discovery_host"
 )
 
 // JSONMap is the schema-less key/value bag used by the Metadata
