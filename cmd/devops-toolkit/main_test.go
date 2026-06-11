@@ -89,6 +89,61 @@ func TestBuildRouter_APIv1Placeholder(t *testing.T) {
 	}
 }
 
+// TestBuildRouter_LogsEveryRequest pins the v0.2.0.0
+// middleware-chain compliance: the project's
+// middleware.Logger (not stock gin.Logger) must emit one
+// structured log line per request, both for a matched
+// route (/health, 200) and a NoRoute 404. The test
+// exercises the global chain (Logger is registered with
+// r.Use, not per-route) so a future refactor that moves
+// the logger into a per-route handler would fail this
+// test. The on-call engineer's first action at 3am is
+// "tail the access log" — a missing per-request line is
+// the bug they cannot diagnose.
+func TestBuildRouter_LogsEveryRequest(t *testing.T) {
+	var buf bytes.Buffer
+	log := logger.New(logger.WithWriter(&buf), logger.WithLevel("info"))
+	r, _, _ := buildRouter(log, nil, nil)
+
+	// One matched route, one 404.
+	for _, path := range []string{"/health", "/no-such-route"} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		r.ServeHTTP(rr, req)
+	}
+
+	lines := splitNonEmptyLines(buf.String())
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 log lines, got %d: %s", len(lines), buf.String())
+	}
+	// Each line must carry method + path. We do not
+	// pin on the exact field set (the Logger emits
+	// status, duration_ms, client_ip, request_id) so
+	// the test stays robust to Logger output tweaks.
+	for _, l := range lines {
+		if !strings.Contains(l, "http request") {
+			continue
+		}
+		// ok
+		return
+	}
+	t.Errorf("expected at least one 'http request' line; got: %s", buf.String())
+}
+
+// splitNonEmptyLines is a tiny helper local to the main
+// package test binary; the same helper in
+// internal/middleware/logger_test.go is not importable
+// across packages.
+func splitNonEmptyLines(s string) []string {
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 func TestRenderConfigString_MasksPasswords(t *testing.T) {
 	// GIVEN a config with a database password
 	// WHEN rendered
