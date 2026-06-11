@@ -743,13 +743,16 @@ func registerPhysicalHostRoutes(ctx context.Context, v1 *gin.RouterGroup, db *go
 	go loop.Run(ctx, nil)
 	log.Info("monitor loop started", "tick", "1m", "jitter", "5s")
 
+	phSvc := physicalhost.NewService(physicalhost.ServiceConfig{
+		Repo:      repo,
+		AuditRepo: auditRepo,
+	})
 	physicalhost.NewHandler(physicalhost.HandlerConfig{
-		Repo:        repo,
+		Service:     phSvc,
 		Monitor:     monitor,
 		Maintenance: maint,
 		Metrics:     physicalhost.NewMetricsCache(physicalhost.MetricsCacheConfig{Collector: collector, TTL: 30 * time.Second, MaxEntries: 1024}),
 		Audit:       auditSvc,
-		AuditRepo:   auditRepo,
 	}).Register(v1, perms)
 	log.Info("physicalhost routes registered")
 	return maint

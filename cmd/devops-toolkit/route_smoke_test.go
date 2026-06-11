@@ -129,8 +129,9 @@ func TestRouteSmoke_ProjectAndDeviceRegistered(t *testing.T) {
 		Repo:    phRepo,
 		Auditor: noopAuditEmitter{},
 	})
+	phSvc := physicalhost.NewService(physicalhost.ServiceConfig{Repo: phRepo})
 	physicalhost.NewHandler(physicalhost.HandlerConfig{
-		Repo: phRepo, Monitor: phMonitor, Maintenance: phMaint,
+		Service: phSvc, Monitor: phMonitor, Maintenance: phMaint,
 	}).Register(v1, noopPerms)
 
 	discRepo := discovery.NewRepository(db)
