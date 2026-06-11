@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -55,6 +56,7 @@ type Service struct {
 	repo      *Repository
 	client    Client
 	cryptoKey []byte
+	audit     *audit.Service
 	// registry is the per-cluster ClientResolver (P1.5).
 	// Optional — nil means "no per-cluster registry wired"
 	// (e.g. dev/test fixtures). Set via SetRegistry. The
@@ -67,14 +69,22 @@ type Service struct {
 // NewService builds a Service. The client is seam-able
 // (FakeClient for tests, KubeClient in production). An empty
 // cryptoKey panics — encryption must always be configured.
-func NewService(repo *Repository, client Client, cryptoKey []byte) *Service {
+// The audit service is optional (nil means "no audit
+// emission"); production always wires a real service so
+// v0.2.0.0 P0 #3 audit-trail coverage holds.
+func NewService(repo *Repository, client Client, cryptoKey []byte, auditSvc ...*audit.Service) *Service {
 	if len(cryptoKey) == 0 {
 		panic("k8s: NewService requires a non-empty cryptoKey")
+	}
+	var a *audit.Service
+	if len(auditSvc) > 0 {
+		a = auditSvc[0]
 	}
 	return &Service{
 		repo:      repo,
 		client:    client,
 		cryptoKey: cryptoKey,
+		audit:     a,
 	}
 }
 
@@ -96,7 +106,11 @@ func (s *Service) Registry() ClientRegistry { return s.registry }
 // persists the cluster. The returned Cluster's
 // KubeconfigEncrypted field is the ciphertext — callers
 // wishing to read the plaintext must use DecryptKubeconfig.
-func (s *Service) Create(in CreateClusterInput) (*Cluster, error) {
+// The audit emission (k8s_cluster.create) is best-effort;
+// the context is variadic so existing test rig keeps
+// compiling.
+func (s *Service) Create(in CreateClusterInput, ctxArg ...context.Context) (*Cluster, error) {
+	ctx := s.ctxOrBackground(ctxArg)
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, &contracts.APIError{
 			Code:    contracts.CodeValidation,
@@ -156,6 +170,14 @@ func (s *Service) Create(in CreateClusterInput) (*Cluster, error) {
 			Cause:   err,
 		}
 	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionCreate,
+			ResourceType: audit.ResourceK8sCluster,
+			ResourceID:   c.ID,
+			Metadata:     audit.JSONMap{"name": c.Name, "type": string(c.Type)},
+		})
+	}
 	return c, nil
 }
 
@@ -195,8 +217,11 @@ func (s *Service) List(f ListFilter) ([]Cluster, int64, error) {
 
 // Update applies a partial update. Pointer fields are
 // honoured (nil = leave unchanged); Kubeconfig is re-encrypted
-// when supplied.
-func (s *Service) Update(id string, in UpdateClusterInput) (*Cluster, error) {
+// when supplied. The audit emission (k8s_cluster.update) is
+// best-effort; the context is variadic so existing test
+// rig keeps compiling.
+func (s *Service) Update(id string, in UpdateClusterInput, ctxArg ...context.Context) (*Cluster, error) {
+	ctx := s.ctxOrBackground(ctxArg)
 	c, err := s.repo.Get(id)
 	if err != nil {
 		if IsNotFound(err) {
@@ -275,11 +300,22 @@ func (s *Service) Update(id string, in UpdateClusterInput) (*Cluster, error) {
 			Cause:   err,
 		}
 	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionUpdate,
+			ResourceType: audit.ResourceK8sCluster,
+			ResourceID:   c.ID,
+			Metadata:     audit.JSONMap{"name": c.Name, "type": string(c.Type)},
+		})
+	}
 	return c, nil
 }
 
-// Delete soft-deletes a cluster.
-func (s *Service) Delete(id string) error {
+// Delete soft-deletes a cluster. The audit emission
+// (k8s_cluster.delete) is best-effort; the context is
+// variadic so existing test rig keeps compiling.
+func (s *Service) Delete(id string, ctxArg ...context.Context) error {
+	ctx := s.ctxOrBackground(ctxArg)
 	if err := s.repo.Delete(id); err != nil {
 		if IsNotFound(err) {
 			return &contracts.APIError{
@@ -293,7 +329,25 @@ func (s *Service) Delete(id string) error {
 			Cause:   err,
 		}
 	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionDelete,
+			ResourceType: audit.ResourceK8sCluster,
+			ResourceID:   id,
+		})
+	}
 	return nil
+}
+
+// ctxOrBackground returns the first supplied context, or
+// context.Background() when none was supplied. Mirrors the
+// pattern used in the other modules so existing test rig
+// (which never wires a context) keeps compiling.
+func (s *Service) ctxOrBackground(args []context.Context) context.Context {
+	if len(args) > 0 && args[0] != nil {
+		return args[0]
+	}
+	return context.Background()
 }
 
 // Probe pings the cluster through the Client seam. The
@@ -465,6 +519,26 @@ func (s *Service) Exec(ctx context.Context, id, namespace, pod, container string
 			Message: fmt.Sprintf("exec failed: %v", execErr),
 			Cause:   execErr,
 		}
+	}
+	// Audit emission: every successful exec is recorded so
+	// the audit log can answer "who ran which command on
+	// which pod/container/cluster" without re-deriving it
+	// from the kubeconfig. The action is "trigger" (the
+	// spec's existing action set has it for "operator
+	// invoked a side-effect"); the metadata carries the
+	// full command for forensic replay.
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionTrigger,
+			ResourceType: audit.ResourceK8sCluster,
+			ResourceID:   id,
+			Metadata: audit.JSONMap{
+				"namespace": namespace,
+				"pod":       pod,
+				"container": container,
+				"command":   command,
+			},
+		})
 	}
 	return result, nil
 }
