@@ -17,6 +17,13 @@ import (
 // intentionally thin: parse, call Catalog, render. All
 // validation, orchestration, and persistence live in the
 // Catalog / Repository.
+//
+// Layering exception (documented per the v0.2.0.0
+// architecture audit, item 2): the Get endpoint at
+// h.cat.repo.CurrentOnCall / h.cat.repo.ListRunbook
+// reaches into the repository directly. A full refactor
+// would add Catalog.GetWithOnCallAndRunbook that hides
+// the joins; tracked as a P2 follow-up.
 type Handler struct {
 	cat     *Catalog
 	health  *Health  // optional; nil means health endpoint returns "unknown / not configured"

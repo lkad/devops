@@ -32,6 +32,17 @@ const (
 // HandlerConfig bundles the dependencies of Handler. The handler
 // is the only place that depends on Gin; the service layer is
 // framework-agnostic.
+//
+// Layering exception (documented per the v0.2.0.0
+// architecture audit, item 2): 8 sites in the handler
+// reach h.repo / h.auditRepo directly for list-with-join
+// reads (List, Get, Create, Update, Delete, the metrics
+// path, and the maintenance-history path). A full refactor
+// would introduce a physicalhost.Service that hides the
+// joins; tracked as a P2 follow-up. The pragmatic decision
+// is to keep the reads in the handler: they are pure
+// SQL-with-joins and a Service pass-through would be
+// empty boilerplate.
 type HandlerConfig struct {
 	Repo        *Repository
 	Monitor     *MonitorService

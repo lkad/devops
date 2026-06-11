@@ -35,6 +35,19 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 //
 // perms is the per-route permission factory; pass a no-op
 // factory in unit tests that don't exercise auth.
+//
+// Security note: the /audit endpoints are gated to
+// PermissionViewAuditLog only. Per the rbac matrix that
+// permission is granted to SuperAdmin and Operator (not
+// Developer or Auditor-at-the-time-of-this-fix). The
+// rationale is that a full audit-log read across every
+// project would let a Developer or scoped Auditor enumerate
+// other projects' activity; the P0 cross-tenant work gates
+// the surface to roles that need global visibility. A
+// follow-up TODO will add the per-project SQL filter
+// (AuditFilter.ProjectIDsIn / JOIN project_members) so a
+// scoped Auditor can be re-introduced with proper tenant
+// isolation.
 func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
 	viewP := perms(rbac.PermissionViewAuditLog)
 	r.GET("/audit", viewP, h.List)
