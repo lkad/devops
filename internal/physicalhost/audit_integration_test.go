@@ -117,7 +117,8 @@ func handlerWithAudit(t *testing.T) *gin.Engine {
 		Auditor: NewAuditEmitterAdapter(auditSvc),
 	})
 	mon.SetMaintenance(maint)
-	h := NewHandler(HandlerConfig{Repo: repo, Monitor: mon, Maintenance: maint, Audit: auditSvc, AuditRepo: auditRepo})
+	svc := NewService(ServiceConfig{Repo: repo, AuditRepo: auditRepo})
+	h := NewHandler(HandlerConfig{Service: svc, Monitor: mon, Maintenance: maint, Audit: auditSvc})
 	r := gin.New()
 	v1 := r.Group("/api/v1")
 	h.Register(v1, rbac.NoopPermFactory())

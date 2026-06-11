@@ -19,9 +19,9 @@ import (
 // handler / service signatures read as physicalhost-typed
 // without an audit import scattered across the file.
 type (
-	AuditService    = audit.Service
-	AuditRepo       = audit.Repository
-	AuditFilter     = audit.AuditFilter
+	AuditService     = audit.Service
+	AuditRepo        = audit.Repository
+	AuditFilter      = audit.AuditFilter
 	AuditResourceType = audit.AuditResourceType
 )
 
@@ -33,50 +33,44 @@ const (
 // is the only place that depends on Gin; the service layer is
 // framework-agnostic.
 //
-// Layering exception (documented per the v0.2.0.0
-// architecture audit, item 2): 8 sites in the handler
-// reach h.repo / h.auditRepo directly for list-with-join
-// reads (List, Get, Create, Update, Delete, the metrics
-// path, and the maintenance-history path). A full refactor
-// would introduce a physicalhost.Service that hides the
-// joins; tracked as a P2 follow-up. The pragmatic decision
-// is to keep the reads in the handler: they are pure
-// SQL-with-joins and a Service pass-through would be
-// empty boilerplate.
+// Per the v0.2.0.0 architecture audit (item 2), the previous
+// version of Handler held *Repository and *AuditRepo directly
+// and reached them at 8 sites for list-with-join reads. Those
+// reads now flow through *Service; the handler no longer
+// imports gorm or the audit table for those paths.
 type HandlerConfig struct {
-	Repo        *Repository
+	Service     *Service
 	Monitor     *MonitorService
 	Maintenance *MaintenanceService
 	Metrics     *MetricsCache
 	Audit       *AuditService
-	AuditRepo   *AuditRepo
 }
 
 // Handler is the HTTP layer for the physical-host monitoring
 // subsystem. It is intentionally thin: parse, call service,
-// render. All validation, orchestration, and persistence live
-// in the service / repository / prober layers.
+// render. All persistence and orchestration live in the
+// service / repository / prober layers; the handler holds
+// framework-typed handles (Gin, *Service, *MonitorService,
+// *MaintenanceService) and nothing else.
 type Handler struct {
-	repo        *Repository
+	svc         *Service
 	monitor     *MonitorService
 	maintenance *MaintenanceService
 	metrics     *MetricsCache
 	audit       *AuditService
-	auditRepo   *AuditRepo
 }
 
 // NewHandler builds a Handler. A nil Metrics cache is tolerated;
 // the metrics route returns 503 in that case so misconfigured
-// deployments fail loudly. Audit fields are similarly
-// optional — only the maintenance-history route needs them.
+// deployments fail loudly. The Service is required — it is the
+// new home of every read the handler used to issue directly.
 func NewHandler(cfg HandlerConfig) *Handler {
 	return &Handler{
-		repo:        cfg.Repo,
+		svc:         cfg.Service,
 		monitor:     cfg.Monitor,
 		maintenance: cfg.Maintenance,
 		metrics:     cfg.Metrics,
 		audit:       cfg.Audit,
-		auditRepo:   cfg.AuditRepo,
 	}
 }
 
@@ -205,7 +199,7 @@ func (h *Handler) List(c *gin.Context) {
 		filter.Offset = n
 	}
 
-	rows, total, err := h.repo.ListWithDevice(filter)
+	rows, total, err := h.svc.ListWithDevice(c.Request.Context(), filter)
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
@@ -222,7 +216,7 @@ func (h *Handler) List(c *gin.Context) {
 // Get handles GET /physical-hosts/:id.
 func (h *Handler) Get(c *gin.Context) {
 	id := c.Param("id")
-	p, err := h.repo.Get(id)
+	p, err := h.svc.Get(c.Request.Context(), id)
 	if err != nil {
 		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
@@ -246,7 +240,7 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 	p := req.toModel()
-	if err := h.repo.Create(p); err != nil {
+	if err := h.svc.Create(c.Request.Context(), p); err != nil {
 		handler.WriteAPIError(c.Writer, mapRepoError(err, p.DeviceID))
 		return
 	}
@@ -270,7 +264,7 @@ func (h *Handler) Replace(c *gin.Context) {
 		return
 	}
 
-	p, err := h.repo.Get(id)
+	p, err := h.svc.Get(c.Request.Context(), id)
 	if err != nil {
 		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
@@ -290,7 +284,7 @@ func (h *Handler) Replace(c *gin.Context) {
 	if req.State != "" {
 		p.State = PhysicalHostState(req.State)
 	}
-	if err := h.repo.Update(p); err != nil {
+	if err := h.svc.Update(c.Request.Context(), p); err != nil {
 		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
 	}
@@ -304,7 +298,7 @@ func (h *Handler) Replace(c *gin.Context) {
 // host without an explicit stop call.
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
-	if err := h.repo.Delete(id); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
 		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
 	}
@@ -322,7 +316,7 @@ func (h *Handler) Probe(c *gin.Context) {
 		handler.WriteAPIError(c.Writer, mapMonitorError(err, id))
 		return
 	}
-	p, err := h.repo.Get(id)
+	p, err := h.svc.Get(c.Request.Context(), id)
 	if err != nil {
 		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
@@ -385,7 +379,7 @@ func (h *Handler) ExitMaintenance(c *gin.Context) {
 // just resolves the host row, calls the cache, and renders.
 func (h *Handler) Metrics(c *gin.Context) {
 	id := c.Param("id")
-	host, err := h.repo.Get(id)
+	host, err := h.svc.Get(c.Request.Context(), id)
 	if err != nil {
 		handler.WriteAPIError(c.Writer, mapRepoError(err, id))
 		return
@@ -412,7 +406,7 @@ func (h *Handler) Metrics(c *gin.Context) {
 // "last 5 maintenance windows" timeline.
 func (h *Handler) MaintenanceHistory(c *gin.Context) {
 	id := c.Param("id")
-	if h.auditRepo == nil {
+	if !h.svc.HasAuditRepo() {
 		handler.WriteError(c.Writer, &contracts.APIError{
 			Code:    contracts.CodeInternal,
 			Message: "audit repository not configured",
@@ -425,11 +419,7 @@ func (h *Handler) MaintenanceHistory(c *gin.Context) {
 			limit = n
 		}
 	}
-	rows, _, err := h.auditRepo.List(AuditFilter{
-		ResourceType: AuditResourcePhysicalHost,
-		ResourceID:   id,
-		Limit:        limit,
-	})
+	rows, _, err := h.svc.ListMaintenanceHistory(c.Request.Context(), id, limit)
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return

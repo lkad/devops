@@ -111,8 +111,9 @@ func handlerWithMetrics(t *testing.T, seed func(p *Fake)) *gin.Engine {
 	})
 	maint := NewMaintenanceService(MaintenanceConfig{Repo: repo, Auditor: &fakeAuditor{}})
 	mon.SetMaintenance(maint)
+	svc := NewService(ServiceConfig{Repo: repo})
 	h := NewHandler(HandlerConfig{
-		Repo: repo, Monitor: mon, Maintenance: maint, Metrics: cache,
+		Service: svc, Monitor: mon, Maintenance: maint, Metrics: cache,
 	})
 	r := gin.New()
 	v1 := r.Group("/api/v1")

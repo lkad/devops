@@ -38,9 +38,10 @@ func handlerFixture(t *testing.T) *gin.Engine {
 	// Bridge: the monitor needs to delegate Enter/Exit to the
 	// maintenance service so audit emission lives in one place.
 	mon.SetMaintenance(maint)
+	svc := NewService(ServiceConfig{Repo: repo})
 	h := NewHandler(HandlerConfig{
-		Repo:       repo,
-		Monitor:    mon,
+		Service:     svc,
+		Monitor:     mon,
 		Maintenance: maint,
 	})
 	r := gin.New()
