@@ -180,13 +180,13 @@ func run() error {
 			hubPublisher = realtime.NewHubPublisher(wsHubAdapter{wsHub})
 		}
 		phMaintenance := registerPhysicalHostRoutes(ctx, v1, db, log, obs, hubPublisher, auditSvc, auditRepo, perms)
-		registerAlertsRoutes(v1, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance}, perms)
-		registerDiscoveryRoutes(v1, db, log, perms)
+		registerAlertsRoutes(v1, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance}, perms, auditSvc)
+		registerDiscoveryRoutes(v1, db, log, perms, auditSvc)
 		k8sSvc := registerK8sClusterRoutes(v1, db, log, perms, auditSvc)
 		registerHostProjectLinkRoutes(v1, db, log, perms, rbacSvc, auditSvc)
 		registerPipelineRoutes(v1, db, log, perms)
-		registerServiceCatalogRoutes(v1, db, log, k8sSvc, obs, perms)
-		registerLogsRoutes(v1, db, log, perms)
+		registerServiceCatalogRoutes(v1, db, log, k8sSvc, obs, perms, auditSvc)
+		registerLogsRoutes(v1, db, log, perms, auditSvc)
 		registerMetricsRoutes(v1, db, log, perms)
 		registerLogStreamRoutes(v1, db, log, perms)
 	} else {
@@ -820,14 +820,14 @@ func (a *physicalhostMaintenanceAdapter) IsInMaintenance(ctx context.Context, ho
 // registerDiscoveryRoutes wires the network-discovery module. Scanner
 // and Prober are fakes in dev mode; production deployments swap them
 // for real nmap/ICMP and SNMP impls.
-func registerDiscoveryRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
+func registerDiscoveryRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, auditSvc *audit.Service) {
 	if err := dbpkg.AutoMigrate(db, discovery.AllModels()...); err != nil {
 		log.Error("discovery AutoMigrate failed", "err", err)
 		return
 	}
 	repo := discovery.NewRepository(db)
 	devs := devicepkg.NewRepository(db)
-	svc := discovery.NewService(repo, devs, discovery.NewFakeScanner(nil, nil), discovery.NewFakeProber(nil, nil))
+	svc := discovery.NewService(repo, devs, discovery.NewFakeScanner(nil, nil), discovery.NewFakeProber(nil, nil), auditSvc)
 	discovery.NewHandler(svc).Register(v1, perms)
 	log.Info("discovery routes registered")
 }
@@ -910,13 +910,13 @@ func registerPipelineRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger
 // observability Metrics so the catalog's domain-level
 // gauges land on the same /metrics registry as the HTTP
 // middleware.
-func registerServiceCatalogRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, k8sSvc *k8s.Service, obs *observability.Metrics, perms func(rbacpkg.Permission) gin.HandlerFunc) {
+func registerServiceCatalogRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, k8sSvc *k8s.Service, obs *observability.Metrics, perms func(rbacpkg.Permission) gin.HandlerFunc, auditSvc *audit.Service) {
 	if err := dbpkg.AutoMigrate(db, &servicecatalog.Service{}, &servicecatalog.OnCall{}, &servicecatalog.RunbookEntry{}); err != nil {
 		log.Error("servicecatalog AutoMigrate failed", "err", err)
 		return
 	}
 	repo := servicecatalog.NewRepository(db)
-	cat := servicecatalog.NewCatalog(repo)
+	cat := servicecatalog.NewCatalog(repo, auditSvc)
 	handler := servicecatalog.NewHandler(cat)
 
 	// Domain-level Prometheus metrics for per-service
@@ -1064,13 +1064,20 @@ func orZeroTime(t *time.Time) time.Time {
 // swap to ES or Loki by changing cfg.Logs.Backend and instantiating
 // the matching backend. The /capabilities endpoint always returns
 // 200 (with a "unavailable" row if the backend is misconfigured).
-func registerLogsRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
+func registerLogsRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, auditSvc *audit.Service) {
 	_ = db // logs module is read-only; no AutoMigrate needed
 	backend := logs.NewLocal(logs.LocalConfig{
 		Dir: envOr("LOG_STORAGE_DIR", "tests/fixtures/logs"),
 	})
 	svc := logs.NewService(backend, logs.ServiceConfig{})
-	logs.NewHandler(svc, backend).Register(v1, perms)
+	// The saved-filter / alert-rule routes live in the
+	// extra handler (NewHandlerWithExtra), not the
+	// default NewHandler. Wire the audit service in so
+	// the saved-filter and alert-rule mutating handlers
+	// emit RecordAction rows.
+	extraRepo := logs.NewExtraRepository(db)
+	extraSvc := logs.NewExtraService(extraRepo, svc)
+	logs.NewHandlerWithExtra(svc, extraSvc, extraRepo, auditSvc).Register(v1, perms)
 	log.Info("logs routes registered", "backend", "local")
 }
 
@@ -1095,7 +1102,7 @@ func registerMetricsRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger,
 // suppression checker is the real DefaultSuppressionChecker
 // driven by a tiny adapter that consults the physicalhost
 // service's InMaintenance predicate.
-func registerAlertsRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, phMaintenance physicalhostMaintenanceProbe, perms func(rbacpkg.Permission) gin.HandlerFunc) {
+func registerAlertsRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, phMaintenance physicalhostMaintenanceProbe, perms func(rbacpkg.Permission) gin.HandlerFunc, auditSvc *audit.Service) {
 	if err := dbpkg.AutoMigrate(db, alerts.AllModels()...); err != nil {
 		log.Error("alerts AutoMigrate failed", "err", err)
 		return
@@ -1106,6 +1113,7 @@ func registerAlertsRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, 
 		Dispatcher:  alerts.NewLogDispatcher(log.Logger),
 		Suppression: alerts.NewDefaultSuppressionChecker(phMaintenance),
 		Logger:      log.Logger,
+		Audit:       auditSvc,
 	})
 	alerts.NewHandler(svc).Register(v1, perms)
 	log.Info("alerts routes registered", "real_suppression", true)
