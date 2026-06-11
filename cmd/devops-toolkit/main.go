@@ -29,6 +29,7 @@ import (
 	devicepkg "github.com/devops-toolkit/backend/internal/device"
 	"github.com/devops-toolkit/backend/internal/discovery"
 	"github.com/devops-toolkit/backend/internal/handler"
+	"github.com/devops-toolkit/backend/internal/health"
 	"github.com/devops-toolkit/backend/internal/hostproject"
 	"github.com/devops-toolkit/backend/internal/k8s"
 	"github.com/devops-toolkit/backend/internal/k8s/logstream"
@@ -38,13 +39,13 @@ import (
 	"github.com/devops-toolkit/backend/internal/physicalhost"
 	"github.com/devops-toolkit/backend/internal/physicalhost/prober"
 	"github.com/devops-toolkit/backend/internal/pipeline"
-	"github.com/devops-toolkit/backend/internal/servicecatalog"
 	projectpkg "github.com/devops-toolkit/backend/internal/project"
 	internalServer "github.com/devops-toolkit/backend/internal/server"
-	"github.com/devops-toolkit/backend/pkg/contracts"
-	"github.com/devops-toolkit/backend/pkg/logger"
+	"github.com/devops-toolkit/backend/internal/servicecatalog"
 	"github.com/devops-toolkit/backend/internal/ws/hub"
 	"github.com/devops-toolkit/backend/internal/ws/realtime"
+	"github.com/devops-toolkit/backend/pkg/contracts"
+	"github.com/devops-toolkit/backend/pkg/logger"
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 )
@@ -81,6 +82,17 @@ func main() {
 }
 
 func run() error {
+	// Shared signal-aware context. Every background worker
+	// (the physical-host monitor loop, future AsyncInfluxWriter
+	// fix in audit item 4) receives this same ctx, so a single
+	// SIGINT/SIGTERM cancels them in lockstep with the HTTP
+	// server's Shutdown call. This is the audit item-1 fix:
+	// the old code started the monitor loop with
+	// context.Background() and the per-host 5s check held
+	// shutdown for 1000s+ on a 200-host fleet.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	cfgPath := os.Getenv("CONFIG_PATH")
 	if cfgPath == "" {
 		cfgPath = "configs/templates/config-dev.yaml"
@@ -102,7 +114,7 @@ func run() error {
 	}
 	log.Info("database connected", "driver", cfg.Database.Driver)
 
-	router, obs := buildRouter(log)
+	router, obs, _ := buildRouter(log, nil)
 	if eng, ok := router.(*gin.Engine); ok {
 		// Signer is the JWT signer. The auth middleware
 		// uses it to verify the Bearer token. The same
@@ -151,7 +163,7 @@ func run() error {
 		if wsHub != nil {
 			hubPublisher = realtime.NewHubPublisher(wsHubAdapter{wsHub})
 		}
-		phMaintenance := registerPhysicalHostRoutes(v1, db, log, hubPublisher, auditSvc, auditRepo, perms)
+		phMaintenance := registerPhysicalHostRoutes(ctx, v1, db, log, obs, hubPublisher, auditSvc, auditRepo, perms)
 		registerAlertsRoutes(v1, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance}, perms)
 		registerDiscoveryRoutes(v1, db, log, perms)
 		k8sSvc := registerK8sClusterRoutes(v1, db, log, perms)
@@ -187,9 +199,12 @@ func run() error {
 		log.Info("mTLS enabled", "cert", certFile, "ca", os.Getenv("TLS_CA_FILE"))
 	}
 
-	// Graceful shutdown on SIGINT/SIGTERM.
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	// Graceful shutdown on SIGINT/SIGTERM. The shared
+	// signal-aware ctx at the top of run() is what the
+	// physical-host monitor loop and (in a follow-up) the
+	// AsyncInfluxWriter watch; we just have to wait for it
+	// to fire (or for the HTTP server to error out) and
+	// then call Shutdown with a bounded timeout.
 	errCh := make(chan error, 1)
 	go func() {
 		if srv.TLSConfig != nil {
@@ -207,20 +222,25 @@ func run() error {
 	select {
 	case err := <-errCh:
 		return err
-	case sig := <-stop:
-		log.Info("shutdown signal received", "signal", sig.String())
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	case <-ctx.Done():
+		log.Info("shutdown signal received")
+		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		return srv.Shutdown(ctx)
+		return srv.Shutdown(shutCtx)
 	}
 }
 
 // buildRouter returns the HTTP handler tree plus the Prometheus
 // observability Metrics struct (so route registrars can share
 // the same /metrics registry for domain-level instruments).
+// The third return is a *health.Checker seam: a future wiring
+// pass constructs the deep-readiness checker here (DB + LDAP +
+// K8s + per-cluster); for now the test path passes nil and
+// main.go's run() does the same.
+//
 // Kept as a separate function so tests can call it without
 // booting a listener.
-func buildRouter(log *logger.Logger) (http.Handler, *observability.Metrics) {
+func buildRouter(log *logger.Logger, _ *health.Checker) (http.Handler, *observability.Metrics, *health.Checker) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -260,9 +280,9 @@ func buildRouter(log *logger.Logger) (http.Handler, *observability.Metrics) {
 	// / sees something useful instead of a 404 envelope.
 	r.GET("/", func(c *gin.Context) {
 		handler.WriteJSON(c.Writer, http.StatusOK, gin.H{
-			"name":     "devops-toolkit",
-			"phase":    1,
-			"build":    "foundation",
+			"name":  "devops-toolkit",
+			"phase": 1,
+			"build": "foundation",
 			"endpoints": []string{
 				"GET  /health",
 				"GET  /metrics",
@@ -321,7 +341,7 @@ func buildRouter(log *logger.Logger) (http.Handler, *observability.Metrics) {
 			})
 		})
 	}
-	return r, obs
+	return r, obs, nil
 }
 
 // toDBConfig maps the config-tree DatabaseConfig to the database
@@ -555,7 +575,15 @@ func registerDeviceRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, 
 // into the AsyncInfluxWriter for long-term storage. Returns the
 // *MaintenanceService so callers (e.g. the alert module) can
 // consult IsInMaintenance via a small adapter.
-func registerPhysicalHostRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, pub realtime.Publisher, auditSvc *audit.Service, auditRepo *audit.Repository, perms func(rbacpkg.Permission) gin.HandlerFunc) *physicalhost.MaintenanceService {
+//
+// ctx is the shared signal-aware context from run() — the
+// monitor loop watches it so SIGTERM aborts a 200-host
+// sweep in milliseconds instead of 1000s (audit item 1).
+//
+// obs is the Prometheus registry; the loop writes
+// monitor_loop_iterations_total / errors_total /
+// last_tick_timestamp_seconds to it.
+func registerPhysicalHostRoutes(ctx context.Context, v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, obs *observability.Metrics, pub realtime.Publisher, auditSvc *audit.Service, auditRepo *audit.Repository, perms func(rbacpkg.Permission) gin.HandlerFunc) *physicalhost.MaintenanceService {
 	if err := dbpkg.AutoMigrate(db, append(physicalhost.AllModels(), audit.AllModels()...)...); err != nil {
 		log.Error("physicalhost AutoMigrate failed", "err", err)
 		return nil
@@ -611,12 +639,18 @@ func registerPhysicalHostRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Lo
 	// Background loop: drives periodic Check for every host.
 	// Starts on a 1-minute tick; the loop is best-effort and
 	// never blocks shutdown (ctx cancellation is honoured).
+	// Audit item 1 fix: ctx is the shared signal-aware ctx
+	// from run() so a SIGTERM cancels the loop in lockstep
+	// with srv.Shutdown. obs is the Prometheus registry so
+	// operators can alert on monitor_loop_iterations_total
+	// / errors_total / last_tick_timestamp_seconds.
 	loop := physicalhost.NewMonitorLoop(monitor, physicalhost.MonitorLoopConfig{
-		Tick:   1 * time.Minute,
-		Jitter: 5 * time.Second,
-		Logger: log.Logger,
+		Tick:    1 * time.Minute,
+		Jitter:  5 * time.Second,
+		Logger:  log.Logger,
+		Metrics: obs,
 	})
-	go loop.Run(context.Background(), nil)
+	go loop.Run(ctx, nil)
 	log.Info("monitor loop started", "tick", "1m", "jitter", "5s")
 
 	physicalhost.NewHandler(physicalhost.HandlerConfig{
