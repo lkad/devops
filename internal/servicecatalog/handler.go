@@ -55,6 +55,20 @@ func (h *Handler) SetMetrics(m *Metrics) { h.metrics = m }
 //
 // perms is the per-route permission factory; pass a no-op
 // factory in unit tests that don't exercise auth.
+// Register attaches the service-catalog routes.
+//
+// Per-project access: SERVICES ARE GLOBAL — the Service
+// model has no project_id column. Services have an Owner
+// (a user, not a project); on-call rotations and runbook
+// entries are sub-resources of a service. The threat
+// model relies on the global rbac matrix + the
+// per-Service Owner field for edit authority: a future
+// Owner-or-SuperAdmin gate on the edit endpoints would
+// close the "any Operator can rewrite any service's
+// on-call rotation" gap that the global rbac matrix
+// does not cover. Until that lands,
+// PermissionWriteServices granted to Operator is the
+// only seam.
 func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
 	viewP := perms(rbac.PermissionViewServiceCatalog)
 	writeP := perms(rbac.PermissionManageServiceCatalog)

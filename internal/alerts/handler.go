@@ -48,6 +48,18 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 //
 // perms is the per-route permission factory; pass a no-op
 // factory in unit tests that don't exercise auth.
+// Register attaches the alert-notification routes.
+//
+// Per-project access: ALERT RULES ARE GLOBAL — AlertRule
+// has no project_id column. Alert events (the firing
+// state) derive their project scope from the rule that
+// fired; cross-tenant visibility is therefore a function
+// of the rule, not the event. The global rbac matrix
+// gates who can CREATE / LIST / UPDATE / DELETE rules and
+// channels; a future "rule per project" feature would
+// add a project_id column and a per-project access gate
+// mirroring physicalhost. Until then the perms() factory
+// is the only seam.
 func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
 	viewP := perms(rbac.PermissionViewAlerts)
 	writeP := perms(rbac.PermissionWriteAlerts)

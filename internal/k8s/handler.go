@@ -35,6 +35,20 @@ func NewHandler(svc *Service) *Handler {
 //
 // perms is the per-route permission factory; pass a no-op
 // factory in unit tests that don't exercise auth.
+// Register attaches the k8s-cluster-management routes to
+// the supplied router group.
+//
+// Per-project access: CLUSTERS ARE GLOBAL — the Cluster
+// model has no project_id column (k8s/clusters is a
+// platform-level resource, not a per-tenant one). The
+// threat model relies on the global rbac matrix:
+// SuperAdmin / Operator can manage any cluster;
+// Developer / Viewer cannot reach /k8s/clusters at all
+// (PermissionViewK8sCluster / WriteK8sCluster are not
+// granted to those roles). A future "k8s cluster per
+// project" feature would introduce a project_id column
+// and a per-project access gate mirroring physicalhost;
+// until then the perms() factory is the only seam.
 func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
 	viewP := perms(rbac.PermissionViewK8sResources)
 	clusterP := perms(rbac.PermissionManageK8sClusters)

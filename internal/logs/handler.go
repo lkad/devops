@@ -99,6 +99,20 @@ func (h *Handler) emitAlertRule(action audit.AuditAction, id string, metadata au
 //
 // perms is the per-route permission factory; pass a no-op
 // factory in unit tests that don't exercise auth.
+// Register attaches the log-aggregation routes.
+//
+// Per-project access: SAVED FILTERS ARE USER-SCOPED (the
+// OwnerUserID field, not a project) and ALERT RULES HERE
+// ARE GLOBAL (the logs module's alert rules apply to every
+// log stream, not to a specific project). The threat
+// model relies on the global rbac matrix: ViewLogs lets a
+// caller read any stream; WriteLogs lets a caller create
+// filters and rules; the OwnerUserID on a saved filter is
+// informational (the global rbac decides who can see
+// every filter, not the owner field). A future "filter
+// per project" feature would add a project_id column and
+// a per-project access gate; until then perms() is the
+// only seam.
 func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
 	viewP := perms(rbac.PermissionViewLogs)
 	writeP := perms(rbac.PermissionWriteLogs)
