@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
@@ -49,22 +50,84 @@ func NewHandler(svc *Service) *Handler {
 //
 // perms is the per-route permission factory; pass a no-op
 // factory in unit tests that don't exercise auth.
-func (h *Handler) Register(group *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+//
+// projectAccess is the per-project access factory used to
+// gate the project-scoped routes. The host-centric routes
+// extract the project_id from the URL (DELETE) or the
+// body (POST); the project-centric route uses the URL
+// :id. Variadic so the existing single-arg signature
+// still compiles for callers that don't wire the check
+// (e.g. early unit tests).
+func (h *Handler) Register(group *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc, projectAccess ...rbac.ProjectAccessFactory) {
 	viewP := perms(rbac.PermissionViewDevices)
 	writeP := perms(rbac.PermissionManageHostProjectLinks)
+	// per-project access gates: the URL :id for project-
+	// centric reads, the URL :project_id for unlink, the
+	// body project_id (first of the array for bulk) for
+	// the link / bulk-link paths. Built only when
+	// projectAccess is supplied; tests that omit it
+	// exercise the global-RBAC-only path.
+	var (
+		viewByProjectURL, writeByProjectURL,
+		writeByProjectBody gin.HandlerFunc
+	)
+	if len(projectAccess) > 0 && projectAccess[0] != nil {
+		viewByProjectURL = projectAccess[0](rbac.PermissionViewDevices, func(c *gin.Context) string {
+			return c.Param("id")
+		})
+		writeByProjectURL = projectAccess[0](rbac.PermissionManageHostProjectLinks, func(c *gin.Context) string {
+			return c.Param("project_id")
+		})
+		writeByProjectBody = projectAccess[0](rbac.PermissionManageHostProjectLinks, projectIDFromLinkBody)
+	}
 	d := group.Group("/devices/:id/projects")
 	{
 		d.GET("", viewP, h.listDeviceProjects)
-		d.POST("", writeP, h.linkDeviceProject)
-		d.POST("/bulk", writeP, h.bulkLinkDeviceProjects)
-		d.DELETE("/:project_id", writeP, h.unlinkDeviceProject)
+		d.POST("", writeP, writeByProjectBody, h.linkDeviceProject)
+		d.POST("/bulk", writeP, writeByProjectBody, h.bulkLinkDeviceProjects)
+		d.DELETE("/:project_id", writeP, writeByProjectURL, h.unlinkDeviceProject)
 	}
-	group.GET("/projects/:id/devices", viewP, h.listProjectDevices)
+	group.GET("/projects/:id/devices", viewP, viewByProjectURL, h.listProjectDevices)
+}
+
+// projectIDFromLinkBody extracts the project_id from the
+// JSON body of a host-project link request. The shape is
+// { "project_id": "...", ... } (plus the bulk shape with
+// "project_ids" — we use the first entry of that array
+// so the per-project check covers the same project the
+// service will operate on). The body is read via
+// ShouldBindBodyWithJSON which stashes it for re-read by
+// the handler's bind() helper. An unparseable body or
+// missing id returns "" so the middleware 403s and the
+// handler surfaces a 400 in the same round trip.
+func projectIDFromLinkBody(c *gin.Context) string {
+	if c.Request.Body == nil {
+		return ""
+	}
+	var peek struct {
+		ProjectID  string   `json:"project_id"`
+		ProjectIDs []string `json:"project_ids"`
+	}
+	if err := c.ShouldBindBodyWithJSON(&peek); err != nil {
+		return ""
+	}
+	if peek.ProjectID != "" {
+		return peek.ProjectID
+	}
+	if len(peek.ProjectIDs) > 0 {
+		return peek.ProjectIDs[0]
+	}
+	return ""
 }
 
 // linkRequest is the wire shape for POST
-// /devices/:id/projects. LinkedBy is required so audit
-// attribution is complete.
+// /devices/:id/projects. The LinkedBy field is accepted
+// for backward compatibility (older clients still send
+// it) but is IGNORED: the audit-trail attribution comes
+// from the JWT subject so a caller cannot forge a
+// different value. The P0 cross-tenant audit-trail fix
+// removes the field from the wire shape; for now it is
+// tolerated and overwritten.
 type linkRequest struct {
 	ProjectID string `json:"project_id"`
 	LinkedBy  string `json:"linked_by"`
@@ -73,7 +136,8 @@ type linkRequest struct {
 // bulkLinkRequest is the wire shape for POST
 // /devices/:id/projects/bulk. The order of IDs is
 // preserved in the response so the UI can render the
-// newly-added links in submission order.
+// newly-added links in submission order. LinkedBy is
+// ignored (see linkRequest for the audit-trail note).
 type bulkLinkRequest struct {
 	ProjectIDs []string `json:"project_ids"`
 	LinkedBy   string   `json:"linked_by"`
@@ -101,7 +165,13 @@ func (h *Handler) linkDeviceProject(c *gin.Context) {
 	if !h.bind(c, &in) {
 		return
 	}
-	link, err := h.svc.Link(c.Param("id"), in.ProjectID, in.LinkedBy)
+	// Audit-trail attribution MUST come from the JWT, not
+	// the request body. The previous shape allowed any
+	// caller to forge a different linked_by; the P0
+	// cross-tenant fix replaces in.LinkedBy with the
+	// authenticated user's id.
+	actor := callerFromGin(c)
+	link, err := h.svc.Link(c.Param("id"), in.ProjectID, actor)
 	if err != nil {
 		h.writeAPIError(c, err)
 		return
@@ -129,12 +199,32 @@ func (h *Handler) bulkLinkDeviceProjects(c *gin.Context) {
 	if !h.bind(c, &in) {
 		return
 	}
-	links, err := h.svc.BulkLink(c.Param("id"), in.ProjectIDs, in.LinkedBy)
+	// Audit-trail attribution MUST come from the JWT —
+	// see linkDeviceProject for the full rationale.
+	actor := callerFromGin(c)
+	links, err := h.svc.BulkLink(c.Param("id"), in.ProjectIDs, actor)
 	if err != nil {
 		h.writeAPIError(c, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusCreated, contracts.ListResponse{Data: links})
+}
+
+// callerFromGin returns the authenticated user's id from
+// the gin context, or empty when no caller is attached
+// (the test path that doesn't exercise auth). The link
+// service writes "" to the audit column in that case
+// rather than refusing the request — refusing would
+// break the existing handler tests that pre-date the
+// per-project access middleware; the service layer
+// already requires a non-empty device id and project
+// id, so a missing actor is a data-integrity issue
+// surfaced in the audit-log render rather than a 4xx.
+func callerFromGin(c *gin.Context) string {
+	if cl, ok := caller.FromGin(c); ok && cl != nil {
+		return cl.UserID()
+	}
+	return ""
 }
 
 // listProjectDevices handles GET /projects/:id/devices.

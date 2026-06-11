@@ -261,7 +261,13 @@ func (s *Service) ListDeviceDetailsByProject(projectID string) ([]ProjectDeviceL
 }
 
 // validateLinkInputs is the shared field-validation block
-// for Link and BulkLink.
+// for Link and BulkLink. The linkedBy value is the
+// audit-trail attribution and MUST be present — the
+// production handler derives it from the JWT (the P0
+// cross-tenant audit-trail fix moved the field off the
+// wire shape). An empty value is a programming error
+// (the test path that bypasses auth must set a caller)
+// rather than a normal user input.
 func (s *Service) validateLinkInputs(deviceID, _projectID, linkedBy string) error {
 	if strings.TrimSpace(deviceID) == "" {
 		return &contracts.APIError{Code: contracts.CodeValidation, Message: "device_id is required"}

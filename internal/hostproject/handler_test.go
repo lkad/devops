@@ -1,6 +1,7 @@
 package hostproject
 
 import (
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"bytes"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 
 	devicepkg "github.com/devops-toolkit/backend/internal/device"
 	projectpkg "github.com/devops-toolkit/backend/internal/project"
+	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
 // newHandlerRig is the single fixture for handler tests:
@@ -22,6 +24,14 @@ import (
 // handler does not know about the service, but the test
 // does — this is the standard "real handler + service
 // shortcut for seeding" pattern used across the repo.
+//
+// A SuperAdmin caller is stamped on every request so the
+// per-project access checks (which require a caller) and
+// the link audit-trail attribution (which now comes from
+// the JWT) are satisfied. Cross-tenant denial is covered
+// by a separate test in the caller package; the per-route
+// project factory is the no-op here because the rig
+// builds no memberships.
 func newHandlerRig(t *testing.T) (*gin.Engine, *gorm.DB, *Service) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -37,7 +47,14 @@ func newHandlerRig(t *testing.T) (*gin.Engine, *gorm.DB, *Service) {
 
 	r := gin.New()
 	api := r.Group("/api/v1")
-	hpH.Register(api, rbac.NoopPermFactory())
+	api.Use(func(c *gin.Context) {
+		caller.WithGin(c, caller.New(&contracts.User{
+			ID:   "test-admin",
+			Role: contracts.RoleSuperAdmin,
+		}))
+		c.Next()
+	})
+	hpH.Register(api, rbac.NoopPermFactory(), rbac.NoopProjectAccessFactory())
 	return r, db, svc
 }
 
@@ -141,16 +158,21 @@ func TestHandler_LinkDeviceProject_MissingDevice(t *testing.T) {
 	}
 }
 
-// TestHandler_LinkDeviceProject_MissingActor covers the
-// validation rule.
-func TestHandler_LinkDeviceProject_MissingActor(t *testing.T) {
+// TestHandler_LinkDeviceProject_ActorFromJWT pins the P0
+// cross-tenant audit-trail fix: the link's `linked_by`
+// audit column is now derived from the JWT, not the
+// request body. A request without a `linked_by` field
+// in the body succeeds (201) when the auth chain
+// stamps a caller; the service layer's "linked_by is
+// required" check is satisfied by the JWT-derived value.
+func TestHandler_LinkDeviceProject_ActorFromJWT(t *testing.T) {
 	r, db, _ := newHandlerRig(t)
 	dev := seedDeviceDB(t, db, "h1")
 	prj := seedProjectDB(t, db, "p1", nil)
 	rr, _ := doJSON(t, r, "POST", "/api/v1/devices/"+dev.ID+"/projects",
 		map[string]any{"project_id": prj.ID})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rr.Code)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%v", rr.Code, rr.Body.String())
 	}
 }
 

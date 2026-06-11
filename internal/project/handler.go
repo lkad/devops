@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
@@ -45,11 +46,34 @@ func NewHandler(svc *Service, repo *Repository) *Handler {
 // the supplied permission key. Pass a no-op factory in unit
 // tests that don't exercise auth.
 //
+// projectAccess is the per-project access factory: it returns
+// the caller.RequireProjectAccess middleware pre-configured
+// with the membership + permission checkers. Pass a no-op
+// factory in unit tests; production wires the real checkers
+// from the rbac service and the project repository.
+//
 //	group := r.Group("/api/v1")
-//	project.NewHandler(svc, repo).Register(group, perms)
-func (h *Handler) Register(group *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
+//	project.NewHandler(svc, repo).Register(group, perms, projectAccess)
+func (h *Handler) Register(group *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc, projectAccess ...ProjectAccessFactory) {
 	viewP := perms(rbac.PermissionViewProjects)
 	writeP := perms(rbac.PermissionWriteProjects)
+	// projectAccess is variadic so the existing single-arg
+	// signature (perms only) still compiles for any caller
+	// that does not want the per-project check (e.g. early
+	// unit tests). When the factory is supplied every
+	// project-scoped route is gated by it.
+	var projectView, projectWrite, projectMemberView, projectMemberWrite gin.HandlerFunc
+	if len(projectAccess) > 0 && projectAccess[0] != nil {
+		// Reuse the same factory for the URL :id routes; the
+		// per-handler middleware below reads project_id from
+		// either the URL param or the request body.
+		view := projectAccess[0](rbac.PermissionViewProjects, projectIDFromURL)
+		write := projectAccess[0](rbac.PermissionWriteProjects, projectIDFromURL)
+		projectView = view
+		projectWrite = write
+		projectMemberView = view
+		projectMemberWrite = write
+	}
 	pt := group.Group("/project-types")
 	{
 		pt.GET("", h.listTypes)
@@ -59,15 +83,34 @@ func (h *Handler) Register(group *gin.RouterGroup, perms func(rbac.Permission) g
 	{
 		p.GET("", viewP, h.list)
 		p.POST("", writeP, h.create)
-		p.GET("/:id", viewP, h.get)
-		p.PUT("/:id", writeP, h.update)
-		p.DELETE("/:id", writeP, h.delete)
-		p.GET("/:id/children", viewP, h.children)
-		p.GET("/:id/ancestors", viewP, h.ancestors)
-		p.GET("/:id/members", viewP, h.listMembers)
-		p.POST("/:id/members", writeP, h.addMember)
-		p.DELETE("/:id/members/:user_id", writeP, h.removeMember)
+		p.GET("/:id", viewP, projectView, h.get)
+		p.PUT("/:id", writeP, projectWrite, h.update)
+		p.DELETE("/:id", writeP, projectWrite, h.delete)
+		p.GET("/:id/children", viewP, projectView, h.children)
+		p.GET("/:id/ancestors", viewP, projectView, h.ancestors)
+		p.GET("/:id/members", viewP, projectMemberView, h.listMembers)
+		p.POST("/:id/members", writeP, projectMemberWrite, h.addMember)
+		p.DELETE("/:id/members/:user_id", writeP, projectMemberWrite, h.removeMember)
 	}
+}
+
+// ProjectAccessFactory is re-exported as a type alias to
+// rbac.ProjectAccessFactory so the per-route wiring inside
+// Register reads the same as the production code that calls
+// Register. Production wires a real factory from
+// rbac.NewProjectAccessFactory; tests pass
+// rbac.NoopProjectAccessFactory or omit the variadic arg
+// entirely.
+type ProjectAccessFactory = rbac.ProjectAccessFactory
+
+// projectIDFromURL is the standard project-id extractor for
+// the project-hierarchy routes. Every route on /projects/:id
+// uses it; the per-handler middleware reads the value via
+// c.Param("id"). The signature is a func(*gin.Context) string
+// so a future handler that needs the project id from the
+// body can supply a different closure.
+func projectIDFromURL(c *gin.Context) string {
+	return c.Param("id")
 }
 
 // createTypeInput is the wire shape for POST /project-types. The
@@ -238,10 +281,15 @@ func (h *Handler) listMembers(c *gin.Context) {
 }
 
 // addMemberInput is the wire shape for POST /projects/:id/members.
+// The AddedBy field is intentionally absent from the wire
+// shape: the audit-trail attribution comes from the JWT
+// (the authenticated user) rather than the request body,
+// which would otherwise allow any caller to forge a
+// different "added_by" value. See the project audit-trail
+// fix in the P0 cross-tenant work.
 type addMemberInput struct {
-	UserID  string `json:"user_id"`
-	Role    string `json:"role"`
-	AddedBy string `json:"added_by"`
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
 }
 
 // addMember handles POST /projects/:id/members. The spec's
@@ -252,7 +300,17 @@ func (h *Handler) addMember(c *gin.Context) {
 	if !h.bind(c, &in) {
 		return
 	}
-	if err := h.svc.AssignMember(c.Param("id"), in.UserID, in.Role, in.AddedBy); err != nil {
+	// The AddedBy value MUST come from the JWT, never from
+	// the request body — see the comment on addMemberInput.
+	cl, ok := caller.FromGin(c)
+	if !ok || cl == nil || cl.User == nil {
+		h.writeAPIError(c, &contracts.APIError{
+			Code:    contracts.CodeUnauthorized,
+			Message: "authentication required",
+		})
+		return
+	}
+	if err := h.svc.AssignMember(c.Param("id"), in.UserID, in.Role, cl.User.ID); err != nil {
 		h.writeAPIError(c, err)
 		return
 	}

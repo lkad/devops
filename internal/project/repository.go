@@ -300,6 +300,37 @@ func (r *Repository) ListMembers(projectID string) ([]ProjectMember, error) {
 	return out, nil
 }
 
+// ListProjectIDsForUser returns the set of project IDs the
+// given user is a member of. The result is the membership
+// table only (no transitive ancestor / descendant walk) so
+// the caller-package cache stays simple — a user with a
+// row on the BusinessLine is a member of the BusinessLine
+// but not of the descendant Systems / Projects until a
+// separate row is added for them.
+//
+// An empty userID is an error rather than a silent
+// empty result so a misconfigured service cannot leak
+// "every project is accessible" semantics. The function
+// is the data source for caller.MembershipChecker in
+// production wiring.
+func (r *Repository) ListProjectIDsForUser(ctx context.Context, userID string) (map[string]struct{}, error) {
+	if userID == "" {
+		return nil, &contracts.APIError{
+			Code:    contracts.CodeValidation,
+			Message: "userID is required",
+		}
+	}
+	var rows []ProjectMember
+	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{}, len(rows))
+	for _, m := range rows {
+		out[m.ProjectID] = struct{}{}
+	}
+	return out, nil
+}
+
 // WithContext is a thin shim for callers that want to thread a
 // context. The repository does not currently use it, but exposing
 // it keeps the API future-proof for the audit module.
