@@ -211,19 +211,28 @@ func (t *Tracing) Middleware() gin.HandlerFunc {
 		)
 		defer span.End()
 
-		// X-Trace-Id: set BEFORE c.Next() so the
-		// header is in the response. Gin's response
-		// writer commits the header set on the first
-		// body Write, so writing it after the handler
-		// runs is too late. (The unit test passes
-		// c.String which uses a non-streaming path; the
-		// real handler uses json.Encoder which does
-		// commit early.)
+		// X-Trace-Id: set the response header in TWO
+		// places so it lands on every response, including
+		// gin.NoRoute 404s. Gin's response writer
+		// commits headers on the first body write, so
+		// the pre-c.Next Set is the load-bearing call:
+		// it ensures the header is in the buffered
+		// header map before the handler writes the
+		// body. The deferred Set is a defensive
+		// second-set; it is a no-op once the writer
+		// has flushed, but it is correct when a future
+		// refactor moves the pre-c.Next call (e.g.
+		// to gate on a condition). Either way, the
+		// client always sees X-Trace-Id — even for
+		// unmatched routes.
 		traceID := span.SpanContext().TraceID().String()
 		if traceID == "00000000000000000000000000000000" {
 			traceID = randomTraceID()
 		}
-		c.Writer.Header().Set("X-Trace-Id", traceID)
+		c.Header("X-Trace-Id", traceID)
+		defer func() {
+			c.Header("X-Trace-Id", traceID)
+		}()
 
 		start := time.Now()
 		c.Request = c.Request.WithContext(ctx)

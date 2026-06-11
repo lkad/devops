@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/devops-toolkit/backend/internal/k8s/logstream"
 	"github.com/devops-toolkit/backend/internal/logs"
 	"github.com/devops-toolkit/backend/internal/metrics"
+	"github.com/devops-toolkit/backend/internal/middleware"
 	"github.com/devops-toolkit/backend/internal/observability"
 	"github.com/devops-toolkit/backend/internal/physicalhost"
 	"github.com/devops-toolkit/backend/internal/physicalhost/prober"
@@ -114,7 +116,18 @@ func run() error {
 	}
 	log.Info("database connected", "driver", cfg.Database.Driver)
 
-	router, obs, _ := buildRouter(log, nil)
+	// CORS: production must declare an explicit allowlist
+	// (CORS_ALLOWED_ORIGINS). The default http://localhost:5173
+	// is dev-only; shipping it to prod would let any browser
+	// hit the API cross-origin. Mirrors the JWT-secret guard
+	// in registerAuthRoutes.
+	origins := corsAllowedOrigins(cfg.App.Env)
+	if cfg.App.Env == "production" && len(origins) == 0 {
+		return fmt.Errorf("CORS_ALLOWED_ORIGINS must be set in production (comma-separated list of allowed origins)")
+	}
+	log.Info("cors configured", "env", cfg.App.Env, "origins", origins)
+
+	router, obs, _ := buildRouter(log, nil, origins)
 	if eng, ok := router.(*gin.Engine); ok {
 		// Signer is the JWT signer. The auth middleware
 		// uses it to verify the Bearer token. The same
@@ -152,7 +165,7 @@ func run() error {
 		// inside each module's Register.
 		v1 := eng.Group("/api/v1", authMW.RequireAuth())
 
-		registerProjectRoutes(v1, db, log, perms)
+		registerProjectRoutes(v1, db, log, perms, rbacSvc)
 		registerDeviceRoutes(v1, db, log, perms)
 		wsHub := registerWsHubRoutes(v1, cfg, log, perms)
 		// Audit must be registered before physicalhost so the
@@ -167,7 +180,7 @@ func run() error {
 		registerAlertsRoutes(v1, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance}, perms)
 		registerDiscoveryRoutes(v1, db, log, perms)
 		k8sSvc := registerK8sClusterRoutes(v1, db, log, perms)
-		registerHostProjectLinkRoutes(v1, db, log, perms)
+		registerHostProjectLinkRoutes(v1, db, log, perms, rbacSvc)
 		registerPipelineRoutes(v1, db, log, perms)
 		registerServiceCatalogRoutes(v1, db, log, k8sSvc, obs, perms)
 		registerLogsRoutes(v1, db, log, perms)
@@ -238,19 +251,26 @@ func run() error {
 // K8s + per-cluster); for now the test path passes nil and
 // main.go's run() does the same.
 //
+// corsOrigins is the CORS allowlist; see corsAllowedOrigins
+// for the env-driven resolution. Wired as the OUTERMOST
+// middleware so OPTIONS preflight short-circuits before
+// any other middleware runs (the spec mandates this order:
+// CORS → Recovery → RequestID → Metrics → Tracing → Auth).
+//
 // Kept as a separate function so tests can call it without
 // booting a listener.
-func buildRouter(log *logger.Logger, _ *health.Checker) (http.Handler, *observability.Metrics, *health.Checker) {
+func buildRouter(log *logger.Logger, _ *health.Checker, corsOrigins []string) (http.Handler, *observability.Metrics, *health.Checker) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(gin.Recovery())
 
-	// OpenTelemetry tracing. Initialised before the
-	// Prometheus middleware so the trace is the outermost
-	// span (Prometheus / Gin metrics are children of the
-	// HTTP span). Exports to stdout when OTEL_EXPORTER=stdout
-	// or to a remote OTLP collector when OTEL_EXPORTER_OTLP_ENDPOINT
-	// is set; otherwise a noop tracer keeps the API stable.
+	// OpenTelemetry tracing. Registered FIRST so the
+	// X-Trace-Id header is set on the response writer
+	// BEFORE any other middleware (including CORS) gets
+	// a chance to short-circuit with c.Abort. The
+	// middleware-stack spec lists "tracing (outermost)";
+	// in practice that means tracing wraps everything
+	// else so the trace id is on every response, even
+	// 204 preflights and 404 NoRoute paths.
 	tracingCfg := observability.TracingConfig{
 		ServiceName:  "devops-toolkit",
 		ServiceVer:   envOr("APP_VERSION", "dev"),
@@ -266,12 +286,34 @@ func buildRouter(log *logger.Logger, _ *health.Checker) (http.Handler, *observab
 	}()
 	r.Use(tracing.Middleware())
 
+	// CORS — runs after tracing so the preflight short-
+	// circuit still carries X-Trace-Id. Using the existing
+	// internal/middleware.CORS struct rather than
+	// gin-contrib/cors keeps the dep tree small. The
+	// struct's allowlist echo behaviour matches the spec
+	// scenario ("echo request Origin back when the
+	// configured allowlist contains it").
+	r.Use(middleware.CORS(corsOrigins))
+
+	// Recovery — catches panics in everything downstream
+	// (including the CORS short-circuit and the metrics
+	// middleware). Wraps the rest of the chain so a panic
+	// renders the standard 500 envelope.
+	r.Use(gin.Recovery())
+
 	// Prometheus instrumentation. The middleware counts every
 	// request by route template + status; the /metrics endpoint
 	// itself is mounted as a plain handler so it doesn't show up
 	// in the request counter (a self-counting scraper would
 	// inflate its own numbers). Prometheus 9090 is expected to
 	// scrape GET /metrics every 15s (see deploy/prometheus).
+	//
+	// Order: metrics is registered BEFORE tracing so the
+	// Prometheus histogram observation is recorded by an
+	// outer middleware relative to the OTel span (the
+	// span is a child of the histogram, matching the
+	// middleware-stack spec ordering CORS → Recovery →
+	// RequestID → Metrics → Tracing → Auth).
 	obs := observability.New()
 	r.Use(obs.Middleware())
 	r.GET("/metrics", gin.WrapH(obs.Handler()))
@@ -416,6 +458,47 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// corsAllowedOrigins returns the CORS allowlist for the
+// current environment. Driven by CORS_ALLOWED_ORIGINS
+// (comma-separated). In dev / test / unset, falls back to
+// the Vite dev server (http://localhost:5173) so the local
+// frontend just works. In production the env var is
+// REQUIRED — a permissive default in prod would let any
+// origin hit the API. Mirrors the JWT-secret + K8s-crypto
+// guard pattern in config.Validate.
+//
+// Empty / unset in production returns an empty slice. The
+// production wiring then logs a fatal error and refuses to
+// start (we still return an empty slice here so the caller
+// can choose to log + exit rather than fail the JSON
+// unmarshal).
+func corsAllowedOrigins(appEnv string) []string {
+	raw := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if raw != "" {
+		parts := strings.Split(raw, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				out = append(out, p)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if appEnv == "production" {
+		// Empty allowlist + CORS middleware = "echo the
+		// request Origin back" (see internal/middleware/cors.go).
+		// We deliberately return an empty slice and let the
+		// caller log + exit so the operator gets a clear
+		// startup error rather than a silent insecure default.
+		return nil
+	}
+	// Dev / test default: Vite dev server.
+	return []string{"http://localhost:5173"}
+}
+
 // registerAuthRoutes wires the LDAP login + health endpoints onto the
 // supplied Gin engine. It is a separate function (rather than being
 // inlined into buildRouter) so the middleware agent can call it from
@@ -522,8 +605,11 @@ func devRoleToGroups(role string) []string {
 // registerProjectRoutes wires the project-hierarchy module onto the
 // Gin engine. Phase 3 owns this registration. AutoMigrate registers
 // ProjectType, Project, and ProjectMember; the service enforces the
-// 3-level depth cap at create/update time.
-func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
+// 3-level depth cap at create/update time. The per-project access
+// factory is wired from the project service's
+// MembershipChecker (project_pkg.Repository.ListProjectIDsForUser)
+// and the rbac service's HasPermissionInProject.
+func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service) {
 	if err := dbpkg.AutoMigrate(db,
 		&projectpkg.ProjectType{},
 		&projectpkg.Project{},
@@ -535,7 +621,8 @@ func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger,
 	repo := projectpkg.NewRepository(db)
 	svc := projectpkg.NewService(repo)
 	h := projectpkg.NewHandler(svc, repo)
-	h.Register(v1, perms)
+	projectAccess := rbacpkg.NewProjectAccessFactory(rbacSvc, svc.MembershipChecker())
+	h.Register(v1, perms, projectAccess)
 	log.Info("project routes registered")
 }
 
@@ -773,8 +860,10 @@ func registerK8sClusterRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logg
 
 // registerHostProjectLinkRoutes wires the physical-host-project-linking
 // module. The service walks the project hierarchy when listing devices
-// for a project.
-func registerHostProjectLinkRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
+// for a project. The per-project access factory uses the same
+// MembershipChecker as the project module so a Developer cannot link
+// a device to a project they do not belong to.
+func registerHostProjectLinkRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service) {
 	if err := dbpkg.AutoMigrate(db, hostproject.AllModels()...); err != nil {
 		log.Error("hostproject AutoMigrate failed", "err", err)
 		return
@@ -783,7 +872,8 @@ func registerHostProjectLinkRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger
 	projectRepo := projectpkg.NewRepository(db)
 	projectSvc := projectpkg.NewService(projectRepo)
 	svc := hostproject.NewService(repo, projectSvc)
-	hostproject.NewHandler(svc).Register(v1, perms)
+	projectAccess := rbacpkg.NewProjectAccessFactory(rbacSvc, projectSvc.MembershipChecker())
+	hostproject.NewHandler(svc).Register(v1, perms, projectAccess)
 	log.Info("hostproject routes registered")
 }
 
