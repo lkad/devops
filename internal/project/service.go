@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -23,6 +24,21 @@ type Service struct {
 // otherwise stateless; the audit/clock collaborators, when they
 // land, will be added as fields.
 func NewService(repo *Repository) *Service { return &Service{repo: repo} }
+
+// MembershipChecker returns a caller.MembershipChecker that
+// looks up the user's project memberships through this
+// service's repository. Production wiring uses the returned
+// function as the membership source for
+// caller.RequireProjectAccess; tests can supply a fake
+// directly without going through the service.
+//
+// The function is a method (not a free function) so a future
+// revision of the service that needs to add caching or
+// ancestor expansion can do so without touching the call
+// sites.
+func (s *Service) MembershipChecker() caller.MembershipChecker {
+	return s.repo.ListProjectIDsForUser
+}
 
 // CreateProjectInput is the input DTO for project creation.
 // Pointer fields let the caller distinguish "not set" from
