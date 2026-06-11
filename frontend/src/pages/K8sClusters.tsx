@@ -15,6 +15,8 @@ import { EmptyState } from '../components/common/EmptyState';
 import { FormField } from '../components/common/FormField';
 import { useToast } from '../components/common/Toast';
 import { DataTable, Column } from '../components/common/DataTable';
+import { PodLogsModal } from '../components/K8s/PodLogsModal';
+import { PodExecModal } from '../components/K8s/PodExecModal';
 
 type ClusterType = 'k3d' | 'kind' | 'standard';
 type ClusterStatus = 'connected' | 'disconnected' | 'unknown';
@@ -386,6 +388,11 @@ function ResourceTab({
   const { data, loading, error } = useApi<{ data: Resource[] }>(path, query);
   const rows = data?.data ?? [];
 
+  // Per-pod drill-in state — only meaningful when kind === 'pods'.
+  // Local to the tab so re-mounting on tab change resets cleanly.
+  const [logsPod, setLogsPod] = useState<Resource | null>(null);
+  const [execPod, setExecPod] = useState<Resource | null>(null);
+
   if (loading) return <div style={{ color: 'var(--color-text-muted)' }}>Loading…</div>;
   if (error) return <div style={{ color: 'var(--color-error)' }}>{error}</div>;
   if (rows.length === 0) {
@@ -401,7 +408,27 @@ function ResourceTab({
     {
       key: 'name',
       header: 'Name',
-      render: (r) => <span className="mono">{r.name}</span>,
+      render: (r) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+          <span className="mono">{r.name}</span>
+          {kind === 'pods' && (
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => setLogsPod(r)}
+              >
+                <span data-testid={`pod-logs-button-${r.name}`}>Logs</span>
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setExecPod(r)}
+              >
+                <span data-testid={`pod-shell-button-${r.name}`}>Shell</span>
+              </Button>
+            </>
+          )}
+        </div>
+      ),
     },
     {
       key: 'namespace',
@@ -415,7 +442,29 @@ function ResourceTab({
     },
   ];
 
-  return <DataTable rows={rows} columns={columns} rowKey={(r) => `${kind}-${r.name}-${r.namespace ?? ''}`} empty={{ title: '—' }} />;
+  return (
+    <>
+      <DataTable rows={rows} columns={columns} rowKey={(r) => `${kind}-${r.name}-${r.namespace ?? ''}`} empty={{ title: '—' }} />
+      {kind === 'pods' && logsPod && (
+        <PodLogsModal
+          open
+          onClose={() => setLogsPod(null)}
+          clusterId={clusterId}
+          namespace={logsPod.namespace ?? (query?.namespace as string) ?? 'default'}
+          pod={logsPod.name}
+        />
+      )}
+      {kind === 'pods' && execPod && (
+        <PodExecModal
+          open
+          onClose={() => setExecPod(null)}
+          clusterId={clusterId}
+          namespace={execPod.namespace ?? (query?.namespace as string) ?? 'default'}
+          pod={execPod.name}
+        />
+      )}
+    </>
+  );
 }
 
 function NewClusterModal({
