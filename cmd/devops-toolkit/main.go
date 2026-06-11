@@ -1205,12 +1205,24 @@ func registerWsHubRoutes(v1 *gin.RouterGroup, cfg *config.Config, log *logger.Lo
 // KubeLogClient which itself wraps a client-go function seam. The
 // RealtimePublisher here is a no-op in dev (logs events are still
 // returned to the WS/SSE client even when no hub is wired).
+//
+// The persistence sink (audit P1 #4) is the logs Service from
+// the same module that owns the historical /logs endpoint:
+// every pod line the streamer emits also lands in
+// log_entries via logs.Service.CreateLogEntry. The seam is
+// declared on the consumer side (logstream.LogSink) so the
+// logstream package does not import the whole logs Service
+// just to call one method.
 func registerLogStreamRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
 	_ = db // no AutoMigrate; log stream is read-mostly
 	client := &logstream.FakeLogClient{}
 	streamer := logstream.NewKubeStreamer(client)
 	pub := &logstreamRealtimeAdapter{} // bridges the local interface to the realtime package
-	svc := logstream.NewService(streamer, client, pub)
+	logBackend := logs.NewLocal(logs.LocalConfig{
+		Dir: envOr("LOG_STORAGE_DIR", "tests/fixtures/logs"),
+	})
+	logSvc := logs.NewService(logBackend, logs.ServiceConfig{})
+	svc := logstream.NewService(streamer, client, pub, logSvc)
 	logstream.NewHandler(svc, logstream.HandlerConfig{}).Register(v1, perms)
 	log.Info("k8s pod log stream routes registered")
 }
