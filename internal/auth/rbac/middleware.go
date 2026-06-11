@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -12,6 +13,61 @@ import (
 // stash the authenticated *contracts.User. Exported so the auth
 // package can write to the same key without a shared constant.
 const AuthUserKey = "auth.user"
+
+// ProjectAccessFactory is the per-project access middleware
+// factory. It mirrors the global Permission-factory shape:
+// pass the permission and a project-id extractor, receive a
+// Gin middleware pre-bound to both. Handlers register it
+// the same way they register the per-route permission factory:
+//
+//	perms(rbac.PermissionViewProjects)             // global
+//	projectAccess(rbac.PermissionViewProjects,
+//	    func(c *gin.Context) string { return c.Param("id") })
+//
+// The factory lives in the rbac package (not caller) so
+// the permission argument is typed as Permission rather
+// than as the untyped `any` the caller package would
+// otherwise need. The actual middleware that runs is
+// caller.RequireProjectAccess; the factory wires it up
+// here so the modules do not have to import both packages
+// and assemble the closure themselves.
+type ProjectAccessFactory func(Permission, func(*gin.Context) string) gin.HandlerFunc
+
+// NewProjectAccessFactory returns a ProjectAccessFactory
+// pre-bound to a MembershipChecker and the supplied rbac
+// service. Modules register the factory like so:
+//
+//	projectAccess := rbac.NewProjectAccessFactory(
+//	    rbacSvc, projectSvc.MembershipChecker())
+//	h.Register(group, perms, projectAccess)
+//
+// The factory is a closure that captures the checker +
+// service; one factory per module is the typical shape
+// because the membership checker is module-specific.
+func NewProjectAccessFactory(svc *Service, m caller.MembershipChecker) ProjectAccessFactory {
+	return func(perm Permission, projectIDFn func(*gin.Context) string) gin.HandlerFunc {
+		// Capture perm in a closure so the
+		// caller-package PermissionChecker signature
+		// (user, projectID) -> bool can stay free of
+		// the permission argument. The middleware
+		// receives the permission once at registration
+		// time and re-uses it on every request.
+		checker := func(user *contracts.User, projectID string) bool {
+			return svc.HasPermissionInProject(user, projectID, perm)
+		}
+		return caller.RequireProjectAccess(m, checker, projectIDFn)
+	}
+}
+
+// NoopProjectAccessFactory is the no-op equivalent of
+// NoopPermFactory for the per-project access seam. It
+// returns a pass-through middleware; useful in unit tests
+// that do not exercise the membership / permission check.
+func NoopProjectAccessFactory() ProjectAccessFactory {
+	return func(Permission, func(*gin.Context) string) gin.HandlerFunc {
+		return func(c *gin.Context) { c.Next() }
+	}
+}
 
 // NoopPermFactory is a no-op Permission factory for tests
 // that build a *Handler.Register on a plain *gin.RouterGroup

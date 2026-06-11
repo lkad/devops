@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
@@ -51,6 +52,12 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) gin.HandlerFunc {
 			return // authenticate already wrote 401 + aborted
 		}
 		c.Set(rbac.AuthUserKey, user)
+		// Stamp a Caller on the request so per-project access
+		// checks (caller.RequireProjectAccess) can read it
+		// without re-parsing the JWT. The membership cache
+		// starts empty; it is populated lazily by the
+		// MembershipChecker supplied to RequireProjectAccess.
+		caller.WithGin(c, caller.New(user))
 		if cfg.RequiredPerm != "" && cfg.PermissionSvc != nil {
 			if !cfg.PermissionSvc.HasPermission(user, cfg.RequiredPerm) {
 				abortForbidden(c, "insufficient permission: "+string(cfg.RequiredPerm))
@@ -109,6 +116,12 @@ func (a *Authenticator) RequireAuth() gin.HandlerFunc {
 			return // authenticate already wrote the response
 		}
 		c.Set(rbac.AuthUserKey, user)
+		// Stamp a Caller on the request so per-project access
+		// checks (caller.RequireProjectAccess) can read it
+		// without re-parsing the JWT. The membership cache
+		// starts empty; it is populated lazily by the
+		// MembershipChecker supplied to RequireProjectAccess.
+		caller.WithGin(c, caller.New(user))
 		c.Next()
 	}
 }
