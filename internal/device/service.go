@@ -1,9 +1,11 @@
 package device
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -41,20 +43,34 @@ type UpdateDeviceInput struct {
 // It is framework-agnostic (no Gin) so it can be reused by gRPC
 // handlers, CLI tools, or background workers in the future.
 type Service struct {
-	repo *Repository
+	repo  *Repository
+	audit *audit.Service
 }
 
 // NewService builds a Service. The repository is the only
-// dependency; everything else (clocks, label normalizers, etc.)
-// can be injected later by extending the constructor.
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+// required dependency; the audit service is optional (nil
+// means "no audit emission") so existing test rig (which
+// never wires an audit sink) keeps compiling. Production
+// always wires a real service so v0.2.0.0 P0 #3
+// audit-trail coverage holds.
+func NewService(repo *Repository, auditSvc ...*audit.Service) *Service {
+	var a *audit.Service
+	if len(auditSvc) > 0 {
+		a = auditSvc[0]
+	}
+	return &Service{repo: repo, audit: a}
 }
 
 // Create validates the input and persists a new device. The
 // returned Device is the freshly-stored row, including its
-// generated ID and timestamps.
-func (s *Service) Create(in CreateDeviceInput) (*Device, error) {
+// generated ID and timestamps. The audit emission
+// (device.create) is best-effort and the context is
+// variadic so existing callers (which pre-date the audit
+// hooks) keep compiling; production callers should pass
+// the request context so the audit emission carries the
+// right request-scoped values.
+func (s *Service) Create(in CreateDeviceInput, ctxArg ...context.Context) (*Device, error) {
+	ctx := s.ctxOrBackground(ctxArg)
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, &contracts.APIError{
 			Code:    contracts.CodeValidation,
@@ -92,6 +108,12 @@ func (s *Service) Create(in CreateDeviceInput) (*Device, error) {
 			Cause:   err,
 		}
 	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionCreate,
+		ResourceType: audit.ResourceDevice,
+		ResourceID:   d.ID,
+		Metadata:     audit.JSONMap{"name": d.Name, "type": string(d.Type), "state": string(d.State)},
+	})
 	return d, nil
 }
 
@@ -144,8 +166,10 @@ func (s *Service) Search(query string) ([]Device, int64, error) {
 
 // Update applies a partial update. Pointer fields are honoured
 // (nil = leave unchanged); Labels and Metadata replace the
-// stored value wholesale.
-func (s *Service) Update(id string, in UpdateDeviceInput) (*Device, error) {
+// stored value wholesale. The audit emission (device.update)
+// records the resulting state for the audit log.
+func (s *Service) Update(id string, in UpdateDeviceInput, ctxArg ...context.Context) (*Device, error) {
+	ctx := s.ctxOrBackground(ctxArg)
 	d, err := s.repo.Get(id)
 	if err != nil {
 		if IsNotFound(err) {
@@ -214,13 +238,21 @@ func (s *Service) Update(id string, in UpdateDeviceInput) (*Device, error) {
 			Cause:   err,
 		}
 	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionUpdate,
+		ResourceType: audit.ResourceDevice,
+		ResourceID:   d.ID,
+		Metadata:     audit.JSONMap{"name": d.Name, "state": string(d.State)},
+	})
 	return d, nil
 }
 
 // Delete soft-deletes a device. A 404 APIError is returned when
 // the row does not exist (either never created or already
-// deleted).
-func (s *Service) Delete(id string) error {
+// deleted). The audit emission (device.delete) records the
+// deletion for the audit log.
+func (s *Service) Delete(id string, ctxArg ...context.Context) error {
+	ctx := s.ctxOrBackground(ctxArg)
 	if err := s.repo.Delete(id); err != nil {
 		if IsNotFound(err) {
 			return &contracts.APIError{
@@ -234,14 +266,23 @@ func (s *Service) Delete(id string) error {
 			Cause:   err,
 		}
 	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionDelete,
+		ResourceType: audit.ResourceDevice,
+		ResourceID:   id,
+	})
 	return nil
 }
 
 // ApplyAction dispatches an action by name. The current action
 // set is intentionally small (the spec's "Execute device action"
 // scenario); a richer state machine lives in the per-type
-// services and is not in scope here.
-func (s *Service) ApplyAction(id, action string) (*Device, error) {
+// services and is not in scope here. The audit emission
+// (device.update) records the new state for the audit log
+// (the same action covers every state transition; the
+// metadata column records the action name).
+func (s *Service) ApplyAction(id, action string, ctxArg ...context.Context) (*Device, error) {
+	ctx := s.ctxOrBackground(ctxArg)
 	d, err := s.Get(id)
 	if err != nil {
 		return nil, err
@@ -276,5 +317,35 @@ func (s *Service) ApplyAction(id, action string) (*Device, error) {
 			Cause:   err,
 		}
 	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionUpdate,
+		ResourceType: audit.ResourceDevice,
+		ResourceID:   d.ID,
+		Metadata:     audit.JSONMap{"action": action, "state": string(d.State)},
+	})
 	return d, nil
+}
+
+// emitAudit is the single seam between this package and
+// the cross-module audit subsystem. A nil audit service is
+// a no-op so unit tests can wire a Service without an
+// audit row in the DB. The emission is best-effort: a
+// failure to record does not roll back the mutation.
+func (s *Service) emitAudit(ctx context.Context, in audit.RecordActionInput) {
+	if s.audit == nil {
+		return
+	}
+	s.audit.RecordAction(ctx, in)
+}
+
+// ctxOrBackground returns the first supplied context, or
+// context.Background() when none was supplied. The
+// variadic-ctx pattern keeps the existing test API
+// (which never passed a context) compiling while still
+// letting production callers pass the request context.
+func (s *Service) ctxOrBackground(args []context.Context) context.Context {
+	if len(args) > 0 && args[0] != nil {
+		return args[0]
+	}
+	return context.Background()
 }

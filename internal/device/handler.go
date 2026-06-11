@@ -171,7 +171,7 @@ func (h *Handler) Create(c *gin.Context) {
 		})
 		return
 	}
-	d, svcErr := h.svc.Create(req.toCreate())
+	d, svcErr := h.svc.Create(req.toCreate(), c.Request.Context())
 	if svcErr != nil {
 		handler.WriteAPIError(c.Writer, svcErr)
 		return
@@ -192,7 +192,7 @@ func (h *Handler) Replace(c *gin.Context) {
 		})
 		return
 	}
-	d, svcErr := h.svc.Update(id, req.toUpdate())
+	d, svcErr := h.svc.Update(id, req.toUpdate(), c.Request.Context())
 	if svcErr != nil {
 		handler.WriteAPIError(c.Writer, svcErr)
 		return
@@ -204,7 +204,7 @@ func (h *Handler) Replace(c *gin.Context) {
 // success; a 404 on missing rows.
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
-	if svcErr := h.svc.Delete(id); svcErr != nil {
+	if svcErr := h.svc.Delete(id, c.Request.Context()); svcErr != nil {
 		handler.WriteAPIError(c.Writer, svcErr)
 		return
 	}
@@ -229,7 +229,7 @@ func (h *Handler) Action(c *gin.Context) {
 		})
 		return
 	}
-	d, svcErr := h.svc.ApplyAction(id, req.Action)
+	d, svcErr := h.svc.ApplyAction(id, req.Action, c.Request.Context())
 	if svcErr != nil {
 		handler.WriteAPIError(c.Writer, svcErr)
 		return

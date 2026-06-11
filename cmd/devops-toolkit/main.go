@@ -173,7 +173,7 @@ func run() error {
 		// discovery, and servicecatalog.
 		auditSvc, auditRepo := registerAuditRoutes(v1, db, log, perms)
 		registerProjectRoutes(v1, db, log, perms, rbacSvc, auditSvc)
-		registerDeviceRoutes(v1, db, log, perms)
+		registerDeviceRoutes(v1, db, log, perms, auditSvc)
 		wsHub := registerWsHubRoutes(v1, cfg, log, perms)
 		var hubPublisher realtime.Publisher
 		if wsHub != nil {
@@ -633,24 +633,24 @@ func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger,
 // Gin engine. AutoMigrate covers Device, DeviceGroup, and
 // ConfigurationTemplate. The service enforces the 4-state model
 // (online/monitoring_issue/offline/maintenance) and action rules.
-func registerDeviceRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) {
+func registerDeviceRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, auditSvc *audit.Service) {
 	if err := dbpkg.AutoMigrate(db, devicepkg.AllModels()...); err != nil {
 		log.Error("device AutoMigrate failed", "err", err)
 		return
 	}
 	repo := devicepkg.NewRepository(db)
-	svc := devicepkg.NewService(repo)
+	svc := devicepkg.NewService(repo, auditSvc)
 	h := devicepkg.NewHandler(svc)
 	h.Register(v1, perms)
 
 	// device-groups and configuration-templates have separate
 	// sub-handlers with their own Register methods.
 	groupRepo := devicepkg.NewGroupRepository(db)
-	groupSvc := devicepkg.NewGroupService(groupRepo)
+	groupSvc := devicepkg.NewGroupService(groupRepo, auditSvc)
 	devicepkg.NewGroupHandler(groupSvc).Register(v1, perms)
 
 	tmplRepo := devicepkg.NewTemplateRepository(db)
-	tmplSvc := devicepkg.NewTemplateService(tmplRepo)
+	tmplSvc := devicepkg.NewTemplateService(tmplRepo, auditSvc)
 	devicepkg.NewTemplateHandler(tmplSvc).Register(v1, perms)
 
 	log.Info("device routes registered")

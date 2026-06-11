@@ -1,6 +1,7 @@
 package device
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/database"
 	"github.com/devops-toolkit/backend/internal/handler"
@@ -124,16 +126,28 @@ type GroupUpdateInput struct {
 
 // GroupService is the business-logic layer for device groups.
 type GroupService struct {
-	repo *GroupRepository
+	repo  *GroupRepository
+	audit *audit.Service
 }
 
-// NewGroupService builds a GroupService.
-func NewGroupService(repo *GroupRepository) *GroupService {
-	return &GroupService{repo: repo}
+// NewGroupService builds a GroupService. The audit service
+// is optional (nil means "no audit emission"); production
+// always wires a real service so v0.2.0.0 P0 #3 audit-trail
+// coverage holds.
+func NewGroupService(repo *GroupRepository, auditSvc ...*audit.Service) *GroupService {
+	var a *audit.Service
+	if len(auditSvc) > 0 {
+		a = auditSvc[0]
+	}
+	return &GroupService{repo: repo, audit: a}
 }
 
-// Create validates and persists a group.
-func (s *GroupService) Create(in GroupCreateInput) (*DeviceGroup, error) {
+// Create validates and persists a group. The audit
+// emission (device_group.create) is best-effort; the
+// context is variadic so existing test rig keeps
+// compiling.
+func (s *GroupService) Create(in GroupCreateInput, ctxArg ...context.Context) (*DeviceGroup, error) {
+	ctx := s.ctxOrBackground(ctxArg)
 	if in.Name == "" {
 		return nil, &contracts.APIError{
 			Code:    contracts.CodeValidation,
@@ -147,6 +161,14 @@ func (s *GroupService) Create(in GroupCreateInput) (*DeviceGroup, error) {
 			Message: "failed to create device group",
 			Cause:   err,
 		}
+	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionCreate,
+			ResourceType: audit.ResourceDevice,
+			ResourceID:   g.ID,
+			Metadata:     audit.JSONMap{"group": true, "name": g.Name},
+		})
 	}
 	return g, nil
 }
@@ -183,8 +205,11 @@ func (s *GroupService) List(limit, offset int) ([]DeviceGroup, int64, error) {
 	return rows, total, nil
 }
 
-// Update persists changes to a group.
-func (s *GroupService) Update(id string, in GroupUpdateInput) (*DeviceGroup, error) {
+// Update persists changes to a group. The audit emission
+// (device_group.update) is best-effort; the context is
+// variadic so existing test rig keeps compiling.
+func (s *GroupService) Update(id string, in GroupUpdateInput, ctxArg ...context.Context) (*DeviceGroup, error) {
+	ctx := s.ctxOrBackground(ctxArg)
 	g, err := s.repo.Get(id)
 	if err != nil {
 		if IsGroupNotFound(err) {
@@ -224,11 +249,22 @@ func (s *GroupService) Update(id string, in GroupUpdateInput) (*DeviceGroup, err
 			Cause:   err,
 		}
 	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionUpdate,
+			ResourceType: audit.ResourceDevice,
+			ResourceID:   g.ID,
+			Metadata:     audit.JSONMap{"group": true, "name": g.Name},
+		})
+	}
 	return g, nil
 }
 
-// Delete soft-deletes a group.
-func (s *GroupService) Delete(id string) error {
+// Delete soft-deletes a group. The audit emission
+// (device_group.delete) is best-effort; the context is
+// variadic so existing test rig keeps compiling.
+func (s *GroupService) Delete(id string, ctxArg ...context.Context) error {
+	ctx := s.ctxOrBackground(ctxArg)
 	if err := s.repo.Delete(id); err != nil {
 		if IsGroupNotFound(err) {
 			return &contracts.APIError{
@@ -242,7 +278,25 @@ func (s *GroupService) Delete(id string) error {
 			Cause:   err,
 		}
 	}
+	if s.audit != nil {
+		s.audit.RecordAction(ctx, audit.RecordActionInput{
+			Action:       audit.ActionDelete,
+			ResourceType: audit.ResourceDevice,
+			ResourceID:   id,
+			Metadata:     audit.JSONMap{"group": true},
+		})
+	}
 	return nil
+}
+
+// ctxOrBackground returns the first supplied context, or
+// context.Background() when none was supplied. Mirrors the
+// pattern in service.go.
+func (s *GroupService) ctxOrBackground(args []context.Context) context.Context {
+	if len(args) > 0 && args[0] != nil {
+		return args[0]
+	}
+	return context.Background()
 }
 
 // GroupHandler is the HTTP layer for device groups.
