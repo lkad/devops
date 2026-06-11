@@ -63,12 +63,20 @@ func (l *Local) Capabilities() Capabilities {
 
 // Append adds an in-memory log entry. The dev-only /_test/echo
 // handler uses this; the service layer guards it on cfg.Readonly
-// and on dev mode.
-func (l *Local) Append(e LogEntry) {
+// and on dev mode. It also satisfies the LogSink interface used
+// by the K8s log-stream path: the K8s streamer fans every line
+// through this method via *Service.CreateLogEntry so a developer
+// running the Local backend can grep past lines without a
+// Loki / ES connection.
+func (l *Local) Append(e LogEntry) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if e.Timestamp.IsZero() {
+		e.Timestamp = time.Now().UTC()
+	}
 	l.echo = append(l.echo, e)
 	l.cache = nil
+	return nil
 }
 
 // Query scans the configured directory (and any appended echo
