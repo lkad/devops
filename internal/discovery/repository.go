@@ -64,7 +64,6 @@ func (r *Repository) GetRun(id string) (*DiscoveryRun, error) {
 	var run DiscoveryRun
 	if err := r.db.First(&run, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("discovery.GetRun: %w", err)
 	}
 	return &run, nil
 }
@@ -98,7 +97,6 @@ func (r *Repository) UpdateRun(run *DiscoveryRun) error {
 	err := r.db.First(&existing, "id = ?", run.ID).Error
 	if err != nil {
 		return database.MapNotFound(err, ErrNotFound)
-		return fmt.Errorf("discovery.UpdateRun lookup: %w", err)
 	}
 	if err := r.db.Save(run).Error; err != nil {
 		return fmt.Errorf("discovery.UpdateRun: %w", err)
@@ -133,7 +131,6 @@ func (r *Repository) GetHost(id string) (*DiscoveredHost, error) {
 	var host DiscoveredHost
 	if err := r.db.First(&host, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("discovery.GetHost: %w", err)
 	}
 	return &host, nil
 }
@@ -146,7 +143,6 @@ func (r *Repository) UpdateHost(host *DiscoveredHost) error {
 	err := r.db.First(&existing, "id = ?", host.ID).Error
 	if err != nil {
 		return database.MapNotFound(err, ErrNotFound)
-		return fmt.Errorf("discovery.UpdateHost lookup: %w", err)
 	}
 	if err := r.db.Save(host).Error; err != nil {
 		return fmt.Errorf("discovery.UpdateHost: %w", err)
