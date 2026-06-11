@@ -68,7 +68,6 @@ func (r *Repository) Get(id string) (*Service, error) {
 	var s Service
 	if err := r.db.First(&s, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("servicecatalog.Get: %w", err)
 	}
 	return &s, nil
 }

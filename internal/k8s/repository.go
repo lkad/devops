@@ -53,7 +53,6 @@ func (r *Repository) Get(id string) (*Cluster, error) {
 	var c Cluster
 	if err := r.db.First(&c, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("k8s.Get: %w", err)
 	}
 	return &c, nil
 }
@@ -65,7 +64,6 @@ func (r *Repository) FindByName(name string) (*Cluster, error) {
 	var c Cluster
 	if err := r.db.First(&c, "name = ?", name).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("k8s.FindByName: %w", err)
 	}
 	return &c, nil
 }
@@ -104,7 +102,6 @@ func (r *Repository) Update(c *Cluster) error {
 	err := r.db.First(&existing, "id = ?", c.ID).Error
 	if err != nil {
 		return database.MapNotFound(err, ErrNotFound)
-		return fmt.Errorf("k8s.Update lookup: %w", err)
 	}
 	if err := r.db.Save(c).Error; err != nil {
 		return fmt.Errorf("k8s.Update: %w", err)

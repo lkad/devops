@@ -66,7 +66,6 @@ func (r *TemplateRepository) Get(id string) (*ConfigurationTemplate, error) {
 	var t ConfigurationTemplate
 	if err := r.db.First(&t, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrTemplateNotFound)
-		return nil, fmt.Errorf("template.Get: %w", err)
 	}
 	return &t, nil
 }

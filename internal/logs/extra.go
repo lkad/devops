@@ -107,7 +107,6 @@ func (r *ExtraRepository) GetRetention() (*RetentionPolicy, error) {
 	var p RetentionPolicy
 	if err := r.db.First(&p, "singleton_key = ?", "default").Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, err
 	}
 	return &p, nil
 }
@@ -144,7 +143,6 @@ func (r *ExtraRepository) GetSavedFilter(id string) (*SavedFilter, error) {
 	var f SavedFilter
 	if err := r.db.First(&f, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, err
 	}
 	return &f, nil
 }

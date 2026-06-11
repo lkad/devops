@@ -52,7 +52,6 @@ func (r *Repository) Get(id string) (*Device, error) {
 	var d Device
 	if err := r.db.First(&d, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("device.Get: %w", err)
 	}
 	return &d, nil
 }
@@ -107,7 +106,6 @@ func (r *Repository) Update(d *Device) error {
 	err := r.db.First(&existing, "id = ?", d.ID).Error
 	if err != nil {
 		return database.MapNotFound(err, ErrNotFound)
-		return fmt.Errorf("device.Update lookup: %w", err)
 	}
 	if err := r.db.Save(d).Error; err != nil {
 		return fmt.Errorf("device.Update: %w", err)

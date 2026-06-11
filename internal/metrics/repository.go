@@ -54,7 +54,6 @@ func (r *Repository) Get(id string) (*Metric, error) {
 	var m Metric
 	if err := r.db.First(&m, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("metrics.Get: %w", err)
 	}
 	return &m, nil
 }

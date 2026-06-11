@@ -54,7 +54,6 @@ func (r *GroupRepository) Get(id string) (*DeviceGroup, error) {
 	var g DeviceGroup
 	if err := r.db.First(&g, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrGroupNotFound)
-		return nil, fmt.Errorf("group.Get: %w", err)
 	}
 	return &g, nil
 }
