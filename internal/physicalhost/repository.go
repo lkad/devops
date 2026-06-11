@@ -76,7 +76,6 @@ func (r *Repository) Get(id string) (*PhysicalHost, error) {
 	var p PhysicalHost
 	if err := r.db.First(&p, "id = ?", id).Error; err != nil {
 		return nil, database.MapNotFound(err, ErrNotFound)
-		return nil, fmt.Errorf("physicalhost.Get: %w", err)
 	}
 	return &p, nil
 }
@@ -156,7 +155,6 @@ func (r *Repository) Update(p *PhysicalHost) error {
 	err := r.db.First(&existing, "id = ?", p.ID).Error
 	if err != nil {
 		return database.MapNotFound(err, ErrNotFound)
-		return fmt.Errorf("physicalhost.Update lookup: %w", err)
 	}
 	if err := r.db.Save(p).Error; err != nil {
 		return fmt.Errorf("physicalhost.Update: %w", err)
