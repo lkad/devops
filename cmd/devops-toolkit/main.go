@@ -179,11 +179,23 @@ func run() error {
 		if wsHub != nil {
 			hubPublisher = realtime.NewHubPublisher(wsHubAdapter{wsHub})
 		}
-		phMaintenance := registerPhysicalHostRoutes(ctx, v1, db, log, obs, hubPublisher, auditSvc, auditRepo, perms)
+		// Hostproject service is built early so the
+		// physicalhost module's per-project access
+		// middleware can resolve a host id to its
+		// project set. The service is also used by
+		// registerHostProjectLinkRoutes below; the
+		// duplicated hostproject.NewService call there
+		// is replaced with a no-op (this instance is
+		// the canonical one).
+		hpRepo := hostproject.NewRepository(db)
+		hpProjectRepo := projectpkg.NewRepository(db)
+		hpProjectSvc := projectpkg.NewService(hpProjectRepo)
+		hpSvc := hostproject.NewService(hpRepo, hpProjectSvc, auditSvc)
+		phMaintenance := registerPhysicalHostRoutes(ctx, v1, db, log, obs, hubPublisher, auditSvc, auditRepo, perms, rbacSvc, hpSvc, hpProjectSvc)
 		registerAlertsRoutes(v1, db, log, &physicalhostMaintenanceAdapter{svc: phMaintenance}, perms, auditSvc)
 		registerDiscoveryRoutes(v1, db, log, perms, auditSvc)
 		k8sSvc := registerK8sClusterRoutes(v1, db, log, perms, auditSvc)
-		registerHostProjectLinkRoutes(v1, db, log, perms, rbacSvc, auditSvc)
+		registerHostProjectLinkRoutes(v1, db, log, perms, rbacSvc, auditSvc, hpSvc, hpProjectSvc)
 		registerPipelineRoutes(v1, db, log, perms)
 		registerServiceCatalogRoutes(v1, db, log, k8sSvc, obs, perms, auditSvc)
 		registerLogsRoutes(v1, db, log, perms, auditSvc)
@@ -673,7 +685,7 @@ func registerDeviceRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, 
 // obs is the Prometheus registry; the loop writes
 // monitor_loop_iterations_total / errors_total /
 // last_tick_timestamp_seconds to it.
-func registerPhysicalHostRoutes(ctx context.Context, v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, obs *observability.Metrics, pub realtime.Publisher, auditSvc *audit.Service, auditRepo *audit.Repository, perms func(rbacpkg.Permission) gin.HandlerFunc) *physicalhost.MaintenanceService {
+func registerPhysicalHostRoutes(ctx context.Context, v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, obs *observability.Metrics, pub realtime.Publisher, auditSvc *audit.Service, auditRepo *audit.Repository, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service, hpSvc *hostproject.Service, hpProjectSvc *projectpkg.Service) *physicalhost.MaintenanceService {
 	if err := dbpkg.AutoMigrate(db, append(physicalhost.AllModels(), audit.AllModels()...)...); err != nil {
 		log.Error("physicalhost AutoMigrate failed", "err", err)
 		return nil
@@ -743,9 +755,22 @@ func registerPhysicalHostRoutes(ctx context.Context, v1 *gin.RouterGroup, db *go
 	go loop.Run(ctx, nil)
 	log.Info("monitor loop started", "tick", "1m", "jitter", "5s")
 
+	// Build the per-project access factory for the
+	// physicalhost routes. The host is project-scoped
+	// via the hostproject links table; the
+	// ProjectIDsForHost resolver below chains
+	// hostID -> device_id -> project IDs.
+	projectAny := rbacpkg.NewAnyProjectAccessFactory(rbacSvc, hpProjectSvc.MembershipChecker())
 	phSvc := physicalhost.NewService(physicalhost.ServiceConfig{
 		Repo:      repo,
 		AuditRepo: auditRepo,
+		ProjectIDsForHost: func(hostID string) ([]string, error) {
+			host, err := repo.Get(hostID)
+			if err != nil {
+				return nil, err
+			}
+			return hpSvc.ProjectIDsForDevice(host.DeviceID)
+		},
 	})
 	physicalhost.NewHandler(physicalhost.HandlerConfig{
 		Service:     phSvc,
@@ -753,7 +778,7 @@ func registerPhysicalHostRoutes(ctx context.Context, v1 *gin.RouterGroup, db *go
 		Maintenance: maint,
 		Metrics:     physicalhost.NewMetricsCache(physicalhost.MetricsCacheConfig{Collector: collector, TTL: 30 * time.Second, MaxEntries: 1024}),
 		Audit:       auditSvc,
-	}).Register(v1, perms)
+	}).Register(v1, perms, projectAny)
 	log.Info("physicalhost routes registered")
 	return maint
 }
@@ -869,17 +894,20 @@ func registerK8sClusterRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logg
 // for a project. The per-project access factory uses the same
 // MembershipChecker as the project module so a Developer cannot link
 // a device to a project they do not belong to.
-func registerHostProjectLinkRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service, auditSvc *audit.Service) {
+func registerHostProjectLinkRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service, auditSvc *audit.Service, hpSvc *hostproject.Service, hpProjectSvc *projectpkg.Service) {
 	if err := dbpkg.AutoMigrate(db, hostproject.AllModels()...); err != nil {
 		log.Error("hostproject AutoMigrate failed", "err", err)
 		return
 	}
-	repo := hostproject.NewRepository(db)
-	projectRepo := projectpkg.NewRepository(db)
-	projectSvc := projectpkg.NewService(projectRepo)
-	svc := hostproject.NewService(repo, projectSvc, auditSvc)
-	projectAccess := rbacpkg.NewProjectAccessFactory(rbacSvc, projectSvc.MembershipChecker())
-	hostproject.NewHandler(svc).Register(v1, perms, projectAccess)
+	// The hostproject service and its project dependency
+	// are constructed in run() so the physicalhost
+	// register function can share them. Re-using the same
+	// instance here keeps the per-project access
+	// middleware in sync: the membership cache the
+	// caller-package builds for a request sees one
+	// canonical project service.
+	projectAccess := rbacpkg.NewProjectAccessFactory(rbacSvc, hpProjectSvc.MembershipChecker())
+	hostproject.NewHandler(hpSvc).Register(v1, perms, projectAccess)
 	log.Info("hostproject routes registered")
 }
 
