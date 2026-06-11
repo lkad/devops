@@ -131,12 +131,15 @@ const DefaultExecTimeout = 30 * time.Second
 // ceiling.
 const MaxExecTimeout = 600 * time.Second
 
-// Client is the seam between the k8s subsystem and the
-// Kubernetes API. The interface is intentionally tiny — only
-// the read paths used by /api/v1/k8s/clusters/:id/{pods,
-// deployments, services} and the connectivity probe. A real
-// implementation lives in KubeClient; tests use FakeClient.
-type Client interface {
+// Lister is the read-only enumeration subset of the K8s
+// API used by /api/v1/k8s/clusters/:id/{pods, deployments,
+// services} and the connectivity probe. Callers that only
+// walk resources (e.g. the servicecatalog multi-cluster
+// walker, which only calls ListDeployments) should depend
+// on Lister rather than the full Client. Keeps the
+// dependency surface auditable and lets test fakes be
+// smaller.
+type Lister interface {
 	// Ping verifies the API server is reachable and the
 	// supplied credentials are valid. It returns nil on
 	// success, an error on failure.
@@ -153,7 +156,14 @@ type Client interface {
 	// ListServices returns the services in the given
 	// namespace. An empty namespace means "all namespaces".
 	ListServices(ctx context.Context, namespace string) ([]ServiceEntry, error)
+}
 
+// LogReader is the log-fetching subset of the K8s API
+// used by /api/v1/k8s/clusters/:id/logs and the streaming
+// pipeline. A pod namespace scope is required (label
+// selectors are only unique within a namespace, so an
+// unscoped query is almost always a caller bug).
+type LogReader interface {
 	// GetLogsBySelector lists pods matching the given label
 	// selector (in the given namespace) and returns a merged
 	// historical tail of their log lines. The query is
@@ -165,7 +175,14 @@ type Client interface {
 	// query without a namespace scope is almost always a
 	// caller bug.
 	GetLogsBySelector(ctx context.Context, namespace, labelSelector string, q LogQuery) ([]LogEntry, error)
+}
 
+// Execer is the pod-command-execution subset of the K8s
+// API used by /api/v1/k8s/clusters/:id/pods/:pod/exec. A
+// non-empty command and a non-empty container are both
+// required; the wire shape is non-streaming (one HTTP
+// round trip per call, the v0.3 spec).
+type Execer interface {
 	// ExecInPod executes a one-shot command in a running
 	// pod and returns its stdout, stderr, and exit code.
 	// The wire shape is non-streaming (one HTTP round trip
@@ -175,6 +192,22 @@ type Client interface {
 	// expansion, no PTY. A non-empty command and a
 	// non-empty container are both required.
 	ExecInPod(ctx context.Context, namespace, pod, container string, command []string, timeout time.Duration) (PodExecResult, error)
+}
+
+// Client is the full seam between the k8s subsystem and
+// the Kubernetes API. The interface is the union of
+// Lister + LogReader + Execer — the read paths used by
+// /api/v1/k8s/clusters/:id/{pods, deployments, services,
+// logs, exec} and the connectivity probe. A real
+// implementation lives in KubeClient; tests use FakeClient.
+//
+// Callers that only need a subset (e.g. the servicecatalog
+// walker) should depend on the smaller interface (Lister
+// for the catalog case).
+type Client interface {
+	Lister
+	LogReader
+	Execer
 }
 
 // FakeClient is an in-memory Client for unit tests. Each
@@ -868,8 +901,19 @@ var ErrInvalidLogQuery = errors.New("invalid log query")
 // can join.
 var ErrInvalidExecRequest = errors.New("invalid exec request")
 
-// Compile-time interface checks.
+// Compile-time interface checks. The per-subset checks
+// (Lister / LogReader / Execer) are the contract assertion
+// for the smaller interfaces — if any one of them fails to
+// compile, the corresponding subset was removed from a
+// concrete type and the audit's interface-split goal is
+// broken. The full Client check is the umbrella.
 var (
-	_ Client = (*FakeClient)(nil)
-	_ Client = (*KubeClient)(nil)
+	_ Lister     = (*FakeClient)(nil)
+	_ LogReader  = (*FakeClient)(nil)
+	_ Execer     = (*FakeClient)(nil)
+	_ Client     = (*FakeClient)(nil)
+	_ Lister     = (*KubeClient)(nil)
+	_ LogReader  = (*KubeClient)(nil)
+	_ Execer     = (*KubeClient)(nil)
+	_ Client     = (*KubeClient)(nil)
 )
