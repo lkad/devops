@@ -150,7 +150,7 @@ type bulkLinkRequest struct {
 func (h *Handler) listDeviceProjects(c *gin.Context) {
 	rows, err := h.svc.ListProjectDetailsByDevice(c.Param("id"))
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteList(c.Writer, rows, nil)
@@ -173,7 +173,7 @@ func (h *Handler) linkDeviceProject(c *gin.Context) {
 	actor := callerFromGin(c)
 	link, err := h.svc.Link(c.Param("id"), in.ProjectID, actor, c.Request.Context())
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteCreated(c.Writer, link)
@@ -184,7 +184,7 @@ func (h *Handler) linkDeviceProject(c *gin.Context) {
 // 404 if the link is missing.
 func (h *Handler) unlinkDeviceProject(c *gin.Context) {
 	if err := h.svc.Unlink(c.Param("id"), c.Param("project_id"), c.Request.Context()); err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteNoContent(c.Writer)
@@ -204,7 +204,7 @@ func (h *Handler) bulkLinkDeviceProjects(c *gin.Context) {
 	actor := callerFromGin(c)
 	links, err := h.svc.BulkLink(c.Param("id"), in.ProjectIDs, actor, c.Request.Context())
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusCreated, contracts.ListResponse{Data: links})
@@ -233,7 +233,7 @@ func callerFromGin(c *gin.Context) string {
 func (h *Handler) listProjectDevices(c *gin.Context) {
 	rows, err := h.svc.ListDeviceDetailsByProject(c.Param("id"))
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteList(c.Writer, rows, nil)
@@ -246,7 +246,7 @@ func (h *Handler) listProjectDevices(c *gin.Context) {
 // doesn't have to remember to render it.
 func (h *Handler) bind(c *gin.Context, dst any) bool {
 	if c.Request.Body == nil {
-		h.writeAPIError(c, &contracts.APIError{
+		handler.WriteAPIError(c.Writer, &contracts.APIError{
 			Code:    contracts.CodeValidation,
 			Message: "request body is required",
 		})
@@ -256,35 +256,17 @@ func (h *Handler) bind(c *gin.Context, dst any) bool {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		if errors.Is(err, io.EOF) {
-			h.writeAPIError(c, &contracts.APIError{
+			handler.WriteAPIError(c.Writer, &contracts.APIError{
 				Code:    contracts.CodeValidation,
 				Message: "request body is empty",
 			})
 			return false
 		}
-		h.writeAPIError(c, &contracts.APIError{
+		handler.WriteAPIError(c.Writer, &contracts.APIError{
 			Code:    contracts.CodeValidation,
 			Message: "invalid request body: " + err.Error(),
 		})
 		return false
 	}
 	return true
-}
-
-// writeAPIError centralises the error render. It also
-// unwraps generic errors to a 500 envelope so the
-// handler never panics.
-func (h *Handler) writeAPIError(c *gin.Context, err error) {
-	if err == nil {
-		return
-	}
-	var ae *contracts.APIError
-	if !errors.As(err, &ae) {
-		ae = &contracts.APIError{
-			Code:    contracts.CodeInternal,
-			Message: err.Error(),
-			Cause:   err,
-		}
-	}
-	handler.WriteError(c.Writer, ae)
 }

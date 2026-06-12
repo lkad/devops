@@ -138,7 +138,7 @@ func (h *Handler) createType(c *gin.Context) {
 	}
 	pt, err := h.svc.CreateType(ProjectType{Name: in.Name, Description: in.Description, Weight: in.Weight})
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteCreated(c.Writer, pt)
@@ -150,7 +150,7 @@ func (h *Handler) createType(c *gin.Context) {
 func (h *Handler) listTypes(c *gin.Context) {
 	pts, err := h.svc.ListTypes()
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, pts)
@@ -188,7 +188,7 @@ func (h *Handler) create(c *gin.Context) {
 		Metadata:    in.Metadata,
 	})
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	h.emitAudit(c, audit.RecordActionInput{
@@ -223,7 +223,7 @@ func (h *Handler) update(c *gin.Context) {
 		Weight:      in.Weight,
 	})
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	h.emitAudit(c, audit.RecordActionInput{
@@ -238,7 +238,7 @@ func (h *Handler) update(c *gin.Context) {
 // the rest are 204.
 func (h *Handler) delete(c *gin.Context) {
 	if err := h.svc.DeleteProject(c.Param("id")); err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	h.emitAudit(c, audit.RecordActionInput{
@@ -256,7 +256,7 @@ func (h *Handler) delete(c *gin.Context) {
 func (h *Handler) get(c *gin.Context) {
 	p, kids, members, err := h.svc.GetProjectWithRelations(c.Param("id"))
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, gin.H{
@@ -272,7 +272,7 @@ func (h *Handler) children(c *gin.Context) {
 	page, pageSize := readPagination(c)
 	kids, total, err := h.repo.List(Filter{ParentID: ptr(c.Param("id")), Limit: pageSize, Offset: (page - 1) * pageSize})
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	p := contracts.NewPagination(page, pageSize)
@@ -287,7 +287,7 @@ func (h *Handler) children(c *gin.Context) {
 func (h *Handler) ancestors(c *gin.Context) {
 	chain, err := h.svc.ListAncestors(c.Param("id"))
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, chain)
@@ -298,7 +298,7 @@ func (h *Handler) ancestors(c *gin.Context) {
 func (h *Handler) listMembers(c *gin.Context) {
 	members, err := h.svc.ListMembers(c.Param("id"))
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	handler.WriteJSON(c.Writer, http.StatusOK, members)
@@ -328,14 +328,14 @@ func (h *Handler) addMember(c *gin.Context) {
 	// the request body — see the comment on addMemberInput.
 	cl, ok := caller.FromGin(c)
 	if !ok || cl == nil || cl.User == nil {
-		h.writeAPIError(c, &contracts.APIError{
+		handler.WriteAPIError(c.Writer, &contracts.APIError{
 			Code:    contracts.CodeUnauthorized,
 			Message: "authentication required",
 		})
 		return
 	}
 	if err := h.svc.AssignMember(c.Param("id"), in.UserID, in.Role, cl.User.ID); err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	h.emitAudit(c, audit.RecordActionInput{
@@ -354,7 +354,7 @@ func (h *Handler) addMember(c *gin.Context) {
 // removeMember handles DELETE /projects/:id/members/:user_id.
 func (h *Handler) removeMember(c *gin.Context) {
 	if err := h.svc.RevokeMember(c.Param("id"), c.Param("user_id")); err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	h.emitAudit(c, audit.RecordActionInput{
@@ -388,7 +388,7 @@ func (h *Handler) list(c *gin.Context) {
 	}
 	items, total, err := h.svc.ListProjects(f)
 	if err != nil {
-		h.writeAPIError(c, err)
+		handler.WriteAPIError(c.Writer, err)
 		return
 	}
 	p := contracts.NewPagination(page, pageSize)
@@ -403,33 +403,20 @@ func (h *Handler) list(c *gin.Context) {
 // handler doesn't have to remember to render it.
 func (h *Handler) bind(c *gin.Context, dst any) bool {
 	if c.Request.Body == nil {
-		h.writeAPIError(c, &contracts.APIError{Code: contracts.CodeValidation, Message: "request body is required"})
+		handler.WriteAPIError(c.Writer, &contracts.APIError{Code: contracts.CodeValidation, Message: "request body is required"})
 		return false
 	}
 	dec := json.NewDecoder(c.Request.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		if errors.Is(err, io.EOF) {
-			h.writeAPIError(c, &contracts.APIError{Code: contracts.CodeValidation, Message: "request body is empty"})
+			handler.WriteAPIError(c.Writer, &contracts.APIError{Code: contracts.CodeValidation, Message: "request body is empty"})
 			return false
 		}
-		h.writeAPIError(c, &contracts.APIError{Code: contracts.CodeValidation, Message: "invalid request body: " + err.Error()})
+		handler.WriteAPIError(c.Writer, &contracts.APIError{Code: contracts.CodeValidation, Message: "invalid request body: " + err.Error()})
 		return false
 	}
 	return true
-}
-
-// writeAPIError centralises the error render. It also unwraps
-// generic errors to a 500 envelope so the handler never panics.
-func (h *Handler) writeAPIError(c *gin.Context, err error) {
-	if err == nil {
-		return
-	}
-	var ae *contracts.APIError
-	if !errors.As(err, &ae) {
-		ae = &contracts.APIError{Code: contracts.CodeInternal, Message: err.Error(), Cause: err}
-	}
-	handler.WriteError(c.Writer, ae)
 }
 
 // readPagination parses the standard page/page_size query params
