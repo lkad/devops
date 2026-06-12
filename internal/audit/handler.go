@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/pkg/contracts"
@@ -18,13 +19,25 @@ import (
 // params, call service, render. All validation, persistence,
 // and emission live in the service / repository / emitter.
 type Handler struct {
-	svc *Service
+	svc        *Service
+	membership caller.MembershipChecker
 }
 
 // NewHandler returns a Handler bound to the supplied service.
-// The service is the only dependency; future RBAC middleware
-// can be added at the route level without changing this type.
-func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
+// The membership checker is optional (nil = no scoped
+// audit; only SuperAdmin can list events); production
+// wires the project's MembershipChecker so scoped
+// Auditors can be re-introduced with proper tenant
+// isolation. The variadic-arg pattern keeps the
+// single-arg call site used by unit tests compiling
+// unchanged.
+func NewHandler(svc *Service, membership ...caller.MembershipChecker) *Handler {
+	var m caller.MembershipChecker
+	if len(membership) > 0 {
+		m = membership[0]
+	}
+	return &Handler{svc: svc, membership: m}
+}
 
 // Register wires the audit routes onto the supplied router
 // group. The group is expected to live under /api/v1; the
@@ -62,6 +75,29 @@ func (h *Handler) List(c *gin.Context) {
 	filter, err := h.parseFilter(c)
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
+		return
+	}
+	// When a caller is on the gin context, route
+	// through ListForCaller so the per-tenant filter
+	// is applied. No caller (dev / unit tests that
+	// pre-date the scoped-Auditor wiring) falls back
+	// to the unfiltered List — the unfiltered path
+	// stays for the dev tooling and for the audit
+	// admin path that explicitly needs it.
+	cl, ok := caller.FromGin(c)
+	if ok && cl != nil {
+		rows, total, err := h.svc.ListForCaller(c.Request.Context(), filter, cl, h.membership)
+		if err != nil {
+			handler.WriteAPIError(c.Writer, err)
+			return
+		}
+		page := contracts.Pagination{
+			Total:   total,
+			Limit:   filter.Limit,
+			Offset:  filter.Offset,
+			HasMore: filter.Limit > 0 && filter.Offset+filter.Limit < int(total),
+		}
+		handler.WriteList(c.Writer, rows, &page)
 		return
 	}
 	rows, total, err := h.svc.List(filter)
