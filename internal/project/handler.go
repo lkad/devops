@@ -186,7 +186,7 @@ func (h *Handler) create(c *gin.Context) {
 		Weight:      in.Weight,
 		Labels:      in.Labels,
 		Metadata:    in.Metadata,
-	})
+	}, c.Request.Context())
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return

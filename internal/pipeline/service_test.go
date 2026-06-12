@@ -1,12 +1,14 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -618,3 +620,148 @@ func TestService_Trigger_WebhookStub(t *testing.T) {
 
 // ensure errors.As is referenced
 var _ = errors.As
+
+// recordingEmitter captures every AuditEvent for assertion. It
+// satisfies the audit.Emitter interface used by audit.Service.
+type recordingPipelineEmitter struct {
+	mu     sync.Mutex
+	events []audit.AuditEvent
+}
+
+func (r *recordingPipelineEmitter) Emit(_ context.Context, e audit.AuditEvent) {
+	r.mu.Lock()
+	r.events = append(r.events, e)
+	r.mu.Unlock()
+}
+
+func (r *recordingPipelineEmitter) all() []audit.AuditEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]audit.AuditEvent, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+// pipelineAuditSvcFixture wires a fresh in-memory repository, a
+// Fake executor, and a recording audit service. The audit
+// service is the one used by Service.audit; the emitter
+// captures every emit for assertion.
+func pipelineAuditSvcFixture(t *testing.T) (*Service, *Repository, *Fake, *recordingPipelineEmitter) {
+	t.Helper()
+	repo := NewRepository(openPipelineDB(t))
+	fake := &Fake{}
+	emitter := &recordingPipelineEmitter{}
+	auditSvc := audit.NewService(audit.ServiceConfig{Repo: audit.NewRepository(openPipelineDB(t)), Emitter: emitter})
+	svc := NewService(repo, fake, auditSvc)
+	return svc, repo, fake, emitter
+}
+
+// validPipelineInput returns a CreatePipelineInput that passes
+// the service's validation. Reused by the audit tests.
+func validPipelineInput() CreatePipelineInput {
+	return CreatePipelineInput{
+		Name:       "ci",
+		ProjectID:  "proj-1",
+		TargetType: TargetTypeProject,
+		Steps:      []PipelineStep{{Name: "build", Type: StepTypeShell}},
+	}
+}
+
+// TestService_Create_EmitsAudit pins the service-layer audit
+// emission for pipeline creation. Before this commit the
+// pipeline module had no audit trail; P0 #3 audit-trail
+// coverage closes the gap.
+func TestService_Create_EmitsAudit(t *testing.T) {
+	svc, _, _, emitter := pipelineAuditSvcFixture(t)
+	p, err := svc.Create(validPipelineInput())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	events := emitter.all()
+	if len(events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(events))
+	}
+	if events[0].Action != audit.ActionCreate {
+		t.Errorf("action = %q, want %q", events[0].Action, audit.ActionCreate)
+	}
+	if events[0].ResourceType != audit.ResourcePipeline {
+		t.Errorf("resource type = %q, want %q", events[0].ResourceType, audit.ResourcePipeline)
+	}
+	if events[0].ResourceID != p.ID {
+		t.Errorf("resource id = %q, want %q", events[0].ResourceID, p.ID)
+	}
+}
+
+// TestService_Update_EmitsAudit pins the update path.
+func TestService_Update_EmitsAudit(t *testing.T) {
+	svc, _, _, emitter := pipelineAuditSvcFixture(t)
+	p, _ := svc.Create(validPipelineInput())
+	newName := "ci-2"
+	if _, err := svc.Update(p.ID, UpdatePipelineInput{Name: &newName}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	events := emitter.all()
+	if len(events) != 2 {
+		t.Fatalf("audit events = %d, want 2", len(events))
+	}
+	last := events[len(events)-1]
+	if last.Action != audit.ActionUpdate {
+		t.Errorf("last action = %q, want %q", last.Action, audit.ActionUpdate)
+	}
+	if last.ResourceID != p.ID {
+		t.Errorf("last resource id = %q, want %q", last.ResourceID, p.ID)
+	}
+}
+
+// TestService_Delete_EmitsAudit pins the delete path.
+func TestService_Delete_EmitsAudit(t *testing.T) {
+	svc, _, _, emitter := pipelineAuditSvcFixture(t)
+	p, _ := svc.Create(validPipelineInput())
+	if err := svc.Delete(p.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	events := emitter.all()
+	if len(events) != 2 {
+		t.Fatalf("audit events = %d, want 2", len(events))
+	}
+	last := events[len(events)-1]
+	if last.Action != audit.ActionDelete {
+		t.Errorf("last action = %q, want %q", last.Action, audit.ActionDelete)
+	}
+	if last.ResourceID != p.ID {
+		t.Errorf("last resource id = %q, want %q", last.ResourceID, p.ID)
+	}
+}
+
+// TestService_Trigger_EmitsAudit pins the trigger path. The
+// emit happens AFTER the run row lands but BEFORE the
+// goroutine dispatches the executor; a flaky test would catch
+// the ordering mistake.
+func TestService_Trigger_EmitsAudit(t *testing.T) {
+	svc, _, _, emitter := pipelineAuditSvcFixture(t)
+	p, _ := svc.Create(validPipelineInput())
+	run, err := svc.Trigger(p.ID, "user-1")
+	if err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	events := emitter.all()
+	if len(events) != 2 {
+		t.Fatalf("audit events = %d, want 2", len(events))
+	}
+	last := events[len(events)-1]
+	if last.Action != audit.ActionTrigger {
+		t.Errorf("last action = %q, want %q", last.Action, audit.ActionTrigger)
+	}
+	if last.ResourceID != p.ID {
+		t.Errorf("last resource id = %q, want %q", last.ResourceID, p.ID)
+	}
+	if last.Metadata == nil {
+		t.Fatal("last metadata nil, want set")
+	}
+	if last.Metadata["run_id"] != run.ID {
+		t.Errorf("metadata run_id = %v, want %q", last.Metadata["run_id"], run.ID)
+	}
+	if last.Metadata["triggered_by"] != "user-1" {
+		t.Errorf("metadata triggered_by = %v, want user-1", last.Metadata["triggered_by"])
+	}
+}

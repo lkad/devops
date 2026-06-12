@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -69,6 +70,12 @@ type Service struct {
 	// package wires the real validator in main.go; tests
 	// can inject a fake via WithServiceValidator.
 	serviceValidator ServiceValidator
+	// audit is the cross-module audit service. Optional
+	// (nil means "no audit emission"); production wires a
+	// real service so v0.2.0.0 P0 #3 audit-trail coverage
+	// holds. The emit is best-effort; failure to record
+	// does not roll back the mutation.
+	audit *audit.Service
 }
 
 // ServiceValidator reports whether a service_id refers to
@@ -92,11 +99,20 @@ func (s *Service) WithServiceValidator(v ServiceValidator) *Service {
 // NewService builds a Service. The repository and executor
 // are the only dependencies; everything else (clocks, audit
 // hooks) can be injected later by extending the constructor.
-func NewService(repo *Repository, exec Executor) *Service {
+// The audit service is optional (nil means "no audit emission");
+// production wires a real service so v0.2.0.0 P0 #3 audit-trail
+// coverage holds. The variadic argument keeps legacy callers
+// (which pre-date the audit hooks) compiling.
+func NewService(repo *Repository, exec Executor, auditSvc ...*audit.Service) *Service {
+	var a *audit.Service
+	if len(auditSvc) > 0 {
+		a = auditSvc[0]
+	}
 	return &Service{
 		repo:     repo,
 		executor: exec,
 		running:  make(map[string]context.CancelFunc),
+		audit:    a,
 	}
 }
 
@@ -136,6 +152,12 @@ func (s *Service) Create(in CreatePipelineInput) (*Pipeline, error) {
 			Cause:   err,
 		}
 	}
+	s.emitAudit(audit.RecordActionInput{
+		Action:       audit.ActionCreate,
+		ResourceType: audit.ResourcePipeline,
+		ResourceID:   p.ID,
+		Metadata:     audit.JSONMap{"name": p.Name, "project_id": p.ProjectID, "trigger": p.Trigger},
+	})
 	return p, nil
 }
 
@@ -236,6 +258,11 @@ func (s *Service) Update(id string, in UpdatePipelineInput) (*Pipeline, error) {
 			Cause:   err,
 		}
 	}
+	s.emitAudit(audit.RecordActionInput{
+		Action:       audit.ActionUpdate,
+		ResourceType: audit.ResourcePipeline,
+		ResourceID:   p.ID,
+	})
 	return p, nil
 }
 
@@ -255,6 +282,11 @@ func (s *Service) Delete(id string) error {
 			Cause:   err,
 		}
 	}
+	s.emitAudit(audit.RecordActionInput{
+		Action:       audit.ActionDelete,
+		ResourceType: audit.ResourcePipeline,
+		ResourceID:   id,
+	})
 	return nil
 }
 
@@ -310,6 +342,13 @@ func (s *Service) Trigger(pipelineID, triggeredBy string) (*PipelineRun, error) 
 	s.runMu.Lock()
 	s.running[run.ID] = cancel
 	s.runMu.Unlock()
+
+	s.emitAudit(audit.RecordActionInput{
+		Action:       audit.ActionTrigger,
+		ResourceType: audit.ResourcePipeline,
+		ResourceID:   p.ID,
+		Metadata:     audit.JSONMap{"run_id": run.ID, "triggered_by": triggeredBy},
+	})
 
 	go s.executeRun(ctx, p, run)
 	return run, nil
@@ -797,4 +836,21 @@ func (s *Service) validateServiceID(id string) error {
 		}
 	}
 	return nil
+}
+
+// emitAudit is the single seam between this package and the
+// cross-module audit subsystem. A nil s.audit is a clean
+// no-op so unit tests can wire a Service without an audit
+// sink. The emission is best-effort: a failure to record does
+// not roll back the mutation. The context is background
+// because pipeline mutations are not user-attributable in
+// the cross-module audit (the actor is captured via the
+// explicit triggeredBy parameter for Trigger, and is omitted
+// for Create / Update / Delete where the handler's
+// authentication middleware is the source of truth).
+func (s *Service) emitAudit(in audit.RecordActionInput) {
+	if s == nil || s.audit == nil {
+		return
+	}
+	s.audit.RecordAction(context.Background(), in)
 }
