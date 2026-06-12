@@ -286,6 +286,27 @@ typoes. 15 min CC (install promtool in CI).
 
 ## Completed
 
+### A 子项目 — 后端生产化 (2026-06-12)
+
+A 子项目 12 项全部落地,5 个 agent 并行实施,3.5 小时完成。
+具体见 `openspec/specs/production-readiness/` (镜像本 spec) + git log。
+关键 commit:`d954e86d` (a1 merge) + `ff90443e` (a3 merge) + `37c88180` (a4 merge) + `79b44124` (a5 merge) + `6a09794b` (plan) + `cb5ea906` (spec)。
+
+- P0 #4 (APP_JWT_SECRET/K8S_CRYPTO_KEY 强制生产) — `internal/config/config.go` Validate + main.go env check
+- P0 #5 (`/health` 拆 `/live`/`/ready`/`/health` + fan-out 探活 DB+LDAP+K8s) — `internal/health/health.go`
+- P0 #6 (docker-compose mem_limit/cpus/healthcheck/backup 容器) — `deploy/docker-compose.yml`
+- P1 monitor_loop 优雅停机 + 3 Prometheus metrics — `signal.NotifyContext` 共享,既已实施
+- P2 `handler.WriteAPIError` 合并 (8 sites → 2 真 site,hostproject/project 真实)
+- P2 `database.MapNotFound` helper (已存在,Task 2 无 commit)
+- P2 dev-default secrets 集中 (5 const + EnvOrWarn) — `internal/config/secrets_block.go`
+- P2 K8s Client interface 拆 (Lister/LogReader/Execer) — 已存在
+- P2 secret masking 名单 (15 key) — `pkg/logger/secret_keys.go`
+- P3 49MB binary `.gitignore` 精确模式
+- P3 dashboard `?status=open` bug (handler.go:373-381 synonym 方式)
+- P3 `promtool check rules` + `check config` CI step
+- 新增 Helm chart 骨架(13 文件,9 templates) + configmap flatten 修
+- 新增 `scripts/backup-postgres.sh` + `scripts/restore-postgres.sh`
+
 ### Audit reports persisted 2026-06-10
 
 `/mnt/devops/.context/audits/2026-06-10-{1,2,3,4}-*.md` —

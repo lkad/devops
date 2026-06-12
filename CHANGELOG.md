@@ -2,6 +2,48 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1.0] - 2026-06-12
+
+A 子项目 — 后端生产化 (Production-Readiness) 落地。5 个并行 agent 实施,3.5 小时完成。所有 P0 #4 / #5 / #6 + P1 monitor_loop + P2 收敛(8 module-local writeAPIError / dev-default secrets / secret masking 名单 / K8s Lister 接口) + P3 杂项(`?status=open` bug 修 / 49MB binary .gitignore / promtool CI),加 Helm chart 骨架 + backup/restore 脚本。
+
+### Added
+
+- **Health endpoints** — `/live` (liveness) + `/ready` (DB+LDAP+K8s fan-out 探活) + `/health` (兼容旧调用方)。`internal/health/health.go` + tests。
+- **Production secret enforcement** — `config.Validate()` 在 `env == "production"` 时强制 `ldap.url` / `database.password != "devops"` / `ldap.dev_bypass == false`。JWT/K8S-crypto 密钥 env-only,在 main.go 启动检查。
+- **Dev-default secrets 集中** — `internal/config/secrets_block.go`:5 个 `DevDefault*` 常量 + `EnvOrWarn(envName, devDefault)` helper。生产 fail-fast 关键支撑。
+- **Secret masking 完整名单** — `pkg/logger/secret_keys.go`:15 个 key (password/kubeconfig/bind_password/token/secret/jwt_secret/k8s_crypto_key/private_key/ssh_key/client_secret/api_key/ldap_bind_pw/tls_cert 等) + `ShouldMask(key)` helper。`IsSensitiveField` 委托到 `ShouldMask`,Single source of truth。
+- **monitor_loop 优雅停机** — `signal.NotifyContext` 在 main.go 接管 SIGINT/SIGTERM,与 HTTP server 共享 root context。3 个 Prometheus metrics:`physicalhost_loop_iterations_total` / `physicalhost_loop_errors_total` / `physicalhost_loop_last_success_timestamp_seconds`。
+- **K8s Client interface 拆分** — `Lister` (Ping + ListPods/ListDeployments/ListServices) / `LogReader` (GetLogsBySelector) / `Execer` (ExecInPod)。`k8sClientAdapter.client: k8s.Lister` 走窄接口,`ListerFor` registry method。
+- **Helm chart 骨架** — `deploy/helm/` (13 文件):Chart.yaml + values.yaml + 9 templates (deployment/service/ingress/configmap/secret/serviceaccount/hpa/cronjob-backup/prometheusrule) + _helpers.tpl + README。livenessProbe→/live,readinessProbe→/ready,cert-manager/ExternalSecret 接入点已留。
+- **Backup/Restore 脚本** — `scripts/backup-postgres.sh` + `scripts/restore-postgres.sh`,3 target/source (local/s3/nfs),`set -euo pipefail`,路径遍历 sanitization,dump 验证。
+
+### Fixed
+
+- **dashboard `?status=open` 静默忽略** — `internal/alerts/handler.go:373-381` 改用 `state` + `status` synonym 方式,前端发 `?status=open` 现在能正确返 open alerts。
+- **Plan 级别 bug** — configmap template 原用 `quote` 处理 nested config map,`helm template` 失败。改为 toYaml 输出 nested config 到 `config.yaml` 文件 key,顶层 scalar 转 env 注入。
+- **`.gitignore` 49MB binary 误匹配目录** — `**/devops-toolkit` 改 `*/devops-toolkit`(单星,避免误匹配 `cmd/devops-toolkit/` 目录)。
+- **`handler.WriteAPIError` 合并** — 8 module-local `writeAPIError` helper 删除,改调统一 `handler.WriteAPIError`。`servicecatalog.writeAPIError` 保留(做 typed-error mapping,fit 不进 pass-through 语义)。
+
+### Changed
+
+- **Layering 改进** — 5 module `hostproject` + `project` 改用 `handler.WriteAPIError`,`servicecatalog` 维持自己(typed-error mapping 需求)。
+- **CI** — `.github/workflows/ci.yml` 加 promtool `check rules` + `check config` 两步,验证 `prometheus.yml` scrape config + 规则文件。
+- **docker-compose** — `deploy/docker-compose.yml` 加 backup 容器(postgres:15 + cron + /backups volume)+ mem_limit/cpus/healthcheck 资源限制。
+
+### Internal
+
+- **`database.MapNotFound` helper** — 之前 session 已实施(`internal/database/notfound.go`),接受 sentinel 参数。Task 2 无新增 commit。
+- **Task 8 monitor_loop + Task 12 K8s interface split** — 之前 session 已实施,Agent 3 验证 + 扩展(`ListerFor` registry method + 4 个 test file stub)。
+
+### For contributors
+
+- 新 spec 文档: `docs/superpowers/specs/2026-06-12-A-production-readiness-design.md` (746 行)
+- 新 plan 文档: `docs/superpowers/plans/2026-06-12-A-production-readiness.md` (2509 行, 14 task × 105 step)
+- 13 个 atomic commit + 4 个 merge commit on main
+- 测试:31 packages 全绿,0 fail,1 vet warning (`internal/audit/repository.go:89` 既有,已 exclude)
+
+---
+
 ## [0.2.0.0] - 2026-06-10
 
 A big week. The service catalog, distributed tracing, and real client-go all landed end-to-end. Operators can now see live K8s pod health rolled up per service, click a trace id in an error toast to land on a deep-link page, and the multi-cluster walker actually talks to apiservers instead of returning empty.
