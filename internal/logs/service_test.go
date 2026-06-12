@@ -2,10 +2,12 @@ package logs
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -173,4 +175,40 @@ func (b *capLimitedBackend) Query(_ context.Context, q Query) (Result, error) {
 }
 func (b *capLimitedBackend) Streams(_ context.Context) ([]Stream, error) {
 	return []Stream{{Name: "test"}}, nil
+}
+
+// TestService_Streams_CrossTenant_Denied covers the v0.3.0.0
+// P0 #2 cross-tenant enforcement: a non-SuperAdmin caller
+// is denied access.
+func TestService_Streams_CrossTenant_Denied(t *testing.T) {
+	svc := NewService(&fakeBackend{caps: Capabilities{BackendName: "local"}}, ServiceConfig{})
+	cl := caller.New(&contracts.User{ID: "alice", Username: "alice", Role: contracts.RoleDeveloper})
+	ctx := caller.WithContext(context.Background(), cl)
+	_, err := svc.StreamsWithCaller(ctx)
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("err = %v, want ErrForbidden", err)
+	}
+}
+
+// TestService_Streams_SuperAdmin_Bypasses covers the spec
+// rule that SuperAdmin is implicitly allowed.
+func TestService_Streams_SuperAdmin_Bypasses(t *testing.T) {
+	svc := NewService(&fakeBackend{caps: Capabilities{BackendName: "local"}}, ServiceConfig{})
+	cl := caller.New(&contracts.User{ID: "root", Username: "root", Role: contracts.RoleSuperAdmin})
+	ctx := caller.WithContext(context.Background(), cl)
+	_, err := svc.StreamsWithCaller(ctx)
+	if errors.Is(err, ErrForbidden) {
+		t.Errorf("SuperAdmin should bypass cross-tenant, got ErrForbidden")
+	}
+}
+
+// TestService_Streams_NilCaller_401 covers the fail-closed
+// rule: a context without a caller MUST surface as
+// ErrUnauthenticated.
+func TestService_Streams_NilCaller_401(t *testing.T) {
+	svc := NewService(&fakeBackend{caps: Capabilities{BackendName: "local"}}, ServiceConfig{})
+	_, err := svc.StreamsWithCaller(context.Background())
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("err = %v, want ErrUnauthenticated", err)
+	}
 }
