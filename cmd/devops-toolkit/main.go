@@ -1066,11 +1066,17 @@ type registryAdapter struct {
 }
 
 // ClientFor implements servicecatalog.K8sClientGetter
-// by delegating to the k8s registry. The k8s.Client
-// (which has all the production methods) is adapted
-// to the minimal servicecatalog.K8sClient.
+// by delegating to the k8s registry. The k8s.Lister
+// (narrow Ping + List* interface from the k8s package)
+// is adapted to the even-more-minimal
+// servicecatalog.K8sClient. Depending on Lister
+// rather than full Client documents the contract —
+// the catalog only needs ListDeployments — and lets
+// the k8s package swap the read-only implementation
+// (e.g. a future cached Lister) without touching this
+// adapter.
 func (a registryAdapter) ClientFor(clusterID string) (servicecatalog.K8sClient, error) {
-	c, err := a.registry.ClientFor(clusterID)
+	c, err := a.registry.ListerFor(clusterID)
 	if err != nil {
 		// Map the k8s package's ErrNotFound to the
 		// servicecatalog's ErrK8sNoClient so the
@@ -1083,14 +1089,17 @@ func (a registryAdapter) ClientFor(clusterID string) (servicecatalog.K8sClient, 
 	return k8sClientAdapter{client: c, clusterID: clusterID}, nil
 }
 
-// k8sClientAdapter wraps a k8s.Client (production
-// type with the full method set) and exposes only
-// the ListDeployments method the servicecatalog
-// actually calls. Each adapter is bound to a single
-// cluster ID so the walker's filter is not
-// ambiguous.
+// k8sClientAdapter wraps a k8s.Lister (narrow
+// Ping + List* interface) and exposes only the
+// ListDeployments method the servicecatalog actually
+// calls. Each adapter is bound to a single cluster ID
+// so the walker's filter is not ambiguous. The narrow
+// dependency on Lister (not the full Client) is the
+// audit-trail win: the type assertion "this only needs
+// Ping + List*" is encoded in the field type, not just
+// a comment.
 type k8sClientAdapter struct {
-	client    k8s.Client
+	client    k8s.Lister
 	clusterID string
 }
 
