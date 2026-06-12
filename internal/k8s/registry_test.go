@@ -251,6 +251,51 @@ type countingDecrypter struct {
 	count     int
 }
 
+// TestClientRegistry_ListerFor returns the narrow Lister
+// view from a ListerFor call. The returned value must
+// implement Lister (Ping + List*) and reuse the same
+// underlying client object (no extra decrypt path) as
+// ClientFor. The narrow typing is the audit-trail win:
+// servicecatalog's health rollup needs ListDeployments
+// only, so depending on Lister makes the dependency
+// surface auditable.
+func TestClientRegistry_ListerFor(t *testing.T) {
+	repo := repoFixture(t)
+	created := &Cluster{Name: "cl-lister", Type: ClusterTypeK3d, KubeconfigEncrypted: "ct-lister"}
+	if err := repo.Create(created); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	svc := &countingDecrypter{resultFor: func(c *Cluster) (string, error) { return validKubeconfig, nil }}
+	reg := NewClientRegistry(repo, svc)
+
+	// Two ListerFor calls must collapse to ONE decrypt
+	// (sticky cache; same rule as ClientFor).
+	lister1, err := reg.ListerFor(created.ID)
+	if err != nil {
+		t.Fatalf("first ListerFor: %v", err)
+	}
+	lister2, err := reg.ListerFor(created.ID)
+	if err != nil {
+		t.Fatalf("second ListerFor: %v", err)
+	}
+	if svc.count != 1 {
+		t.Errorf("decrypt count = %d, want 1 (cache hit)", svc.count)
+	}
+	// Compile-time interface assertion; the test fails
+	// to compile if Lister loses any of these methods.
+	var _ Lister = lister1
+	// ListerFor must surface the same not-found error as
+	// ClientFor.
+	if _, err := reg.ListerFor("cl-missing-lister"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("ListerFor(missing) = %v, want ErrNotFound", err)
+	}
+	// Both lister1 and lister2 must be the same cached
+	// client object (no separate cache).
+	if lister1 != lister2 {
+		t.Errorf("ListerFor returned different objects on repeated calls")
+	}
+}
+
 func (s *countingDecrypter) DecryptKubeconfig(c *Cluster) (string, error) {
 	s.mu.Lock()
 	s.count++

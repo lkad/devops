@@ -225,6 +225,40 @@ services:
     mem_limit: 256m
     cpus: '0.5'
 
+  # Backup: nightly pg_dump via the host's
+  # scripts/backup-postgres.sh. Runs inside the
+  # postgres:15 image so pg_dump is in PATH without
+  # having to install it; the cron schedule is set
+  # dynamically (the crontab line is rebuilt every
+  # container start) so BACKUP_CRON (default
+  # "0 2 * * *") can be overridden via .env.prod.
+  # The /backups volume is bind-mounted into a
+  # sibling named volume so `docker volume ls`
+  # surfaces it as a first-class backup target.
+  backup:
+    image: postgres:15
+    mem_limit: 512m
+    cpus: '0.5'
+    volumes:
+      - ../scripts/backup-postgres.sh:/backup.sh:ro
+      - backups:/backups
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo "$$(printf '%d' $$(( $$(date +%M) ))) $$(printf '%d' $$(( $$(date +%H) * 60 + $$(date +%M) ))) * * * /backup.sh --target=local" > /etc/crontabs/root
+        echo "INFO: backup schedule: $$(cat /etc/crontabs/root)"
+        crond -f -l 2
+    env_file:
+      - path: ./.env.prod
+        required: false
+    environment:
+      PG_URL: ${PG_URL:-postgres://${POSTGRES_USER:-devops}:${POSTGRES_PASSWORD:-devops}@postgres:5432/${POSTGRES_DB:-devops}?sslmode=disable}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 networks:
   default:
     name: devops-toolkit-net
@@ -238,3 +272,4 @@ volumes:
   redis-data: {}
   influxdb-data: {}
   ldap-data: {}
+  backups: {}

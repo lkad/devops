@@ -48,18 +48,24 @@ jobs:
 
   prometheus-rules:
     # Lint check on the alert/recording rules under
-    # deploy/prometheus/rules/. PromQL silently accepts
-    # typoes, so a CI gate prevents a broken rule from
-    # shipping. Runs in a container with promtool
-    # pre-installed (avoids the install step on every CI
-    # run; the prom/prometheus image ships /bin/promtool
-    # out of the box).
+    # deploy/prometheus/rules/ AND on the prometheus.yml
+    # scrape config. PromQL silently accepts typoes, so
+    # a CI gate prevents a broken rule from shipping.
+    # The prometheus.yml check catches the "rename a
+    # scrape target, the job_name is now a typo" class
+    # of regression that no unit test in the Go code
+    # path can catch (the prom config never reaches
+    # the Go runtime — it's consumed by the prom/prometheus
+    # container in deploy/docker-compose).
     #
-    # The container's default entrypoint is the
-    # prometheus binary itself; override it to an empty
-    # string so /bin/promtool runs in the foreground
-    # without "unexpected <args>" parser errors from
-    # prometheus.
+    # Runs in a container with promtool pre-installed
+    # (avoids the install step on every CI run; the
+    # prom/prometheus image ships /bin/promtool out of
+    # the box). The container's default entrypoint is
+    # the prometheus binary itself; override it to an
+    # empty string so /bin/promtool runs in the
+    # foreground without "unexpected <args>" parser
+    # errors from prometheus.
     runs-on: ubuntu-latest
     container:
       image: prom/prometheus:latest
@@ -75,6 +81,12 @@ jobs:
             echo "checking $f"
             /bin/promtool check rules "$f"
           done
+
+      - name: promtool check config
+        run: |
+          set -euo pipefail
+          echo "checking deploy/prometheus/prometheus.yml"
+          /bin/promtool check config deploy/prometheus/prometheus.yml
 
   frontend:
     runs-on: ubuntu-latest

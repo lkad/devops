@@ -97,6 +97,18 @@ func (f *fakeExecRegistry) ClientFor(clusterID string) (Client, error) {
 	return f.client, nil
 }
 
+// ListerFor mirrors ClientFor but typed as the narrower
+// Lister interface. The fake's stored client (FakeClient)
+// satisfies Lister, so the type-assertion through c, nil
+// is the entire body.
+func (f *fakeExecRegistry) ListerFor(clusterID string) (Lister, error) {
+	c, err := f.ClientFor(clusterID)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
 // createClusterID is a small helper that POSTs a new cluster
 // and returns its generated ID. Used by the exec tests to
 // produce a real (decryptable) cluster row that the registry
