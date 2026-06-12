@@ -1,9 +1,12 @@
 package project
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -316,4 +319,74 @@ func asAPIError(err error, target **contracts.APIError) bool {
 	}
 	*target = ae
 	return true
+}
+
+// projectMembershipChecker returns a MembershipChecker that
+// grants the user membership in the supplied project IDs. Used
+// by the v0.3.0.0 P0 #2 cross-tenant tests below.
+func projectMembershipChecker(projects ...string) caller.MembershipChecker {
+	set := make(map[string]struct{}, len(projects))
+	for _, p := range projects {
+		set[p] = struct{}{}
+	}
+	return func(ctx context.Context, userID string) (map[string]struct{}, error) {
+		return set, nil
+	}
+}
+
+// TestService_GetProject_CrossTenant_Denied covers the v0.3.0.0
+// P0 #2 cross-tenant enforcement: a Developer who is a member of
+// project A cannot read project B. The Service MUST refuse with
+// ErrForbidden so a misconfigured handler that forgets the route
+// middleware cannot leak data across tenants.
+func TestService_GetProject_CrossTenant_Denied(t *testing.T) {
+	svc, _ := newServiceWithDB(t)
+	cl := caller.New(&contracts.User{ID: "alice", Username: "alice", Role: contracts.RoleDeveloper})
+	svc.SetMembershipChecker(projectMembershipChecker("a-1"))
+	ctx := caller.WithContext(context.Background(), cl)
+	_, err := svc.GetProjectWithCaller(ctx, "b-1")
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("err = %v, want ErrForbidden", err)
+	}
+}
+
+// TestService_GetProject_SuperAdmin_Bypasses covers the spec rule
+// that SuperAdmin is implicitly a member of every project, so
+// the Service MUST allow the read.
+func TestService_GetProject_SuperAdmin_Bypasses(t *testing.T) {
+	svc, _ := newServiceWithDB(t)
+	// Seed as SuperAdmin via the repo directly (CreateType/
+	// CreateProject are the ungoverned paths; only the
+	// cross-tenant GetProjectWithCaller is the spec-mandated
+	// one). The new method MUST allow SuperAdmin to read.
+	cl := caller.New(&contracts.User{ID: "root", Username: "root", Role: contracts.RoleSuperAdmin})
+	ctx := caller.WithContext(context.Background(), cl)
+	pt := ProjectType{Name: "platform"}
+	pt, err := svc.repo.CreateType(pt)
+	if err != nil {
+		t.Fatalf("seed type: %v", err)
+	}
+	bl, err := svc.repo.Create(Project{Name: "BL", Code: "bl", TypeID: pt.ID})
+	if err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	got, err := svc.GetProjectWithCaller(ctx, bl.ID)
+	if err != nil {
+		t.Errorf("SuperAdmin should bypass, got err = %v", err)
+	}
+	if got.ID != bl.ID {
+		t.Errorf("got.ID = %q, want %q", got.ID, bl.ID)
+	}
+}
+
+// TestService_GetProject_NilCaller_401 covers the fail-closed
+// rule: a context without a caller (the request never went
+// through AuthMiddleware) MUST surface as ErrUnauthenticated.
+func TestService_GetProject_NilCaller_401(t *testing.T) {
+	svc, _ := newServiceWithDB(t)
+	svc.SetMembershipChecker(projectMembershipChecker("a-1"))
+	_, err := svc.GetProjectWithCaller(context.Background(), "a-1")
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("err = %v, want ErrUnauthenticated", err)
+	}
 }
