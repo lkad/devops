@@ -2,12 +2,32 @@ package device
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/devops-toolkit/backend/internal/audit"
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
+
+// ErrUnauthenticated is the sentinel returned when a service
+// method is invoked without a caller on the context. The
+// handler maps it to a 401 UNAUTHORIZED APIError.
+var ErrUnauthenticated = errors.New("device: unauthenticated")
+
+// ErrForbidden is the sentinel returned when the caller's
+// tenant membership does not allow the requested operation.
+// The handler maps it to a 403 FORBIDDEN APIError.
+//
+// Note: device has no direct project_id column (the binding
+// is via hostproject), so the v0.3.0.0 P0 #2 service-layer
+// guard is a placeholder that allows any authenticated
+// caller with the right global permission (or SuperAdmin).
+// Cross-tenant device reads are blocked at the
+// hostproject layer in this branch; the projectID-based
+// per-device filter will land in a follow-up.
+var ErrForbidden = errors.New("device: forbidden")
 
 // CreateDeviceInput is the request payload for Service.Create.
 // The handler decodes the wire JSON into this struct; the service
@@ -136,6 +156,31 @@ func (s *Service) Get(id string) (*Device, error) {
 	return d, nil
 }
 
+// GetWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant of
+// Get. The caller MUST be attached to the context; an absent
+// caller surfaces as ErrUnauthenticated (401). A non-SuperAdmin
+// caller without an explicit allow is denied (the device-to-
+// project resolution goes through hostproject; until the
+// per-device project_id column lands, the service-layer guard
+// is "caller present + SuperAdmin OR a global project-membership
+// match" — the latter defaults to allow when the membership
+// checker is not wired). The ungoverned Get is retained for
+// legacy code paths that do not carry a context.
+func (s *Service) GetWithCaller(ctx context.Context, id string) (*Device, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		// Device has no direct project_id; cross-tenant
+		// reads are blocked at the hostproject layer. The
+		// service-layer guard is a placeholder that
+		// requires the caller to be SuperAdmin for now.
+		return nil, ErrForbidden
+	}
+	return s.Get(id)
+}
+
 // List returns a page of devices plus the unfiltered total.
 // The handler renders this as the standard envelope.
 func (s *Service) List(f ListFilter) ([]Device, int64, error) {
@@ -148,6 +193,23 @@ func (s *Service) List(f ListFilter) ([]Device, int64, error) {
 		}
 	}
 	return rows, total, nil
+}
+
+// ListWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant
+// of List. The caller MUST be attached to the context. A
+// non-SuperAdmin caller is denied (the per-device
+// project_id filter is the follow-up work; today the
+// service-layer guard is SuperAdmin only). The ungoverned
+// List is retained for legacy code paths.
+func (s *Service) ListWithCaller(ctx context.Context, f ListFilter) ([]Device, int64, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, 0, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, 0, ErrForbidden
+	}
+	return s.List(f)
 }
 
 // Search is the Service's wrapper over Repository.Search. It
