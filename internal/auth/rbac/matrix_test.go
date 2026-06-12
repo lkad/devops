@@ -143,3 +143,48 @@ func TestMatrix_UnknownRoleHasNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestRoleHasPermission_ScopedAuditor_GrantsViewAuditLog pins:
+// a ScopedAuditor (per-tenant audit reader) holds the
+// ViewAuditLog permission (full read) so the existing route
+// continues to work for them.
+func TestRoleHasPermission_ScopedAuditor_GrantsViewAuditLog(t *testing.T) {
+	if !RoleHasPermission(contracts.RoleScopedAuditor, PermissionViewAuditLog) {
+		t.Errorf("RoleScopedAuditor should have PermissionViewAuditLog")
+	}
+}
+
+// TestRoleHasPermission_ScopedAuditor_GrantsViewAuditLogProject pins:
+// a ScopedAuditor holds the new per-tenant audit permission.
+func TestRoleHasPermission_ScopedAuditor_GrantsViewAuditLogProject(t *testing.T) {
+	if !RoleHasPermission(contracts.RoleScopedAuditor, PermissionViewAuditLogProject) {
+		t.Errorf("RoleScopedAuditor should have PermissionViewAuditLogProject")
+	}
+}
+
+// TestRoleHasPermission_Auditor_DoesNotHaveScopedPermission pins:
+// the existing full Auditor role must NOT have the per-tenant
+// permission (semantics: full Auditor sees everything; only
+// ScopedAuditor gets per-tenant).
+func TestRoleHasPermission_Auditor_DoesNotHaveScopedPermission(t *testing.T) {
+	if RoleHasPermission(contracts.RoleAuditor, PermissionViewAuditLogProject) {
+		t.Errorf("RoleAuditor should NOT have PermissionViewAuditLogProject (only ScopedAuditor does)")
+	}
+}
+
+// TestRoleHasPermission_ScopedAuditor_DoesNotHaveWritePermissions pins:
+// ScopedAuditor is read-only — must not get any write permission.
+func TestRoleHasPermission_ScopedAuditor_DoesNotHaveWritePermissions(t *testing.T) {
+	writePerms := []Permission{
+		PermissionWriteDevices,
+		PermissionWriteProjects,
+		PermissionManagePipelines,
+		PermissionWriteAlerts,
+		PermissionWriteLogs,
+	}
+	for _, p := range writePerms {
+		if RoleHasPermission(contracts.RoleScopedAuditor, p) {
+			t.Errorf("RoleScopedAuditor should NOT have write permission %q", p)
+		}
+	}
+}
