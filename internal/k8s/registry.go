@@ -27,6 +27,17 @@ type ClientRegistry interface {
 	// triggers a decrypt + client build. A cluster
 	// that does not exist returns ErrNoSuchCluster.
 	ClientFor(clusterID string) (Client, error)
+
+	// ListerFor is the narrow read-only view. It is
+	// the same cached client as ClientFor (no extra
+	// decrypt) but typed as Lister so callers that
+	// only need Ping + List* (e.g. servicecatalog
+	// health rollups) depend on a smaller surface.
+	// Implemented as a thin type-assertion in
+	// defaultRegistry; the interface seam exists so
+	// test fakes can substitute a Lister without
+	// implementing the full Client.
+	ListerFor(clusterID string) (Lister, error)
 }
 
 // ErrNoSuchCluster is the typed sentinel returned by
@@ -77,6 +88,20 @@ type cachedClient struct {
 // test fake decoupled from the full Service.
 func NewClientRegistry(repo *Repository, decrypter kubeconfigDecrypter) ClientRegistry {
 	return &defaultRegistry{repo: repo, decrypter: decrypter, cache: make(map[string]cachedClient)}
+}
+
+// ListerFor satisfies ClientRegistry. It reuses the
+// same sticky cache as ClientFor (the underlying
+// client object is identical) and type-asserts to
+// the narrower Lister interface. The cache lookup
+// is a single map read; no new decrypt path is
+// introduced.
+func (r *defaultRegistry) ListerFor(clusterID string) (Lister, error) {
+	c, err := r.ClientFor(clusterID)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 // ClientFor satisfies ClientRegistry.

@@ -36,6 +36,18 @@ func (f *fakeRegistry) ClientFor(clusterID string) (Client, error) {
 	return f.client, nil
 }
 
+// ListerFor mirrors ClientFor but returns the narrower
+// Lister interface. The fake's own client (FakeClient)
+// satisfies Lister so a type-assertion through c, nil
+// is the whole implementation.
+func (f *fakeRegistry) ListerFor(clusterID string) (Lister, error) {
+	c, err := f.ClientFor(clusterID)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
 // logsHandlerFixture builds a Gin engine wired to a real
 // Service + Repository + ClientRegistry + FakeClient. The
 // returned engine exposes the k8s routes; tests hit the
