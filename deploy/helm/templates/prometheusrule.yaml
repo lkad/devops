@@ -1,0 +1,25 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "devops-toolkit.fullname" . }}-self-health
+spec:
+  groups:
+    - name: devops-toolkit.self
+      interval: 30s
+      rules:
+        - alert: PhysicalHostLoopNoSuccess
+          expr: time() - physicalhost_loop_last_success_timestamp_seconds > {{ .Values.prometheusRule.loopNoSuccessMinutes }} * 60
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Physical host monitor loop has not succeeded for {{ `{{ $value }}` }} seconds"
+        - alert: ReadyCheckFailing
+          expr: probe_ready{job="devops-toolkit"} == 0
+          for: {{ .Values.prometheusRule.readyCheckFailingMinutes }}m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Readiness probe failing for {{ `{{ $value }}` }} minutes"
+{{- end }}

@@ -1,0 +1,75 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/lkad/devops-toolkit
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: devops.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts:
+        - devops.example.com
+      secretName: devops-toolkit-tls
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# 应用配置(非 secret)。configmap.yaml 用 toYaml 输出,
+# 所以保留 nested 结构,不要 flatten。
+config:
+  server:
+    port: 8080
+  ldap:
+    dev_bypass: false
+
+# Secret 用 external-secrets/sealed-secrets 注入,这里留空。
+secrets: {}
+
+# Backup 配置
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # 每天 02:00
+  target: s3
+  s3Bucket: ""
+  retentionDays: 7
+
+# Postgres(假设外部托管,留 DSN secret)
+postgres:
+  host: ""
+  port: 5432
+  database: devops_toolkit
+
+# PrometheusRule 配置
+prometheusRule:
+  enabled: true
+  loopNoSuccessMinutes: 5
+  readyCheckFailingMinutes: 3
