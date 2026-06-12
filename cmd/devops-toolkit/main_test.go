@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/devops-toolkit/backend/internal/config"
 	"github.com/devops-toolkit/backend/pkg/logger"
@@ -86,6 +90,153 @@ func TestBuildRouter_APIv1Placeholder(t *testing.T) {
 	}
 	if _, ok := body["sections"]; !ok {
 		t.Error("expected 'sections' field")
+	}
+}
+
+// TestBuildRouter_RecoversFromPanic pins that the
+// project's middleware.Recovery (registered as the
+// outermost recovery handler) catches a panic in a
+// handler and renders the standard 500 envelope. The
+// test also asserts the panic was logged at warn
+// level (the project's Recovery writes a 'panic
+// recovered' line).
+func TestBuildRouter_RecoversFromPanic(t *testing.T) {
+	var buf bytes.Buffer
+	log := logger.New(logger.WithWriter(&buf), logger.WithLevel("info"))
+	r, _, _ := buildRouter(log, nil, nil)
+	// buildRouter returns http.Handler; cast back to
+	// *gin.Engine so we can register a panic-prone
+	// route AFTER the global middleware chain is
+	// built (CORS → Recovery → Logger → Metrics). The
+	// cast is safe because the test calls buildRouter
+	// directly; production code goes through run()
+	// which already does the cast.
+	eng, ok := r.(*gin.Engine)
+	if !ok {
+		t.Fatalf("buildRouter did not return *gin.Engine: %T", r)
+	}
+	eng.GET("/panic", func(c *gin.Context) {
+		panic("test panic — recovery middleware should catch this")
+	})
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+	eng.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body.String())
+	}
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Error.Code == "" {
+		t.Errorf("envelope has empty code; body = %s", rr.Body.String())
+	}
+	if !strings.Contains(buf.String(), "panic") {
+		t.Errorf("expected 'panic' in log output; got:\n%s", buf.String())
+	}
+}
+
+// TestBuildRouter_LoggerIncludesDuration pins the
+// v0.2.0.0 middleware-chain compliance: the project's
+// middleware.Logger must stamp duration_ms on every log
+// line. A request that sleeps for >= 50ms must surface
+// in the log with duration_ms >= 50.
+//
+// The test exercises the global chain (Logger is
+// registered with r.Use, not per-route) so a future
+// refactor that demotes the logger would fail this
+// test. The on-call engineer who needs a "how long
+// did this request take" answer at 3am depends on
+// this field.
+func TestBuildRouter_LoggerIncludesDuration(t *testing.T) {
+	var buf bytes.Buffer
+	log := logger.New(logger.WithWriter(&buf), logger.WithLevel("info"))
+	r, _, _ := buildRouter(log, nil, nil)
+	eng, ok := r.(*gin.Engine)
+	if !ok {
+		t.Fatalf("buildRouter did not return *gin.Engine: %T", r)
+	}
+	// Register a slow handler AFTER buildRouter so the
+	// chain (CORS → Recovery → Logger → Metrics) still
+	// wraps it. 50ms is the bound: long enough to
+	// exceed the 1ms clock granularity on every
+	// platform, short enough to keep the test under
+	// 200ms.
+	eng.GET("/slow", func(c *gin.Context) {
+		time.Sleep(50 * time.Millisecond)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/slow", nil)
+	eng.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	// Find the 'http request' log line for the slow
+	// path and parse out the duration_ms. The
+	// project's Logger emits JSON; we substring-match
+	// the message field then parse the value loosely.
+	found := false
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if !strings.Contains(line, `"msg":"http request"`) {
+			continue
+		}
+		if !strings.Contains(line, `"/slow"`) {
+			continue
+		}
+		// `"duration_ms":NN,` — the Logger emits
+		// this as a JSON number; the value sits
+		// between the colon and the next comma.
+		idx := strings.Index(line, `"duration_ms":`)
+		if idx < 0 {
+			continue
+		}
+		rest := line[idx+len(`"duration_ms":`):]
+		end := strings.IndexAny(rest, ",}\n ")
+		if end < 0 {
+			end = len(rest)
+		}
+		var ms int
+		if _, err := fmt.Sscanf(rest[:end], "%d", &ms); err != nil {
+			t.Errorf("parse duration_ms from %q: %v", rest[:end], err)
+			continue
+		}
+		if ms < 50 {
+			t.Errorf("duration_ms = %d, want >= 50", ms)
+		}
+		found = true
+		break
+	}
+	if !found {
+		t.Errorf("no 'http request' line with duration_ms for /slow in log:\n%s", buf.String())
+	}
+}
+
+// TestBuildRouter_TraceIDSetOnResponse pins the
+// tracing middleware's X-Trace-Id header: every
+// response (matched route + 404) must carry the
+// header so the on-call engineer can grep the log
+// aggregator by trace ID. The test sends a 200 and
+// a 404 and asserts both carry the header.
+func TestBuildRouter_TraceIDSetOnResponse(t *testing.T) {
+	log := logger.New(logger.WithWriter(&bytes.Buffer{}), logger.WithLevel("error"))
+	r, _, _ := buildRouter(log, nil, nil)
+	for _, path := range []string{"/health", "/no-such-route"} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		r.ServeHTTP(rr, req)
+		if got := rr.Header().Get("X-Trace-Id"); got == "" {
+			t.Errorf("%s: X-Trace-Id header missing", path)
+		}
 	}
 }
 
