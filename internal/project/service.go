@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"strings"
@@ -8,6 +9,16 @@ import (
 	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
+
+// ErrUnauthenticated is the sentinel returned when a service method
+// is invoked without a caller on the context. The handler maps it
+// to a 401 UNAUTHORIZED APIError.
+var ErrUnauthenticated = errors.New("project: unauthenticated")
+
+// ErrForbidden is the sentinel returned when the caller's tenant
+// membership does not allow the requested operation. The handler
+// maps it to a 403 FORBIDDEN APIError.
+var ErrForbidden = errors.New("project: forbidden")
 
 // Service is the business-rule layer for the project hierarchy.
 // It composes a Repository, applies validation, and ensures the
