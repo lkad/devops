@@ -26,32 +26,17 @@ var sensitiveKeys = []string{
 	"bind_password",
 }
 
-// sensitiveExactFieldNames is the set of field names whose value MUST
-// be masked, regardless of the substring rule in sensitiveKeys. It
-// exists so a future "Logins{Token, Kubeconfig, ...}" struct
-// (audit item: Config.String() masking list incomplete) is masked
-// the moment it lands — callers that already know the exact field
-// name ask IsSensitiveField(name) and the substring check does the
-// rest. Match is case-insensitive.
-var sensitiveExactFieldNames = map[string]bool{
-	"password":      true,
-	"kubeconfig":    true,
-	"bind_password": true,
-	"token":         true,
-	"secret":        true,
-}
-
 // IsSensitiveField reports whether the field name is one of the
-// exact-match sensitive names. This is the helper the audit asked
-// for: a single yes/no question that Config.String() and any future
-// structured-log masking call site can ask without re-implementing
-// the substring rule in sensitiveKeys.
+// exact-match sensitive names. The full list lives in SecretKeys
+// (secret_keys.go); this function is the thin re-export so callers
+// that already know the exact field name can ask without
+// re-implementing the substring rule in sensitiveKeys.
 //
 // The substring match in MaskValue stays as the safety net for
 // ad-hoc field names (e.g. "LDAP_BIND_PASSWORD_DN" — the suffix
 // rule catches it even though it is not in the exact list).
 func IsSensitiveField(name string) bool {
-	return sensitiveExactFieldNames[strings.ToLower(strings.TrimSpace(name))]
+	return ShouldMask(name)
 }
 
 // MaskValue returns "***" when key matches a sensitive pattern, else
