@@ -8,6 +8,14 @@ coverage.html
 coverage.txt
 bin/
 cmd/devops-toolkit/devops-toolkit
+# Catch any future Go-binary build artifact in any
+# subdirectory (the bare name above only matches the
+# repo root; **/ catches e.g. sub-cmd binaries that
+# might be built ad-hoc). Exact form, no leading slash,
+# so the rule stays relative regardless of where
+# `git status` is invoked from.
+**/devops-toolkit
+**/devops-toolkit.exe
 
 # Build outputs
 cmd/devops-toolkit/devops-toolkit
