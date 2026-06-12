@@ -23,6 +23,7 @@ import (
 	"github.com/devops-toolkit/backend/internal/alerts"
 	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/internal/auth"
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/internal/auth/ldap"
 	rbacpkg "github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/config"
@@ -171,8 +172,20 @@ func run() error {
 		// shared across modules. P0 #3 wires it into
 		// project, hostproject, device, k8s, alerts, logs,
 		// discovery, and servicecatalog.
-		auditSvc, auditRepo := registerAuditRoutes(v1, db, log, perms)
-		registerProjectRoutes(v1, db, log, perms, rbacSvc, auditSvc)
+		//
+		// The project service is built once at the top of
+		// the v1 block so two consumers can share the
+		// same instance: the audit handler (which uses
+		// its MembershipChecker to enforce the
+		// per-tenant scope on /audit for scoped
+		// Auditors) and the project routes (which use
+		// the service for the project CRUD). The audit
+		// scoping is the P0 follow-up: a Developer
+		// with PermissionViewAuditLog can no longer
+		// enumerate other projects' audit events.
+		projectSvc := projectpkg.NewService(projectpkg.NewRepository(db))
+		auditSvc, auditRepo := registerAuditRoutes(v1, db, log, perms, projectSvc.MembershipChecker())
+		registerProjectRoutes(v1, db, log, perms, rbacSvc, auditSvc, projectSvc)
 		registerDeviceRoutes(v1, db, log, perms, auditSvc)
 		wsHub := registerWsHubRoutes(v1, cfg, log, perms)
 		var hubPublisher realtime.Publisher
@@ -612,7 +625,7 @@ func devRoleToGroups(role string) []string {
 // factory is wired from the project service's
 // MembershipChecker (project_pkg.Repository.ListProjectIDsForUser)
 // and the rbac service's HasPermissionInProject.
-func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service, auditSvc *audit.Service) {
+func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, rbacSvc *rbacpkg.Service, auditSvc *audit.Service, projectSvc *projectpkg.Service) {
 	if err := dbpkg.AutoMigrate(db,
 		&projectpkg.ProjectType{},
 		&projectpkg.Project{},
@@ -622,7 +635,12 @@ func registerProjectRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger,
 		return
 	}
 	repo := projectpkg.NewRepository(db)
-	svc := projectpkg.NewService(repo)
+	// Use the projectSvc passed in from run() (the
+	// same instance the audit handler uses for its
+	// membership-checker; one canonical project
+	// service keeps the membership cache in sync
+	// across modules).
+	svc := projectSvc
 	h := projectpkg.NewHandler(svc, repo, auditSvc)
 	projectAccess := rbacpkg.NewProjectAccessFactory(rbacSvc, svc.MembershipChecker())
 	h.Register(v1, perms, projectAccess)
@@ -1190,7 +1208,7 @@ func (logstreamRealtimeAdapter) Publish(channel string, payload any) {
 // returns the underlying svc + repo so the physicalhost wiring
 // can re-use the same audit stack instead of building a second
 // one (which would double-write every event).
-func registerAuditRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc) (*audit.Service, *audit.Repository) {
+func registerAuditRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, perms func(rbacpkg.Permission) gin.HandlerFunc, membership caller.MembershipChecker) (*audit.Service, *audit.Repository) {
 	if err := dbpkg.AutoMigrate(db, audit.AllModels()...); err != nil {
 		log.Error("audit AutoMigrate failed", "err", err)
 		return nil, nil
@@ -1204,7 +1222,7 @@ func registerAuditRoutes(v1 *gin.RouterGroup, db *gorm.DB, log *logger.Logger, p
 		Repo:    repo,
 		Emitter: emitter,
 	})
-	audit.NewHandler(svc).Register(v1, perms)
+	audit.NewHandler(svc, membership).Register(v1, perms)
 	log.Info("audit routes registered")
 	return svc, repo
 }

@@ -9,6 +9,9 @@ import (
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
+	"github.com/devops-toolkit/backend/internal/auth/caller"
+	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
 // serviceDB returns a fresh sqlite db for service tests.
@@ -210,6 +213,115 @@ func TestService_RecordAction_DefaultsToNow(t *testing.T) {
 	}
 	if events[0].OccurredAt.Before(before) || events[0].OccurredAt.After(after) {
 		t.Errorf("OccurredAt out of bounds: %v", events[0].OccurredAt)
+	}
+}
+
+// TestService_ListForCaller_ScopedTenantIsolation is the
+// P0 follow-up's enforcement pin: a Developer-role
+// caller with membership in project A only sees A's
+// audit events. A SuperAdmin sees everything. A
+// caller with no memberships sees nothing.
+func TestService_ListForCaller_ScopedTenantIsolation(t *testing.T) {
+	db := serviceDB(t)
+	repo := NewRepository(db)
+	// Seed three events: two in project A, one in
+	// project B. The Metadata->project_id field is
+	// the filter key (recorded by the calling
+	// module's RecordAction in production; here we
+	// set it explicitly via the Event.Metadata map).
+	// BaseModel.BeforeCreate assigns the ID so the
+	// struct literal only needs the data fields.
+	now := time.Now().UTC()
+	for _, e := range []*AuditEvent{
+		{Action: ActionCreate, ResourceType: ResourceProject, ResourceID: "a-1",
+			Metadata: JSONMap{"project_id": "a-1"}, OccurredAt: now},
+		{Action: ActionUpdate, ResourceType: ResourceProject, ResourceID: "a-2",
+			Metadata: JSONMap{"project_id": "a-1"}, OccurredAt: now},
+		{Action: ActionCreate, ResourceType: ResourceProject, ResourceID: "b-1",
+			Metadata: JSONMap{"project_id": "b-1"}, OccurredAt: now},
+	} {
+		if err := repo.Create(e); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+
+	svc := &Service{repo: repo}
+	membership := func(ctx context.Context, userID string) (map[string]struct{}, error) {
+		switch userID {
+		case "dev-a":
+			return map[string]struct{}{"a-1": {}}, nil
+		case "dev-b":
+			return map[string]struct{}{"b-1": {}}, nil
+		case "dev-none":
+			return map[string]struct{}{}, nil
+		}
+		return nil, nil
+	}
+
+	// SuperAdmin: every event visible.
+	rows, total, err := svc.ListForCaller(context.Background(), AuditFilter{},
+		caller.New(&contracts.User{ID: "admin", Role: contracts.RoleSuperAdmin}), membership)
+	if err != nil {
+		t.Fatalf("superadmin: %v", err)
+	}
+	if total != 3 || len(rows) != 3 {
+		t.Errorf("superadmin: total=%d rows=%d, want 3/3", total, len(rows))
+	}
+
+	// Developer in A only: 2 events, both project_id=a-1.
+	rows, total, err = svc.ListForCaller(context.Background(), AuditFilter{},
+		caller.New(&contracts.User{ID: "dev-a", Role: contracts.RoleDeveloper}), membership)
+	if err != nil {
+		t.Fatalf("dev-a: %v", err)
+	}
+	if total != 2 || len(rows) != 2 {
+		t.Errorf("dev-a: total=%d rows=%d, want 2/2", total, len(rows))
+	}
+	for _, r := range rows {
+		if r.Metadata["project_id"] != "a-1" {
+			t.Errorf("dev-a saw a row with project_id=%v (expected a-1)", r.Metadata["project_id"])
+		}
+	}
+
+	// Developer in B only: 1 event, project_id=b-1.
+	rows, total, err = svc.ListForCaller(context.Background(), AuditFilter{},
+		caller.New(&contracts.User{ID: "dev-b", Role: contracts.RoleDeveloper}), membership)
+	if err != nil {
+		t.Fatalf("dev-b: %v", err)
+	}
+	if total != 1 || len(rows) != 1 {
+		t.Errorf("dev-b: total=%d rows=%d, want 1/1", total, len(rows))
+	}
+
+	// Developer with no memberships: deny by default.
+	rows, total, err = svc.ListForCaller(context.Background(), AuditFilter{},
+		caller.New(&contracts.User{ID: "dev-none", Role: contracts.RoleDeveloper}), membership)
+	if err != nil {
+		t.Fatalf("dev-none: %v", err)
+	}
+	if total != 0 || len(rows) != 0 {
+		t.Errorf("dev-none: total=%d rows=%d, want 0/0", total, len(rows))
+	}
+
+	// Nil caller: deny by default.
+	rows, total, err = svc.ListForCaller(context.Background(), AuditFilter{}, nil, membership)
+	if err != nil {
+		t.Fatalf("nil caller: %v", err)
+	}
+	if total != 0 || len(rows) != 0 {
+		t.Errorf("nil caller: total=%d rows=%d, want 0/0", total, len(rows))
+	}
+
+	// Nil membership for a non-SuperAdmin: deny by
+	// default (a misconfigured service must not
+	// silently leak every project's events).
+	rows, total, err = svc.ListForCaller(context.Background(), AuditFilter{},
+		caller.New(&contracts.User{ID: "dev-a", Role: contracts.RoleDeveloper}), nil)
+	if err != nil {
+		t.Fatalf("nil membership: %v", err)
+	}
+	if total != 0 || len(rows) != 0 {
+		t.Errorf("nil membership: total=%d rows=%d, want 0/0", total, len(rows))
 	}
 }
 

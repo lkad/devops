@@ -42,6 +42,18 @@ type AuditFilter struct {
 	// the default page size for total-counting purposes only).
 	Limit  int
 	Offset int
+	// ProjectIDsIn is the per-tenant scope filter used by
+	// the scoped-Auditor role. When non-empty, the
+	// repository restricts results to events whose
+	// metadata's `project_id` is in this set. Empty
+	// means "no tenant filter" (a SuperAdmin caller);
+	// a non-empty set of size >0 is the contract for
+	// scoped access.
+	//
+	// The filter is applied via json_extract on the
+	// Metadata column, which works on both SQLite
+	// (in-memory test DB) and Postgres (production).
+	ProjectIDsIn []string
 }
 
 // Repository is the GORM-only data-access layer for the audit
@@ -110,6 +122,31 @@ func (r *Repository) List(f AuditFilter) ([]AuditEvent, int64, error) {
 	}
 	if f.To != nil {
 		q = q.Where("occurred_at <= ?", *f.To)
+	}
+	// Per-tenant scope filter for the scoped-Auditor
+	// role. The filter restricts results to events
+	// whose Metadata->'project_id' is in the supplied
+	// set. json_extract is the cross-driver expression
+	// (works on SQLite + Postgres + MySQL 5.7+).
+	//
+	// Distinguish two cases:
+	//   - ProjectIDsIn == nil: not set (default
+	//     behaviour, no filter)
+	//   - ProjectIDsIn == []string{} (non-nil but
+	//     empty): explicit "scoped caller with no
+	//     memberships" — the deny-by-default case
+	//     (WHERE 1=0). A non-SuperAdmin caller with
+	//     zero memberships is the contract for "deny
+	//     by default".
+	if f.ProjectIDsIn != nil {
+		if len(f.ProjectIDsIn) == 0 {
+			q = q.Where("1 = 0")
+		} else {
+			q = q.Where(
+				"json_extract(metadata, '$.project_id') IN ?",
+				f.ProjectIDsIn,
+			)
+		}
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {

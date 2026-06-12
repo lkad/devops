@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -131,6 +132,75 @@ func (s *Service) List(f AuditFilter) ([]AuditEvent, int64, error) {
 		}
 	}
 	return rows, total, nil
+}
+
+// ListForCaller is the membership-aware variant of List.
+// It enforces the per-tenant isolation that closes the
+// scoped-Auditor security gap (audit P0 follow-up):
+// a Developer with a scoped-Auditor role can read
+// audit events from the projects they belong to and
+// ONLY those projects. A SuperAdmin keeps full
+// visibility; a caller with nil auth is denied.
+//
+// The contract is:
+//
+//   - cl == nil or cl.User == nil: deny by default
+//     (return empty, no error)
+//   - cl.IsSuperAdmin() == true: bypass the filter;
+//     delegate to the existing List path unchanged
+//   - membership == nil: deny by default (a
+//     misconfigured service must not silently leak
+//     every project's events)
+//   - otherwise: load cl's project membership via
+//     membership, expand the filter's ProjectIDsIn,
+//     and call List
+//
+// Implementation note: the membership is loaded once
+// per request; the per-row check in the SQL filter is
+// fast (json_extract on the metadata column with an
+// IN clause). The Caller's internal cache is unused
+// here because the audit service is the read-side
+// consumer; the cached set is built on the request
+// hot path.
+func (s *Service) ListForCaller(ctx context.Context, f AuditFilter, cl *caller.Caller, membership caller.MembershipChecker) ([]AuditEvent, int64, error) {
+	if s == nil || s.repo == nil {
+		return nil, 0, &contracts.APIError{
+			Code:    contracts.CodeInternal,
+			Message: "audit service: missing repository",
+		}
+	}
+	if cl == nil || cl.User == nil {
+		return nil, 0, nil
+	}
+	if cl.IsSuperAdmin() {
+		// SuperAdmin sees everything; pass through
+		// to the unfiltered List.
+		return s.List(f)
+	}
+	if membership == nil {
+		// fail-closed: a scoped caller with no
+		// membership checker (a misconfigured service)
+		// cannot see anything.
+		return nil, 0, nil
+	}
+	memberSet, err := membership(ctx, cl.User.ID)
+	if err != nil {
+		return nil, 0, &contracts.APIError{
+			Code:    contracts.CodeInternal,
+			Message: "failed to load caller memberships",
+			Cause:   err,
+		}
+	}
+	// Empty set: the caller has no projects; deny by
+	// default (an explicit 1=0 filter rather than an
+	// IN () which is a SQL syntax error on most
+	// drivers).
+	ids := make([]string, 0, len(memberSet))
+	for id := range memberSet {
+		ids = append(ids, id)
+	}
+	f.ProjectIDsIn = ids
+	return s.List(f)
 }
 
 // Get returns a single event or a 404 APIError. The handler
