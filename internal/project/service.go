@@ -38,12 +38,21 @@ type Service struct {
 // production wires a real service so v0.2.0.0 P0 #3 audit-trail
 // coverage holds. The variadic argument keeps legacy callers
 // (which pre-date the audit hooks) compiling.
+//
+// The membership checker defaults to repo.ListProjectIDsForUser
+// so the cross-tenant guards (v0.3.0.0 P0 #2) work out of the
+// box for production wiring. Tests that need a custom checker
+// call SetMembershipChecker to override.
 func NewService(repo *Repository, auditSvc ...*audit.Service) *Service {
 	var a *audit.Service
 	if len(auditSvc) > 0 {
 		a = auditSvc[0]
 	}
-	return &Service{repo: repo, audit: a}
+	return &Service{
+		repo:              repo,
+		membershipChecker: repo.ListProjectIDsForUser,
+		audit:             a,
+	}
 }
 
 // SetMembershipChecker wires the cross-tenant membership check
