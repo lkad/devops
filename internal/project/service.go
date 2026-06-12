@@ -1,13 +1,25 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"strings"
 
+	"github.com/devops-toolkit/backend/internal/audit"
 	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
+
+// ErrUnauthenticated is the sentinel returned when a service method
+// is invoked without a caller on the context. The handler maps it
+// to a 401 UNAUTHORIZED APIError.
+var ErrUnauthenticated = errors.New("project: unauthenticated")
+
+// ErrForbidden is the sentinel returned when the caller's tenant
+// membership does not allow the requested operation. The handler
+// maps it to a 403 FORBIDDEN APIError.
+var ErrForbidden = errors.New("project: forbidden")
 
 // Service is the business-rule layer for the project hierarchy.
 // It composes a Repository, applies validation, and ensures the
@@ -16,14 +28,59 @@ import (
 // *contracts.APIError so the handler can pass them to WriteError
 // without further translation.
 type Service struct {
-	repo *Repository
+	repo              *Repository
+	membershipChecker caller.MembershipChecker
+	audit             *audit.Service
 }
 
 // NewService returns a Service backed by the supplied repository.
-// The constructor takes only the repo because the service is
-// otherwise stateless; the audit/clock collaborators, when they
-// land, will be added as fields.
-func NewService(repo *Repository) *Service { return &Service{repo: repo} }
+// The audit service is optional (nil means "no audit emission");
+// production wires a real service so v0.2.0.0 P0 #3 audit-trail
+// coverage holds. The variadic argument keeps legacy callers
+// (which pre-date the audit hooks) compiling.
+func NewService(repo *Repository, auditSvc ...*audit.Service) *Service {
+	var a *audit.Service
+	if len(auditSvc) > 0 {
+		a = auditSvc[0]
+	}
+	return &Service{repo: repo, audit: a}
+}
+
+// SetMembershipChecker wires the cross-tenant membership check
+// used by Service-level guards (v0.3.0.0 P0 #2). Production wires
+// repo.ListProjectIDsForUser; tests supply a fake.
+func (s *Service) SetMembershipChecker(m caller.MembershipChecker) {
+	s.membershipChecker = m
+}
+
+// requireMembership returns the caller, an ErrUnauthenticated
+// when the context has no caller, and an ErrForbidden when the
+// caller is not a SuperAdmin and is not a member of projectID.
+// SuperAdmin always passes (the spec's "implicit member" rule).
+// The helper is the shared guard for every mutating/read method.
+func (s *Service) requireMembership(ctx context.Context, projectID string) (*caller.Caller, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if cl.IsSuperAdmin() {
+		return cl, nil
+	}
+	if !cl.IsMemberOf(ctx, projectID, s.membershipChecker) {
+		return nil, ErrForbidden
+	}
+	return cl, nil
+}
+
+// ctxOrBackground returns the first variadic context, or
+// context.Background() when none was supplied. Used to keep the
+// legacy "no ctx" call sites compiling while the new guards run.
+func ctxOrBackground(args []context.Context) context.Context {
+	if len(args) > 0 && args[0] != nil {
+		return args[0]
+	}
+	return context.Background()
+}
 
 // MembershipChecker returns a caller.MembershipChecker that
 // looks up the user's project memberships through this
@@ -72,7 +129,11 @@ type UpdateProjectInput struct {
 // at the service layer. The repository also rejects duplicates
 // via the unique index, so this is a defensive double-check that
 // keeps the message in service terms.
-func (s *Service) CreateType(in ProjectType) (ProjectType, error) {
+func (s *Service) CreateType(in ProjectType, ctxArg ...context.Context) (ProjectType, error) {
+	ctx := ctxOrBackground(ctxArg)
+	if _, err := s.requireMembership(ctx, ""); err != nil {
+		return ProjectType{}, err
+	}
 	if strings.TrimSpace(in.Name) == "" {
 		return ProjectType{}, &contracts.APIError{Code: contracts.CodeValidation, Message: "type name is required"}
 	}
@@ -80,10 +141,29 @@ func (s *Service) CreateType(in ProjectType) (ProjectType, error) {
 }
 
 // ListTypes returns all project types for the UI dropdown.
-func (s *Service) ListTypes() ([]ProjectType, error) { return s.repo.ListTypes() }
+func (s *Service) ListTypes(ctxArg ...context.Context) ([]ProjectType, error) {
+	ctx := ctxOrBackground(ctxArg)
+	if _, err := s.requireMembership(ctx, ""); err != nil {
+		return nil, err
+	}
+	return s.repo.ListTypes()
+}
 
 // CreateProject validates the input and persists the row.
-func (s *Service) CreateProject(in CreateProjectInput) (Project, error) {
+func (s *Service) CreateProject(in CreateProjectInput, ctxArg ...context.Context) (Project, error) {
+	ctx := ctxOrBackground(ctxArg)
+	// Cross-tenant guard (v0.3.0.0 P0 #2). For Create the
+	// "project ID" we gate on is the new project itself (its
+	// own ID is empty until persisted, so we use the parent
+	// when present, else the empty string for the global-
+	// root case). SuperAdmin always passes.
+	gatePID := ""
+	if in.ParentID != nil {
+		gatePID = *in.ParentID
+	}
+	if _, err := s.requireMembership(ctx, gatePID); err != nil {
+		return Project{}, err
+	}
 	if err := s.validateProjectFields(in.Name, in.Code, in.TypeID); err != nil {
 		return Project{}, err
 	}
@@ -134,7 +214,7 @@ func (s *Service) CreateProject(in CreateProjectInput) (Project, error) {
 	if !found {
 		return Project{}, &contracts.APIError{Code: contracts.CodeValidation, Message: "type_id does not reference an existing project type"}
 	}
-	return s.repo.Create(Project{
+	created, err := s.repo.Create(Project{
 		Name:        strings.TrimSpace(in.Name),
 		Code:        strings.ToLower(strings.TrimSpace(in.Code)),
 		Description: in.Description,
@@ -145,25 +225,90 @@ func (s *Service) CreateProject(in CreateProjectInput) (Project, error) {
 		Labels:      in.Labels,
 		Metadata:    in.Metadata,
 	})
+	if err != nil {
+		return Project{}, err
+	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionCreate,
+		ResourceType: audit.ResourceProject,
+		ResourceID:   created.ID,
+		Metadata:     audit.JSONMap{"code": created.Code, "name": created.Name, "type_id": created.TypeID},
+	})
+	return created, nil
 }
 
 // GetProject returns a project by ID.
-func (s *Service) GetProject(id string) (Project, error) { return s.repo.Get(id) }
+func (s *Service) GetProject(ctx context.Context, id string) (Project, error) {
+	if _, err := s.requireMembership(ctx, id); err != nil {
+		return Project{}, err
+	}
+	return s.repo.Get(id)
+}
 
 // GetProjectWithRelations returns a project plus its direct
 // children and members, used by the GET /projects/:id handler.
-func (s *Service) GetProjectWithRelations(id string) (Project, []Project, []ProjectMember, error) {
+func (s *Service) GetProjectWithRelations(ctx context.Context, id string) (Project, []Project, []ProjectMember, error) {
+	if _, err := s.requireMembership(ctx, id); err != nil {
+		return Project{}, nil, nil, err
+	}
 	return s.repo.GetWithRelations(id)
 }
 
 // ListProjects applies the filter. The service is a thin pass-
 // through here; the only added value is translating a missing
-// project type to an empty list.
-func (s *Service) ListProjects(f Filter) ([]Project, int64, error) { return s.repo.List(f) }
+// project type to an empty list. For v0.3.0.0 P0 #2, non-
+// SuperAdmin callers only see projects in their membership set
+// (per-row filter — the repo's filter struct does not yet
+// accept a project-ID whitelist).
+func (s *Service) ListProjects(ctx context.Context, f Filter) ([]Project, int64, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, 0, ErrUnauthenticated
+	}
+	rows, total, err := s.repo.List(f)
+	if err != nil {
+		return nil, 0, err
+	}
+	if cl.IsSuperAdmin() {
+		return rows, total, nil
+	}
+	ids, err := s.membershipIDs(ctx, cl)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]Project, 0, len(rows))
+	for _, p := range rows {
+		if _, ok := ids[p.ID]; ok {
+			out = append(out, p)
+		}
+	}
+	return out, int64(len(out)), nil
+}
+
+// membershipIDs returns the caller's project-ID set, using the
+// membershipChecker. A nil result is normalised to an empty map
+// so the per-row check is fail-closed (a caller with no rows
+// sees an empty page).
+func (s *Service) membershipIDs(ctx context.Context, cl *caller.Caller) (map[string]struct{}, error) {
+	if s.membershipChecker == nil {
+		return map[string]struct{}{}, nil
+	}
+	ids, err := s.membershipChecker(ctx, cl.User.ID)
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		return map[string]struct{}{}, nil
+	}
+	return ids, nil
+}
 
 // UpdateProject applies a partial update. Cycle and depth checks
 // are run BEFORE the patch is committed.
-func (s *Service) UpdateProject(id string, in UpdateProjectInput) (Project, error) {
+func (s *Service) UpdateProject(ctx context.Context, id string, in UpdateProjectInput) (Project, error) {
+	if _, err := s.requireMembership(ctx, id); err != nil {
+		return Project{}, err
+	}
 	current, err := s.repo.Get(id)
 	if err != nil {
 		return Project{}, err
@@ -241,11 +386,23 @@ func (s *Service) UpdateProject(id string, in UpdateProjectInput) (Project, erro
 	if len(patch) == 0 {
 		return current, nil
 	}
-	return s.repo.Update(id, patch)
+	updated, err := s.repo.Update(id, patch)
+	if err != nil {
+		return Project{}, err
+	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionUpdate,
+		ResourceType: audit.ResourceProject,
+		ResourceID:   updated.ID,
+	})
+	return updated, nil
 }
 
 // DeleteProject enforces the leaf-only invariant.
-func (s *Service) DeleteProject(id string) error {
+func (s *Service) DeleteProject(ctx context.Context, id string) error {
+	if _, err := s.requireMembership(ctx, id); err != nil {
+		return err
+	}
 	n, err := s.repo.CountChildren(id)
 	if err != nil {
 		return err
@@ -256,11 +413,22 @@ func (s *Service) DeleteProject(id string) error {
 			Message: "cannot delete a project that has children; remove them first",
 		}
 	}
-	return s.repo.Delete(id)
+	if err := s.repo.Delete(id); err != nil {
+		return err
+	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionDelete,
+		ResourceType: audit.ResourceProject,
+		ResourceID:   id,
+	})
+	return nil
 }
 
 // AssignMember grants or promotes a per-project role.
-func (s *Service) AssignMember(projectID, userID, role, addedBy string) error {
+func (s *Service) AssignMember(ctx context.Context, projectID, userID, role, addedBy string) error {
+	if _, err := s.requireMembership(ctx, projectID); err != nil {
+		return err
+	}
 	if !IsValidProjectRole(role) {
 		return &contracts.APIError{Code: contracts.CodeValidation, Message: "role must be viewer, editor, or admin"}
 	}
@@ -280,34 +448,67 @@ func (s *Service) AssignMember(projectID, userID, role, addedBy string) error {
 			return err
 		}
 	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionMemberAdd,
+		ResourceType: audit.ResourceProjectMember,
+		ResourceID:   projectID + ":" + userID,
+		Metadata:     audit.JSONMap{"project_id": projectID, "user_id": userID, "role": role},
+	})
 	return nil
 }
 
 // RevokeMember removes a member from a project.
-func (s *Service) RevokeMember(projectID, userID string) error {
-	return s.repo.RemoveMember(projectID, userID)
+func (s *Service) RevokeMember(ctx context.Context, projectID, userID string) error {
+	if _, err := s.requireMembership(ctx, projectID); err != nil {
+		return err
+	}
+	if err := s.repo.RemoveMember(projectID, userID); err != nil {
+		return err
+	}
+	s.emitAudit(ctx, audit.RecordActionInput{
+		Action:       audit.ActionMemberRemove,
+		ResourceType: audit.ResourceProjectMember,
+		ResourceID:   projectID + ":" + userID,
+		Metadata:     audit.JSONMap{"project_id": projectID, "user_id": userID},
+	})
+	return nil
 }
 
 // ListMembers returns the project's members.
-func (s *Service) ListMembers(projectID string) ([]ProjectMember, error) {
+func (s *Service) ListMembers(ctx context.Context, projectID string) ([]ProjectMember, error) {
+	if _, err := s.requireMembership(ctx, projectID); err != nil {
+		return nil, err
+	}
 	return s.repo.ListMembers(projectID)
 }
 
 // ListChildren returns the direct children of a project. The repo
 // already supports this via Filter; we expose it as a method to
 // keep the handler free of filter plumbing.
-func (s *Service) ListChildren(projectID string) ([]Project, int64, error) {
+func (s *Service) ListChildren(ctx context.Context, projectID string) ([]Project, int64, error) {
+	if _, err := s.requireMembership(ctx, projectID); err != nil {
+		return nil, 0, err
+	}
 	return s.repo.List(Filter{ParentID: &projectID})
 }
 
 // ListAncestors returns the parent chain in root -> leaf order.
-func (s *Service) ListAncestors(id string) ([]Project, error) {
+func (s *Service) ListAncestors(ctx context.Context, id string) ([]Project, error) {
+	if _, err := s.requireMembership(ctx, id); err != nil {
+		return nil, err
+	}
 	return s.repo.GetAncestors(id)
 }
 
 // ListAllTypes is an alias for ListTypes. Kept for symmetry with
 // the project-CRUD methods.
-func (s *Service) ListAllTypes() ([]ProjectType, error) { return s.repo.ListTypes() }
+func (s *Service) ListAllTypes(ctxArg ...context.Context) ([]ProjectType, error) {
+	ctx := ctxOrBackground(ctxArg)
+	if _, err := s.requireMembership(ctx, ""); err != nil {
+		return nil, err
+	}
+	return s.repo.ListTypes()
+}
 
 // AggregateWeight returns the project's own weight multiplied by
 // the weight of its type. The product is the FinOps cost-
@@ -315,7 +516,10 @@ func (s *Service) ListAllTypes() ([]ProjectType, error) { return s.repo.ListType
 // consume this method directly. Ancestor weights are intentionally
 // excluded so a single node's contribution is stable as the
 // hierarchy is reorganised.
-func (s *Service) AggregateWeight(id string) int {
+func (s *Service) AggregateWeight(ctx context.Context, id string) int {
+	if _, err := s.requireMembership(ctx, id); err != nil {
+		return 0
+	}
 	project, err := s.repo.Get(id)
 	if err != nil {
 		return 0
@@ -375,3 +579,25 @@ var codePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 // errors.Is/As through the service. Currently unused; kept as a
 // documentation aid for the planned audit hooks.
 var _ = errors.As
+
+// emitAudit is the single seam between the project service and
+// the cross-module audit subsystem. A nil s.audit is a clean
+// no-op so unit tests can wire a Service without an audit sink.
+// The actor is read from the caller on the context (stamped by
+// the auth middleware); an empty user id falls back to ""
+// rather than failing the emission. The emission is best-effort:
+// a failure to record does not roll back the mutation.
+func (s *Service) emitAudit(ctx context.Context, in audit.RecordActionInput) {
+	if s == nil || s.audit == nil {
+		return
+	}
+	if in.ActorID == "" {
+		if cl, ok := caller.FromContext(ctx); ok && cl != nil && cl.User != nil {
+			in.ActorID = cl.User.ID
+			if in.ActorName == "" {
+				in.ActorName = cl.User.Username
+			}
+		}
+	}
+	s.audit.RecordAction(ctx, in)
+}

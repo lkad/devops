@@ -136,7 +136,7 @@ func (h *Handler) createType(c *gin.Context) {
 	if !h.bind(c, &in) {
 		return
 	}
-	pt, err := h.svc.CreateType(ProjectType{Name: in.Name, Description: in.Description, Weight: in.Weight})
+	pt, err := h.svc.CreateType(ProjectType{Name: in.Name, Description: in.Description, Weight: in.Weight}, c.Request.Context())
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
@@ -148,7 +148,7 @@ func (h *Handler) createType(c *gin.Context) {
 // the types are a small, slowly-changing vocabulary that the UI
 // caches.
 func (h *Handler) listTypes(c *gin.Context) {
-	pts, err := h.svc.ListTypes()
+	pts, err := h.svc.ListTypes(c.Request.Context())
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
@@ -191,12 +191,6 @@ func (h *Handler) create(c *gin.Context) {
 		handler.WriteAPIError(c.Writer, err)
 		return
 	}
-	h.emitAudit(c, audit.RecordActionInput{
-		Action:       audit.ActionCreate,
-		ResourceType: audit.ResourceProject,
-		ResourceID:   p.ID,
-		Metadata:     audit.JSONMap{"code": p.Code, "name": p.Name, "type_id": p.TypeID},
-	})
 	handler.WriteCreated(c.Writer, p)
 }
 
@@ -215,7 +209,7 @@ func (h *Handler) update(c *gin.Context) {
 	if !h.bind(c, &in) {
 		return
 	}
-	p, err := h.svc.UpdateProject(c.Param("id"), UpdateProjectInput{
+	p, err := h.svc.UpdateProject(c.Request.Context(), c.Param("id"), UpdateProjectInput{
 		Name:        in.Name,
 		ParentID:    in.ParentID,
 		Description: in.Description,
@@ -226,26 +220,16 @@ func (h *Handler) update(c *gin.Context) {
 		handler.WriteAPIError(c.Writer, err)
 		return
 	}
-	h.emitAudit(c, audit.RecordActionInput{
-		Action:       audit.ActionUpdate,
-		ResourceType: audit.ResourceProject,
-		ResourceID:   p.ID,
-	})
 	handler.WriteJSON(c.Writer, http.StatusOK, p)
 }
 
 // delete handles DELETE /projects/:id. A non-leaf yields 422;
 // the rest are 204.
 func (h *Handler) delete(c *gin.Context) {
-	if err := h.svc.DeleteProject(c.Param("id")); err != nil {
+	if err := h.svc.DeleteProject(c.Request.Context(), c.Param("id")); err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
 	}
-	h.emitAudit(c, audit.RecordActionInput{
-		Action:       audit.ActionDelete,
-		ResourceType: audit.ResourceProject,
-		ResourceID:   c.Param("id"),
-	})
 	handler.WriteNoContent(c.Writer)
 }
 
@@ -254,7 +238,7 @@ func (h *Handler) delete(c *gin.Context) {
 // members }; the spec's "Get Project with resource links" maps
 // to this payload.
 func (h *Handler) get(c *gin.Context) {
-	p, kids, members, err := h.svc.GetProjectWithRelations(c.Param("id"))
+	p, kids, members, err := h.svc.GetProjectWithRelations(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
@@ -285,7 +269,7 @@ func (h *Handler) children(c *gin.Context) {
 // plain array (no pagination) because the chain is bounded by
 // MaxDepth.
 func (h *Handler) ancestors(c *gin.Context) {
-	chain, err := h.svc.ListAncestors(c.Param("id"))
+	chain, err := h.svc.ListAncestors(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
@@ -296,7 +280,7 @@ func (h *Handler) ancestors(c *gin.Context) {
 // listMembers handles GET /projects/:id/members. Returns the raw
 // array — projects typically have a small member set.
 func (h *Handler) listMembers(c *gin.Context) {
-	members, err := h.svc.ListMembers(c.Param("id"))
+	members, err := h.svc.ListMembers(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
@@ -334,16 +318,10 @@ func (h *Handler) addMember(c *gin.Context) {
 		})
 		return
 	}
-	if err := h.svc.AssignMember(c.Param("id"), in.UserID, in.Role, cl.User.ID); err != nil {
+	if err := h.svc.AssignMember(c.Request.Context(), c.Param("id"), in.UserID, in.Role, cl.User.ID); err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
 	}
-	h.emitAudit(c, audit.RecordActionInput{
-		Action:       audit.ActionMemberAdd,
-		ResourceType: audit.ResourceProjectMember,
-		ResourceID:   c.Param("id") + ":" + in.UserID,
-		Metadata:     audit.JSONMap{"project_id": c.Param("id"), "user_id": in.UserID, "role": in.Role},
-	})
 	handler.WriteCreated(c.Writer, gin.H{
 		"project_id": c.Param("id"),
 		"user_id":    in.UserID,
@@ -353,16 +331,10 @@ func (h *Handler) addMember(c *gin.Context) {
 
 // removeMember handles DELETE /projects/:id/members/:user_id.
 func (h *Handler) removeMember(c *gin.Context) {
-	if err := h.svc.RevokeMember(c.Param("id"), c.Param("user_id")); err != nil {
+	if err := h.svc.RevokeMember(c.Request.Context(), c.Param("id"), c.Param("user_id")); err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
 	}
-	h.emitAudit(c, audit.RecordActionInput{
-		Action:       audit.ActionMemberRemove,
-		ResourceType: audit.ResourceProjectMember,
-		ResourceID:   c.Param("id") + ":" + c.Param("user_id"),
-		Metadata:     audit.JSONMap{"project_id": c.Param("id"), "user_id": c.Param("user_id")},
-	})
 	handler.WriteNoContent(c.Writer)
 }
 
@@ -386,7 +358,7 @@ func (h *Handler) list(c *gin.Context) {
 			f.Depth = d
 		}
 	}
-	items, total, err := h.svc.ListProjects(f)
+	items, total, err := h.svc.ListProjects(c.Request.Context(), f)
 	if err != nil {
 		handler.WriteAPIError(c.Writer, err)
 		return
