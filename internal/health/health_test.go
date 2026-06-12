@@ -77,6 +77,17 @@ func (r *fakeRegistry) ClientFor(id string) (k8s.Client, error) {
 	return c, nil
 }
 
+// ListerFor mirrors ClientFor but returns the narrower
+// Lister interface. FakeClient satisfies Lister, so the
+// type-assertion through c, nil is the entire body.
+func (r *fakeRegistry) ListerFor(id string) (k8s.Lister, error) {
+	c, err := r.ClientFor(id)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
 func (r *fakeRegistry) setPingErr(id string, err error) {
 	r.mu <- struct{}{}
 	defer func() { <-r.mu }()
