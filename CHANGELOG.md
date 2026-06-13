@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0.0] - 2026-06-13
+
+B 子项目 — 鉴权+多租户硬化 落地。关 P0 #1 (Auth+RBAC middleware 接到 /api/v1) + P0 #2 (Service 层跨租户强制) + P0 #3 (Audit 覆盖全部 mutating 模块) + scoped-Auditor RBAC matrix 接线。3 个 phase 并行实施(1 主 session + 2 background agents),2-3 天完成。
+
+### Added
+
+- **scoped-Auditor RBAC matrix** — `pkg/contracts/user.go` 加 `RoleScopedAuditor` 角色,`internal/auth/rbac/matrix.go` 加 `PermissionViewAuditLogProject` 权限。`audit.Service.ListForCaller` 走 per-tenant 路径已经存在(scoped-Auditor P0 follow-up,A 子项目之前完成)。
+- **Service 层跨租户强制 (P0 #2)** — 8 modules (project/device/k8s/pipeline/servicecatalog/physicalhost/alerts/logs) 加 `*WithCaller(ctx, id)` 新方法 + `requireMembership` helper。`caller.IsMemberOf` + SuperAdmin bypass + fail-closed (`ErrUnauthenticated`/`ErrForbidden`)。
+- **Audit 覆盖全部 mutating 模块 (P0 #3)** — 8 modules 全部 emit `audit.Service.RecordAction` (project/pipeline 加实际 emit;其他模块加 test pinning 既有 emit)。Project emit 从 `handler.go` 移到 `service.go`(避免 double emit)。
+- **hostproject system operations** — 加 `systemCtx` helper 合成 SuperAdmin caller 给 `Link/Unlink/Bulk*` 路径(系统操作),允许 hostproject 跨项目操作而不破坏 P0 #2 fail-closed 模型。
+
+### Fixed
+
+- **Pre-existing build break in hostproject** — `hostproject/service.go` 调 `s.projectSvc.GetProject(string)` 缺 `context.Context` 参数。已修:4 处调用加 ctx(Link/Unlink/BulkLink/BulkUnlink 用 `systemCtx`,List paths 也用 `systemCtx`)。
+- **P0 #2 fail-closed 触发意外 500** — `route_smoke_test.go` (Phase 3 integration test) 不接 AuthMiddleware,导致 service-layer caller check 失败。已修:test 加 `devBypassAuth` 中间件(从 X-User header 合成 SuperAdmin caller)。
+
+### Internal
+
+- `pipeline/service.go` 加 `caller` import + `membershipChecker` 字段 + `SetMembershipChecker` method。
+- `hostproject/service.go` 加 `caller` import + `assertProjectExists(ctx, id)` 接 ctx。
+- `hostproject/service_test.go` 加 `context` import + `newServiceWithDB` 设 membershipChecker(allow any)。
+- 31 packages 全绿,0 fail,1 vet warning(`internal/audit/repository.go:89` 既有)。
+- ~30 atomic commits from 3 phase:Phase 1 (1) + Phase 3 (9) + Phase 4 (8) + manual merge resolution (1) + Phase 5 docs (this commit)。
+
+### Notes for next phase
+
+- **scoped-Auditor role usage** — `RoleScopedAuditor` 是新角色,需要 LDAP group → role 映射配置(在 `internal/auth/ldap` 处,留 D 阶段)。
+- **caller injection for admin paths** — hostproject `systemCtx` 模式可推广给其他 admin-only paths(如 `internal/auth/...` 的 admin endpoints),如果后续需要。
+
+---
+
 ## [0.2.1.0] - 2026-06-12
 
 A 子项目 — 后端生产化 (Production-Readiness) 落地。5 个并行 agent 实施,3.5 小时完成。所有 P0 #4 / #5 / #6 + P1 monitor_loop + P2 收敛(8 module-local writeAPIError / dev-default secrets / secret masking 名单 / K8s Lister 接口) + P3 杂项(`?status=open` bug 修 / 49MB binary .gitignore / promtool CI),加 Helm chart 骨架 + backup/restore 脚本。

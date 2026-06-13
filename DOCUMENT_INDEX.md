@@ -1,6 +1,6 @@
 # DevOps Toolkit — 文档索引
 
-**最后更新:** 2026-06-12 (v0.2.1.0 — A 子项目后端生产化落地)
+**最后更新:** 2026-06-13 (v0.3.0.0 — B 子项目鉴权+多租户硬化落地)
 
 > 新接手代码时,从这里开始。本文档列出所有文档的**角色、权威性和阅读顺序**。本仓库就是当前实现 (~25k 行 Go 后端 + React 前端),不需要"重新开发"。
 
@@ -80,7 +80,8 @@
 | [2026-04-27-frontend-reimplementation-design](docs/superpowers/specs/2026-04-27-frontend-reimplementation-design.md) | React 前端 SPA 重构 | 已实施 |
 | [2026-04-28-device-management-mock-test-design](docs/superpowers/specs/2026-04-28-device-management-mock-test-design.md) | 设备管理 mock test | 已实施 |
 | [2026-06-12-A-production-readiness-design](docs/superpowers/specs/2026-06-12-A-production-readiness-design.md) | **A 子项目 — 后端生产化** (v0.2.1.0) | ✅ 已实施 |
-| 计划: B 子项目 (鉴权+多租户硬化) / C 子项目 (Helm 完整化) / D 子项目 (UI 空白补全) / E 子项目 (性能基线) | — | pending |
+| [2026-06-12-B-auth-rbac-hardening-design](docs/superpowers/specs/2026-06-12-B-auth-rbac-hardening-design.md) | **B 子项目 — 鉴权+多租户硬化** (v0.3.0.0) | ✅ 已实施 |
+| 计划: C 子项目 (Helm 完整化) / D 子项目 (UI 空白补全) / E 子项目 (性能基线) | — | pending |
 
 ### docs/superpowers/plans/ — 实施计划
 
@@ -90,6 +91,7 @@
 | [2026-04-27-full-implementation](docs/superpowers/plans/2026-04-27-full-implementation.md) | 全量 plan (历史) | ✅ Done |
 | [2026-04-30-k8s-log-viewer](docs/superpowers/plans/2026-04-30-k8s-log-viewer.md) | K8s log viewer plan | ✅ Done |
 | [2026-06-12-A-production-readiness](docs/superpowers/plans/2026-06-12-A-production-readiness.md) | **A 子项目 plan** (14 task × 105 step, 5 agent 并行) | ✅ Done |
+| [2026-06-12-B-auth-rbac-hardening](docs/superpowers/plans/2026-06-12-B-auth-rbac-hardening.md) | **B 子项目 plan** (23 task × 62 step, 5 phase × agent 并行) | ✅ Done |
 
 ### openspec/changes/ — 进行中的变更
 

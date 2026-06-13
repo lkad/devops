@@ -286,6 +286,20 @@ typoes. 15 min CC (install promtool in CI).
 
 ## Completed
 
+### B 子项目 — 鉴权+多租户硬化 (2026-06-13)
+
+B 子项目 P0 #1+#2+#3 + scoped-Auditor RBAC matrix 全部落地,3 phase (1 主 session + 2 background agents) 并行实施,~30 atomic commits。
+关键 commit:`a84db132` (b1 merge) + `466fac6b` (b3 merge) + `c0b29165` (b4 merge) + `8699d7cb` (merge resolution) + `41e3f1fc` (spec) + `1f14fe28` (plan) + `70c4c916` (release v0.2.1.0)。
+
+- P0 #1 (Auth+RBAC middleware 接到 /api/v1) — 之前 session 已实施 (`authMW.RequireAuth()` 在 `cmd/devops-toolkit/main.go:149`)
+- P0 #2 (跨租户强制) — 8 modules × `*WithCaller` 新方法 + `requireMembership` helper (Agent 2)
+- P0 #3 (Audit 覆盖全部 mutating) — 8 modules (Project + Pipeline 加实际 emit;其他加 test pinning;Agent 3)
+- scoped-Auditor matrix — `RoleScopedAuditor` + `PermissionViewAuditLogProject` (Phase 1 主 session)
+- hostproject `systemCtx` helper — 合成 SuperAdmin caller 给 admin paths (Link/Unlink/Bulk*);fix pre-existing build break + P0 #2 误触发
+- 31 packages 全绿,0 fail,1 vet warning 既有
+
+注: Agent 1 (Phase 2 Auth+RBAC) 实际无新 commit 工作 — Phase 2 之前 session 已完整实施 (`auth.NewAuthMiddleware` + `rbac.RBACMiddleware` 都已经存在)。Agent 2 和 3 各做各的 phase 实质工作,2 个 stop hallucination 重试后成功。
+
 ### A 子项目 — 后端生产化 (2026-06-12)
 
 A 子项目 12 项全部落地,5 个 agent 并行实施,3.5 小时完成。
