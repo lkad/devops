@@ -286,6 +286,18 @@ typoes. 15 min CC (install promtool in CI).
 
 ## Completed
 
+### D 子项目 — UI 空白补全 + Middleware CORS (2026-06-13)
+
+D 子项目 5 项 UI/Middleware 空白全部补全,4 frontend agents + 1 backend CORS 主 session,~3 小时完成。
+关键 commit:d1 `5db94b3e`+`a1ed5cf3` (PodLogPanel) / d3 `c34fdaf6` (OnCall/Runbook editors) / d4 `d6a91394` (Audit filters) / d5 `5c5c4324` (CORS)。
+
+- Phase 1 (Agent 1, d1) K8s pod log UI — 2 commits + 4 vitest
+- Phase 2 (Agent 2, d2) K8s pod exec UI — 之前 session 已实施,no-op
+- Phase 3 (Agent 3, d3) Service catalog 写 UI — 1 commit + 11 vitest
+- Phase 4 (Agent 4, d4) Audit log UI 增强 — 1 commit (无新 test 文件)
+- Phase 5 (主 session, d5) CORS middleware 增强 — 1 commit
+- 31 packages Go + 28+ vitest 全绿,1 vet warning 既有
+
 ### B 子项目 — 鉴权+多租户硬化 (2026-06-13)
 
 B 子项目 P0 #1+#2+#3 + scoped-Auditor RBAC matrix 全部落地,3 phase (1 主 session + 2 background agents) 并行实施,~30 atomic commits。

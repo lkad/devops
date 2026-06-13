@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0.0] - 2026-06-13
+
+D 子项目 — UI 空白补全 + Middleware CORS 落地。4 个 frontend background agents + 1 个 backend CORS 主 session 实施,~3 小时完成。
+
+### Added
+
+- **K8s pod log streaming UI (WS)** — `frontend/src/components/k8s/PodLogPanel.tsx` + 集成到 `K8sClusters.tsx`。4 vitest cases。实时日志滚动 + 过滤 + auto-scroll + 清屏。
+- **K8s pod exec UI (xterm.js + WS)** — 之前 session (`1d409bba`) 已实施 `PodExecModal` (capital K),本轮 spec 描述无新 commit 工作 (Phase 2 no-op)。
+- **Service catalog on-call/runbook 写 UI** — `frontend/src/components/service-catalog/{OnCallEditor,RunbookEditor}.tsx` + 集成到 `Services.tsx` + 11 new vitest cases。Operator/SuperAdmin 加按钮 + 表单 (user_id, shift_start, shift_end, content, tags)。
+- **Audit log UI 增强** — `frontend/src/pages/Audit.tsx` 加 filter row (actor_id / resource_type / action / from / to) + URL sync + ScopedAuditor per-tenant banner。B 子项目的 scoped-Auditor matrix 通过 `RoleAuditor` 触发(server-side 已有 per-tenant filter via `audit.Service.ListForCaller`)。
+- **CORS 完整** — `internal/middleware/cors.go` 增强:`Access-Control-Allow-Headers` 加 X-User, X-User-Id, X-User-Name, X-Forwarded-For, User-Agent(让 React 前端 cross-origin 携带 actor metadata);`Access-Control-Max-Age` 600 → 86400 (24 hours, 减少 preflight 频率)。`main.go` 已经把 CORS 放在 tracing 之后,确保 preflight 也带 X-Trace-Id。
+
+### Notes
+
+- **K8s/PodExecModal.tsx** (capital K) 是之前 session 实施的,本轮 d1 同时创建了 `k8s/PodLogPanel.tsx` (lowercase)。两个文件共存,merge 时未删除 pre-existing 版本,留作清理用。
+- **d1/d4 都加 data-testid 用 globalThis 替换 global** (TS 修复)。
+- 31 backend Go packages + 28+ frontend vitest 全绿,1 vet warning (既有 audit/repository.go:89)。
+
+---
+
 ## [0.3.0.0] - 2026-06-13
 
 B 子项目 — 鉴权+多租户硬化 落地。关 P0 #1 (Auth+RBAC middleware 接到 /api/v1) + P0 #2 (Service 层跨租户强制) + P0 #3 (Audit 覆盖全部 mutating 模块) + scoped-Auditor RBAC matrix 接线。3 个 phase 并行实施(1 主 session + 2 background agents),2-3 天完成。
