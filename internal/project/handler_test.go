@@ -113,6 +113,10 @@ func wireAccessRouter(t *testing.T, db *gorm.DB, u *contracts.User, memberships 
 	checker := func(_ context.Context, _ string) (map[string]struct{}, error) {
 		return memSet, nil
 	}
+	// Wire the service-level cross-tenant guard to the test's
+	// membership set so the in-service check matches the
+	// per-route middleware (v0.3.0.0 P0 #2).
+	svc.SetMembershipChecker(checker)
 	access := rbac.NewProjectAccessFactory(rbac.NewService(), checker)
 	h.Register(api, rbac.NoopPermFactory(), access)
 	return r
