@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -96,5 +97,46 @@ func TestCORS_AddsHeaderToActualRequest(t *testing.T) {
 	}
 	if got := w.Header().Get("Access-Control-Allow-Origin"); got == "" {
 		t.Error("missing Access-Control-Allow-Origin on actual request")
+	}
+}
+
+// TestCORS_PreflightIncludesAllHeaders is the v0.4.0.0 D-子项目
+// regression check: preflight 204 must carry the full set of
+// allowed headers (Authorization, Content-Type, X-User, X-User-Id,
+// X-User-Name, X-Forwarded-For, User-Agent) so the React frontend
+// can send JWT + actor metadata in cross-origin requests.
+func TestCORS_PreflightIncludesAllHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(CORS([]string{"https://app.example.com"}))
+	r.POST("/test", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest("OPTIONS", "/test", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "Authorization, Content-Type, X-User")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("preflight code = %d, want 204", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+		t.Errorf("Allow-Origin = %q, want %q", got, "https://app.example.com")
+	}
+	methods := w.Header().Get("Access-Control-Allow-Methods")
+	for _, want := range []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"} {
+		if !strings.Contains(methods, want) {
+			t.Errorf("Allow-Methods = %q, missing %q", methods, want)
+		}
+	}
+	headers := w.Header().Get("Access-Control-Allow-Headers")
+	for _, want := range []string{"Authorization", "Content-Type", "X-User", "X-User-Id", "X-User-Name", "X-Forwarded-For", "User-Agent"} {
+		if !strings.Contains(headers, want) {
+			t.Errorf("Allow-Headers = %q, missing %q", headers, want)
+		}
+	}
+	if got := w.Header().Get("Access-Control-Max-Age"); got != "86400" {
+		t.Errorf("Max-Age = %q, want 86400", got)
 	}
 }
