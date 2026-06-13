@@ -1,0 +1,22 @@
+enabled: false
+secretStore:
+  enabled: false
+  name: aws-secrets-manager
+  aws:
+    region: us-east-1
+    serviceAccountName: devops-toolkit
+externalSecret:
+  enabled: false
+  secretStoreRef: aws-secrets-manager
+  target:
+    name: devops-toolkit-secrets
+  data:
+    - secretKey: APP_JWT_SECRET
+      remoteRef:
+        key: devops/prod
+        property: jwt_secret
+    - secretKey: K8S_CRYPTO_KEY
+      remoteRef:
+        key: devops/prod
+        property: k8s_crypto_key
+refreshInterval: 1h
