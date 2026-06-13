@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0.0] - 2026-06-13
+
+C 子项目 — Helm chart 完整化 落地。5 个 agents 并行 + 主 session 收尾,~3 小时完成。
+
+### Added
+
+- **umbrella chart + 5 个子 chart** — `deploy/helm/charts/{cert-manager-issuer,external-secrets,sealed-secrets,monitoring,network-policies}/`。每个 opt-in (默认 disabled),主 chart 通过 `Chart.yaml` dependencies 引用。
+- **cert-manager-issuer 子 chart** — ClusterIssuer (letsencrypt-prod + selfSigned) + Certificate CRD。
+- **external-secrets 子 chart** — SecretStore (AWS 示例) + ExternalSecret 模板。
+- **sealed-secrets 子 chart** — SealedSecret 模板 (静态加密,免云)。
+- **monitoring 子 chart** — ServiceMonitor + PodMonitor (Prometheus 抓 /metrics)。
+- **network-policies 子 chart** — NetworkPolicy 默认 deny + explicit allow (ingress from ingress-nginx + egress DNS + 可选 DB)。
+- **minikube install 脚本** — `scripts/install-minikube.sh` 本地 minikube 完整验证 (start + helm dep + helm install + kubectl wait + port-forward + curl 测端点)。
+- **TESTING.md** — minikube 验证详细步骤。
+- **README.md** — 5 个子 chart 用法说明 + testing 链接。
+
+### Notes
+
+- 5 个子 chart 全默认 `enabled: false`, 用户 opt-in
+- cert-manager/sealed-secrets/external-secrets/prometheus-operator 需用户自己装
+- minikube install 不在 CI (资源限制),仅文档化手动验证
+- ~15 atomic commits from 5 phase (Phase 1-5)
+
+---
+
 ## [0.4.0.0] - 2026-06-13
 
 D 子项目 — UI 空白补全 + Middleware CORS 落地。4 个 frontend background agents + 1 个 backend CORS 主 session 实施,~3 小时完成。
