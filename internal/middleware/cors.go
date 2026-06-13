@@ -39,7 +39,12 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 	}
 
 	methods := "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-	headers := "Content-Type, Authorization, X-Request-ID"
+	// v0.4.0.0 D-子项目: full set of headers the React frontend
+	// sends cross-origin — JWT (Authorization), actor metadata
+	// (X-User, X-User-Id, X-User-Name), proxy IP, and standard
+	// User-Agent. The X-Request-ID token is the per-request id
+	// middleware.Chains sets, so it stays in the list.
+	headers := "Content-Type, Authorization, X-Request-ID, X-User, X-User-Id, X-User-Name, X-Forwarded-For, User-Agent"
 
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
@@ -65,7 +70,7 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 
 		c.Header("Access-Control-Allow-Methods", methods)
 		c.Header("Access-Control-Allow-Headers", headers)
-		c.Header("Access-Control-Max-Age", "600")
+		c.Header("Access-Control-Max-Age", "86400")
 
 		// Preflight: respond 204 and stop the chain so no handler runs.
 		if c.Request.Method == http.MethodOptions {
