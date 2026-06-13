@@ -24,6 +24,9 @@ import { EmptyState } from '../components/common/EmptyState';
 import { DataTable, Column } from '../components/common/DataTable';
 import { FormField } from '../components/common/FormField';
 import { useToast } from '../components/common/Toast';
+import { useAuth } from '../stores/auth';
+import { OnCallEditor } from '../components/service-catalog/OnCallEditor';
+import { RunbookEditor } from '../components/service-catalog/RunbookEditor';
 
 type Tier = 'critical' | 'important' | 'standard' | '' | string;
 type HealthStatus = 'healthy' | 'degraded' | 'unknown';
@@ -371,8 +374,23 @@ function ServiceDetail({
   // `creating` would be a footgun.
   const [addingOnCall, setAddingOnCall] = useState(false);
   const [addingRunbook, setAddingRunbook] = useState(false);
+  // Explicit-text Editor modals (separate state so
+  // the inline AddOnCallModal/AddRunbookModal and the
+  // new OnCallEditor/RunbookEditor components don't
+  // collide if both are open simultaneously). Gated
+  // to Operator/SuperAdmin via the role check below.
+  const [editorOnCallOpen, setEditorOnCallOpen] = useState(false);
+  const [editorRunbookOpen, setEditorRunbookOpen] = useState(false);
   const [confirmDeleteShift, setConfirmDeleteShift] = useState<string | null>(null);
   const [confirmDeleteEntry, setConfirmDeleteEntry] = useState<string | null>(null);
+  // D 子项目 — only Operator/SuperAdmin see the
+  // explicit-text "Add on-call" / "Add runbook"
+  // buttons. Other roles still see the legacy +
+  // icon button so they can keep creating entries
+  // through the inline modal if their role permits
+  // server-side.
+  const callerRole = useAuth((s) => s.user?.role ?? null);
+  const canAdd = callerRole === 'Operator' || callerRole === 'SuperAdmin';
 
   async function handleDelete() {
     setDeleting(true);
@@ -470,6 +488,17 @@ function ServiceDetail({
           setConfirmDeleteShift(shiftId);
         }}
       />
+      {canAdd && (
+        <div style={{ marginTop: 'var(--sp-2)' }}>
+          <Button
+            variant="secondary"
+            data-testid="service-add-oncall"
+            onClick={() => setEditorOnCallOpen(true)}
+          >
+            Add on-call
+          </Button>
+        </div>
+      )}
 
       <h3 style={{ fontSize: 'var(--fs-h3)', marginBottom: 'var(--sp-3)', marginTop: 'var(--sp-5)' }}>
         Runbook
@@ -481,6 +510,17 @@ function ServiceDetail({
           setConfirmDeleteEntry(entryId);
         }}
       />
+      {canAdd && (
+        <div style={{ marginTop: 'var(--sp-2)' }}>
+          <Button
+            variant="secondary"
+            data-testid="service-add-runbook"
+            onClick={() => setEditorRunbookOpen(true)}
+          >
+            Add runbook
+          </Button>
+        </div>
+      )}
 
       <h3 style={{ fontSize: 'var(--fs-h3)', marginBottom: 'var(--sp-3)', marginTop: 'var(--sp-5)' }}>
         Recent deploys
@@ -538,6 +578,26 @@ function ServiceDetail({
           }}
         />
       )}
+      <OnCallEditor
+        open={editorOnCallOpen}
+        onClose={() => setEditorOnCallOpen(false)}
+        serviceID={svc.id}
+        onSaved={() => {
+          setEditorOnCallOpen(false);
+          toast('On-call shift added', 'success');
+          onChanged();
+        }}
+      />
+      <RunbookEditor
+        open={editorRunbookOpen}
+        onClose={() => setEditorRunbookOpen(false)}
+        serviceID={svc.id}
+        onSaved={() => {
+          setEditorRunbookOpen(false);
+          toast('Runbook entry added', 'success');
+          onChanged();
+        }}
+      />
       {confirmDeleteShift && (
         <ConfirmDeleteModal
           title="Delete on-call shift?"
