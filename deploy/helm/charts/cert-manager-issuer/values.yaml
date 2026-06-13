@@ -1,0 +1,12 @@
+enabled: false
+clusterIssuer:
+  letsencrypt:
+    enabled: false
+    email: admin@example.com
+  selfSigned:
+    enabled: false
+certificate:
+  enabled: false
+  secretName: devops-toolkit-tls
+  issuerRef: selfsigned-issuer
+  dnsName: devops.example.com
