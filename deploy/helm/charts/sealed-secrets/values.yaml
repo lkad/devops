@@ -1,0 +1,8 @@
+enabled: false
+name: devops-toolkit-sealed
+namespace: default
+# encryptedData 是用 `kubeseal` 工具预先加密的 base64 字符串
+# 用户生成方式: kubeseal --format yaml < secret.yaml > sealed-secret.yaml
+encryptedData:
+  APP_JWT_SECRET: AgBxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  # placeholder
+  K8S_CRYPTO_KEY: AgByyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy  # placeholder

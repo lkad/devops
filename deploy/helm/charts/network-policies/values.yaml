@@ -1,0 +1,5 @@
+enabled: false
+ingressNamespace: ingress-nginx
+database:
+  enabled: false
+  namespace: postgres
