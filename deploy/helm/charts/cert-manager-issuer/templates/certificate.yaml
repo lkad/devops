@@ -1,0 +1,13 @@
+{{ if and .Values.enabled .Values.certificate.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "cert-manager-issuer.fullname" . }}
+spec:
+  secretName: {{ .Values.certificate.secretName | default "devops-toolkit-tls" }}
+  issuerRef:
+    name: {{ .Values.certificate.issuerRef | default "selfsigned-issuer" }}
+    kind: ClusterIssuer
+  dnsNames:
+    - {{ .Values.certificate.dnsName | default "devops.example.com" }}
+{{ end }}
