@@ -28,7 +28,7 @@ class MockWebSocket {
 
 beforeEach(() => {
   MockWebSocket.instances = [];
-  (global as any).WebSocket = MockWebSocket;
+  (globalThis as any).WebSocket = MockWebSocket;
 });
 afterEach(() => { vi.restoreAllMocks(); });
 

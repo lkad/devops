@@ -17,6 +17,7 @@ import { useToast } from '../components/common/Toast';
 import { DataTable, Column } from '../components/common/DataTable';
 import { PodLogsModal } from '../components/K8s/PodLogsModal';
 import { PodExecModal } from '../components/K8s/PodExecModal';
+import { PodLogModal } from '../components/k8s/PodLogPanel';
 
 type ClusterType = 'k3d' | 'kind' | 'standard';
 type ClusterStatus = 'connected' | 'disconnected' | 'unknown';
@@ -446,12 +447,12 @@ function ResourceTab({
     <>
       <DataTable rows={rows} columns={columns} rowKey={(r) => `${kind}-${r.name}-${r.namespace ?? ''}`} empty={{ title: '—' }} />
       {kind === 'pods' && logsPod && (
-        <PodLogsModal
+        <PodLogModal
           open
           onClose={() => setLogsPod(null)}
-          clusterId={clusterId}
+          clusterID={clusterId}
           namespace={logsPod.namespace ?? (query?.namespace as string) ?? 'default'}
-          pod={logsPod.name}
+          podName={logsPod.name}
         />
       )}
       {kind === 'pods' && execPod && (
