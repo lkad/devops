@@ -1,12 +1,14 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -618,3 +620,60 @@ func TestService_Trigger_WebhookStub(t *testing.T) {
 
 // ensure errors.As is referenced
 var _ = errors.As
+
+// TestService_GetPipeline_CrossTenant_Denied covers the v0.3.0.0
+// P0 #2 cross-tenant enforcement: a Developer who is a member
+// of project A cannot read a pipeline in project B.
+func TestService_GetPipeline_CrossTenant_Denied(t *testing.T) {
+	svc, _, _ := pipelineSvcFixture(t)
+	cl := caller.New(&contracts.User{ID: "alice", Username: "alice", Role: contracts.RoleDeveloper})
+	svc.SetMembershipChecker(func(ctx context.Context, userID string) (map[string]struct{}, error) {
+		return map[string]struct{}{"a-1": {}}, nil
+	})
+	p, err := svc.Create(CreatePipelineInput{Name: "P", ProjectID: "b-1", TargetType: TargetTypeProject, Steps: []PipelineStep{{Name: "build", Type: StepTypeShell}}})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ctx := caller.WithContext(context.Background(), cl)
+	_, err = svc.GetWithCaller(ctx, p.ID)
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("err = %v, want ErrForbidden", err)
+	}
+}
+
+// TestService_GetPipeline_SuperAdmin_Bypasses covers the spec
+// rule that SuperAdmin is implicitly a member of every project.
+func TestService_GetPipeline_SuperAdmin_Bypasses(t *testing.T) {
+	svc, _, _ := pipelineSvcFixture(t)
+	cl := caller.New(&contracts.User{ID: "root", Username: "root", Role: contracts.RoleSuperAdmin})
+	svc.SetMembershipChecker(func(ctx context.Context, userID string) (map[string]struct{}, error) {
+		return nil, nil
+	})
+	p, err := svc.Create(CreatePipelineInput{Name: "P", ProjectID: "x-1", TargetType: TargetTypeProject, Steps: []PipelineStep{{Name: "build", Type: StepTypeShell}}})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ctx := caller.WithContext(context.Background(), cl)
+	got, err := svc.GetWithCaller(ctx, p.ID)
+	if err != nil {
+		t.Errorf("SuperAdmin should bypass, got err = %v", err)
+	}
+	if got.ID != p.ID {
+		t.Errorf("got.ID = %q, want %q", got.ID, p.ID)
+	}
+}
+
+// TestService_GetPipeline_NilCaller_401 covers the fail-closed
+// rule: a context without a caller MUST surface as
+// ErrUnauthenticated.
+func TestService_GetPipeline_NilCaller_401(t *testing.T) {
+	svc, _, _ := pipelineSvcFixture(t)
+	p, err := svc.Create(CreatePipelineInput{Name: "P", ProjectID: "x-1", TargetType: TargetTypeProject, Steps: []PipelineStep{{Name: "build", Type: StepTypeShell}}})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	_, err = svc.GetWithCaller(context.Background(), p.ID)
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("err = %v, want ErrUnauthenticated", err)
+	}
+}

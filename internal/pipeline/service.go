@@ -8,8 +8,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
+
+// ErrUnauthenticated is the sentinel returned when a service
+// method is invoked without a caller on the context. The
+// handler maps it to a 401 UNAUTHORIZED APIError.
+var ErrUnauthenticated = errors.New("pipeline: unauthenticated")
+
+// ErrForbidden is the sentinel returned when the caller's
+// tenant membership does not allow the requested operation.
+// The handler maps it to a 403 FORBIDDEN APIError.
+var ErrForbidden = errors.New("pipeline: forbidden")
 
 // CreatePipelineInput is the input DTO for pipeline creation.
 // The handler decodes the wire JSON into this struct; the
@@ -69,6 +80,20 @@ type Service struct {
 	// package wires the real validator in main.go; tests
 	// can inject a fake via WithServiceValidator.
 	serviceValidator ServiceValidator
+
+	// membershipChecker is the cross-tenant membership
+	// check used by the v0.3.0.0 P0 #2 service-layer guard.
+	// nil means "no memberships" (fail-closed). Production
+	// wires repo.ListProjectIDsForUser via the
+	// pipeline.NewService factory in main.go; tests
+	// supply a fake via SetMembershipChecker.
+	membershipChecker caller.MembershipChecker
+}
+
+// SetMembershipChecker wires the cross-tenant membership
+// check used by the v0.3.0.0 P0 #2 service-layer guard.
+func (s *Service) SetMembershipChecker(m caller.MembershipChecker) {
+	s.membershipChecker = m
 }
 
 // ServiceValidator reports whether a service_id refers to
@@ -153,6 +178,30 @@ func (s *Service) Get(id string) (*Pipeline, error) {
 			Code:    contracts.CodeInternal,
 			Message: "failed to load pipeline",
 			Cause:   err,
+		}
+	}
+	return p, nil
+}
+
+// GetWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant of
+// Get. The caller MUST be attached to the context; an absent
+// caller surfaces as ErrUnauthenticated (401). A non-SuperAdmin
+// caller without membership in the pipeline's project_id
+// surfaces as ErrForbidden (403). The ungoverned Get is
+// retained for legacy code paths (e.g. the run executor's
+// internal lookups).
+func (s *Service) GetWithCaller(ctx context.Context, id string) (*Pipeline, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	p, err := s.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	if !cl.IsSuperAdmin() {
+		if !cl.IsMemberOf(ctx, p.ProjectID, s.membershipChecker) {
+			return nil, ErrForbidden
 		}
 	}
 	return p, nil
@@ -269,6 +318,72 @@ func (s *Service) Delete(id string) error {
 // triggeredBy is recorded on the run for audit. The
 // service-layer default is the caller's user ID; an empty
 // string is allowed for system-triggered runs.
+
+// CreateWithCaller is the v0.3.0.0 P0 #2 cross-tenant
+// variant of Create. The caller MUST be attached to the
+// context; an absent caller surfaces as ErrUnauthenticated
+// (401). A non-SuperAdmin caller without membership in
+// in.ProjectID (or an empty ProjectID) is denied. The
+// ungoverned Create is retained for legacy code paths.
+func (s *Service) CreateWithCaller(ctx context.Context, in CreatePipelineInput) (*Pipeline, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		if !cl.IsMemberOf(ctx, in.ProjectID, s.membershipChecker) {
+			return nil, ErrForbidden
+		}
+	}
+	return s.Create(in)
+}
+
+// UpdateWithCaller is the v0.3.0.0 P0 #2 cross-tenant
+// variant of Update. The caller MUST be attached to the
+// context; an absent caller surfaces as ErrUnauthenticated
+// (401). A non-SuperAdmin caller without membership in the
+// pipeline's current project_id is denied. The ungoverned
+// Update is retained for legacy code paths.
+func (s *Service) UpdateWithCaller(ctx context.Context, id string, in UpdatePipelineInput) (*Pipeline, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	current, err := s.repo.GetPipeline(id)
+	if err != nil {
+		return nil, err
+	}
+	if !cl.IsSuperAdmin() {
+		if !cl.IsMemberOf(ctx, current.ProjectID, s.membershipChecker) {
+			return nil, ErrForbidden
+		}
+	}
+	return s.Update(id, in)
+}
+
+// DeleteWithCaller is the v0.3.0.0 P0 #2 cross-tenant
+// variant of Delete. The caller MUST be attached to the
+// context; an absent caller surfaces as ErrUnauthenticated
+// (401). A non-SuperAdmin caller without membership in the
+// pipeline's project_id is denied. The ungoverned Delete is
+// retained for legacy code paths.
+func (s *Service) DeleteWithCaller(ctx context.Context, id string) error {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return ErrUnauthenticated
+	}
+	current, err := s.repo.GetPipeline(id)
+	if err != nil {
+		return err
+	}
+	if !cl.IsSuperAdmin() {
+		if !cl.IsMemberOf(ctx, current.ProjectID, s.membershipChecker) {
+			return ErrForbidden
+		}
+	}
+	return s.Delete(id)
+}
+
 func (s *Service) Trigger(pipelineID, triggeredBy string) (*PipelineRun, error) {
 	p, err := s.repo.GetPipeline(pipelineID)
 	if err != nil {

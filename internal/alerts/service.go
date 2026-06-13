@@ -8,8 +8,19 @@ import (
 	"time"
 
 	"github.com/devops-toolkit/backend/internal/audit"
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
+
+// ErrUnauthenticated is the sentinel returned when a service
+// method is invoked without a caller on the context. The
+// handler maps it to a 401 UNAUTHORIZED APIError.
+var ErrUnauthenticated = errors.New("alerts: unauthenticated")
+
+// ErrForbidden is the sentinel returned when the caller's
+// tenant membership does not allow the requested operation.
+// The handler maps it to a 403 FORBIDDEN APIError.
+var ErrForbidden = errors.New("alerts: forbidden")
 
 // ServiceConfig bundles the dependencies of Service. Kept as a
 // struct (not positional args) so new dependencies (clock, rate
@@ -208,6 +219,37 @@ func (s *Service) GetAlert(id string) (*Alert, error) {
 		}
 	}
 	return a, nil
+}
+
+// GetAlertWithCaller is the v0.3.0.0 P0 #2 cross-tenant
+// variant of GetAlert. The caller MUST be attached to the
+// context; an absent caller surfaces as ErrUnauthenticated
+// (401). A non-SuperAdmin caller is denied (alerts are
+// global today; per-source project binding is the
+// follow-up work).
+func (s *Service) GetAlertWithCaller(ctx context.Context, id string) (*Alert, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, ErrForbidden
+	}
+	return s.GetAlert(id)
+}
+
+// ListWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant
+// of List. The caller MUST be attached to the context. A
+// non-SuperAdmin caller is denied.
+func (s *Service) ListWithCaller(ctx context.Context, f AlertFilter) ([]Alert, int64, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, 0, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, 0, ErrForbidden
+	}
+	return s.List(f)
 }
 
 // List returns a page of alerts plus the unfiltered total.

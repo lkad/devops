@@ -3,6 +3,7 @@ package alerts
 import (
 	"bytes"
 	"context"
+	"errors"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/internal/handler"
 	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/pkg/contracts"
@@ -668,4 +670,40 @@ func TestHandler_ValidationError(t *testing.T) {
 		t.Errorf("code: got %q", er.Error.Code)
 	}
 	_ = handler.WriteList // keep import alive for tooling
+}
+
+// TestService_GetAlert_CrossTenant_Denied covers the v0.3.0.0
+// P0 #2 cross-tenant enforcement: a non-SuperAdmin caller
+// is denied access.
+func TestService_GetAlert_CrossTenant_Denied(t *testing.T) {
+	svc := &Service{repo: NewRepository(openTestDB(t))}
+	cl := caller.New(&contracts.User{ID: "alice", Username: "alice", Role: contracts.RoleDeveloper})
+	ctx := caller.WithContext(context.Background(), cl)
+	_, err := svc.GetAlertWithCaller(ctx, "any-id")
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("err = %v, want ErrForbidden", err)
+	}
+}
+
+// TestService_GetAlert_SuperAdmin_Bypasses covers the spec
+// rule that SuperAdmin is implicitly allowed.
+func TestService_GetAlert_SuperAdmin_Bypasses(t *testing.T) {
+	svc := &Service{repo: NewRepository(openTestDB(t))}
+	cl := caller.New(&contracts.User{ID: "root", Username: "root", Role: contracts.RoleSuperAdmin})
+	ctx := caller.WithContext(context.Background(), cl)
+	_, err := svc.GetAlertWithCaller(ctx, "any-id")
+	if errors.Is(err, ErrForbidden) {
+		t.Errorf("SuperAdmin should bypass cross-tenant, got ErrForbidden")
+	}
+}
+
+// TestService_GetAlert_NilCaller_401 covers the fail-closed
+// rule: a context without a caller MUST surface as
+// ErrUnauthenticated.
+func TestService_GetAlert_NilCaller_401(t *testing.T) {
+	svc := &Service{repo: NewRepository(openTestDB(t))}
+	_, err := svc.GetAlertWithCaller(context.Background(), "any-id")
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("err = %v, want ErrUnauthenticated", err)
+	}
 }

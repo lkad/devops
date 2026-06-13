@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"strings"
@@ -9,6 +10,16 @@ import (
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
+// ErrUnauthenticated is the sentinel returned when a service method
+// is invoked without a caller on the context. The handler maps it
+// to a 401 UNAUTHORIZED APIError.
+var ErrUnauthenticated = errors.New("project: unauthenticated")
+
+// ErrForbidden is the sentinel returned when the caller's tenant
+// membership does not allow the requested operation. The handler
+// maps it to a 403 FORBIDDEN APIError.
+var ErrForbidden = errors.New("project: forbidden")
+
 // Service is the business-rule layer for the project hierarchy.
 // It composes a Repository, applies validation, and ensures the
 // hierarchy invariants (depth, cycle, FK, name uniqueness) hold
@@ -16,14 +27,29 @@ import (
 // *contracts.APIError so the handler can pass them to WriteError
 // without further translation.
 type Service struct {
-	repo *Repository
+	repo              *Repository
+	membershipChecker caller.MembershipChecker
 }
 
 // NewService returns a Service backed by the supplied repository.
 // The constructor takes only the repo because the service is
 // otherwise stateless; the audit/clock collaborators, when they
-// land, will be added as fields.
-func NewService(repo *Repository) *Service { return &Service{repo: repo} }
+// land, will be added as fields. The membership checker defaults
+// to repo.ListProjectIDsForUser so the cross-tenant guards
+// (v0.3.0.0 P0 #2) work out of the box.
+func NewService(repo *Repository) *Service {
+	return &Service{
+		repo:              repo,
+		membershipChecker: repo.ListProjectIDsForUser,
+	}
+}
+
+// SetMembershipChecker overrides the cross-tenant membership
+// checker. Production uses the default set by NewService; tests
+// supply a fake.
+func (s *Service) SetMembershipChecker(m caller.MembershipChecker) {
+	s.membershipChecker = m
+}
 
 // MembershipChecker returns a caller.MembershipChecker that
 // looks up the user's project memberships through this
@@ -149,6 +175,27 @@ func (s *Service) CreateProject(in CreateProjectInput) (Project, error) {
 
 // GetProject returns a project by ID.
 func (s *Service) GetProject(id string) (Project, error) { return s.repo.Get(id) }
+
+// GetProjectWithCaller is the v0.3.0.0 P0 #2 cross-tenant
+// variant of GetProject. The caller MUST be attached to the
+// context; an absent caller surfaces as ErrUnauthenticated
+// (401) and a non-SuperAdmin caller without membership in
+// `id` surfaces as ErrForbidden (403). The ungoverned
+// GetProject is retained for legacy code paths (e.g. the
+// hostproject service's project-existence check) where
+// tenancy is not the axis being checked.
+func (s *Service) GetProjectWithCaller(ctx context.Context, id string) (Project, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return Project{}, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		if !cl.IsMemberOf(ctx, id, s.membershipChecker) {
+			return Project{}, ErrForbidden
+		}
+	}
+	return s.repo.Get(id)
+}
 
 // GetProjectWithRelations returns a project plus its direct
 // children and members, used by the GET /projects/:id handler.

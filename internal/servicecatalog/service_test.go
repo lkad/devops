@@ -1,7 +1,12 @@
 package servicecatalog
 
 import (
+	"context"
+	"errors"
 	"testing"
+
+	"github.com/devops-toolkit/backend/internal/auth/caller"
+	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
 // TestService_Create_ValidatesName pins the name rules
@@ -93,5 +98,44 @@ func TestService_DuplicateName_ReturnsConflict(t *testing.T) {
 	}
 	if !IsConflict(err) {
 		t.Errorf("err = %v, want IsConflict", err)
+	}
+}
+
+// TestService_GetService_CrossTenant_Denied covers the v0.3.0.0
+// P0 #2 cross-tenant enforcement on the service catalog.
+// A non-SuperAdmin caller is denied access.
+func TestService_GetService_CrossTenant_Denied(t *testing.T) {
+	svc := NewCatalog(NewRepository(openTestDB(t)))
+	cl := caller.New(&contracts.User{ID: "alice", Username: "alice", Role: contracts.RoleDeveloper})
+	ctx := caller.WithContext(context.Background(), cl)
+	_, err := svc.GetWithCaller(ctx, "any-id")
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("err = %v, want ErrForbidden", err)
+	}
+}
+
+// TestService_GetService_SuperAdmin_Bypasses covers the spec
+// rule that SuperAdmin is implicitly allowed.
+func TestService_GetService_SuperAdmin_Bypasses(t *testing.T) {
+	svc := NewCatalog(NewRepository(openTestDB(t)))
+	cl := caller.New(&contracts.User{ID: "root", Username: "root", Role: contracts.RoleSuperAdmin})
+	ctx := caller.WithContext(context.Background(), cl)
+	_, err := svc.GetWithCaller(ctx, "any-id")
+	// The repo returns not-found (the fixture has no rows)
+	// but the cross-tenant guard MUST NOT short-circuit
+	// with ErrForbidden.
+	if errors.Is(err, ErrForbidden) {
+		t.Errorf("SuperAdmin should bypass cross-tenant, got ErrForbidden")
+	}
+}
+
+// TestService_GetService_NilCaller_401 covers the fail-closed
+// rule: a context without a caller MUST surface as
+// ErrUnauthenticated.
+func TestService_GetService_NilCaller_401(t *testing.T) {
+	svc := NewCatalog(NewRepository(openTestDB(t)))
+	_, err := svc.GetWithCaller(context.Background(), "any-id")
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("err = %v, want ErrUnauthenticated", err)
 	}
 }

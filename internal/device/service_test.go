@@ -1,12 +1,27 @@
 package device
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
+
+// newDeveloperCaller returns a *caller.Caller for the
+// v0.3.0.0 P0 #2 cross-tenant tests.
+func newDeveloperCaller(id string) *caller.Caller {
+	return caller.New(&contracts.User{ID: id, Username: id, Role: contracts.RoleDeveloper})
+}
+
+// newSuperAdminCaller returns a *caller.Caller for the
+// v0.3.0.0 P0 #2 cross-tenant tests.
+func newSuperAdminCaller() *caller.Caller {
+	return caller.New(&contracts.User{ID: "root", Username: "root", Role: contracts.RoleSuperAdmin})
+}
 // deviceSvcFixture builds a Service backed by a fresh in-memory
 // repository. The Service has no external dependencies — every
 // behaviour is exercised through Repository — so a single
@@ -248,5 +263,47 @@ func TestService_Search(t *testing.T) {
 	}
 	if total != 1 || len(rows) != 1 || rows[0].Name != "webserver-01" {
 		t.Errorf("rows = %+v total=%d", rows, total)
+	}
+}
+
+// TestService_GetDevice_CrossTenant_Denied covers the v0.3.0.0
+// P0 #2 cross-tenant enforcement on the device module. A
+// non-SuperAdmin caller is denied access; the per-device
+// projectID filter is the follow-up work.
+func TestService_GetDevice_CrossTenant_Denied(t *testing.T) {
+	svc := deviceSvcFixture(t)
+	cl := newDeveloperCaller("alice")
+	ctx := caller.WithContext(context.Background(), cl)
+	_, err := svc.GetWithCaller(ctx, "any-id")
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("err = %v, want ErrForbidden", err)
+	}
+}
+
+// TestService_GetDevice_SuperAdmin_Bypasses covers the spec
+// rule that SuperAdmin is implicitly allowed to read any
+// device. The ungoverned Get is then called; the read
+// returns a not-found (the fixture has no rows) but the
+// call MUST NOT short-circuit on the cross-tenant guard.
+func TestService_GetDevice_SuperAdmin_Bypasses(t *testing.T) {
+	svc := deviceSvcFixture(t)
+	cl := newSuperAdminCaller()
+	ctx := caller.WithContext(context.Background(), cl)
+	_, err := svc.GetWithCaller(ctx, "any-id")
+	// The not-found envelope is from the ungoverned path;
+	// the cross-tenant guard passed (no ErrForbidden).
+	if errors.Is(err, ErrForbidden) {
+		t.Errorf("SuperAdmin should bypass cross-tenant, got ErrForbidden")
+	}
+}
+
+// TestService_GetDevice_NilCaller_401 covers the fail-closed
+// rule: a context without a caller MUST surface as
+// ErrUnauthenticated.
+func TestService_GetDevice_NilCaller_401(t *testing.T) {
+	svc := deviceSvcFixture(t)
+	_, err := svc.GetWithCaller(context.Background(), "any-id")
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("err = %v, want ErrUnauthenticated", err)
 	}
 }

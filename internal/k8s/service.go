@@ -13,8 +13,25 @@ import (
 	"time"
 
 	"github.com/devops-toolkit/backend/internal/audit"
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
+
+// ErrUnauthenticated is the sentinel returned when a service
+// method is invoked without a caller on the context. The
+// handler maps it to a 401 UNAUTHORIZED APIError.
+var ErrUnauthenticated = errors.New("k8s: unauthenticated")
+
+// ErrForbidden is the sentinel returned when the caller's
+// tenant membership does not allow the requested operation.
+// The handler maps it to a 403 FORBIDDEN APIError.
+//
+// Note: a k8s Cluster has no direct project_id column, so the
+// v0.3.0.0 P0 #2 service-layer guard is a placeholder that
+// allows any authenticated caller with the right global
+// permission (or SuperAdmin). Per-cluster projectID filter
+// will land in a follow-up.
+var ErrForbidden = errors.New("k8s: forbidden")
 
 // CreateClusterInput is the request payload for Service.Create.
 // The handler decodes the wire JSON into this struct; the
@@ -200,6 +217,89 @@ func (s *Service) Get(id string) (*Cluster, error) {
 		}
 	}
 	return c, nil
+}
+
+// GetWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant of
+// Get. The caller MUST be attached to the context; an absent
+// caller surfaces as ErrUnauthenticated (401). A non-SuperAdmin
+// caller is denied (the per-cluster projectID filter is the
+// follow-up work; today the service-layer guard is SuperAdmin
+// only). The ungoverned Get is retained for legacy code paths.
+func (s *Service) GetWithCaller(ctx context.Context, id string) (*Cluster, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, ErrForbidden
+	}
+	return s.Get(id)
+}
+
+// ListWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant
+// of List. The caller MUST be attached to the context. A
+// non-SuperAdmin caller is denied. The ungoverned List is
+// retained for legacy code paths.
+func (s *Service) ListWithCaller(ctx context.Context, f ListFilter) ([]Cluster, int64, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, 0, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, 0, ErrForbidden
+	}
+	return s.List(f)
+}
+
+// CreateWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant
+// of Create. The caller MUST be attached to the context; an
+// absent caller surfaces as ErrUnauthenticated (401). A
+// non-SuperAdmin caller is denied. The ungoverned Create is
+// retained for legacy code paths.
+func (s *Service) CreateWithCaller(in CreateClusterInput, ctxArg ...context.Context) (*Cluster, error) {
+	ctx := s.ctxOrBackground(ctxArg)
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, ErrForbidden
+	}
+	return s.Create(in, ctx)
+}
+
+// UpdateWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant
+// of Update. The caller MUST be attached to the context; an
+// absent caller surfaces as ErrUnauthenticated (401). A
+// non-SuperAdmin caller is denied. The ungoverned Update is
+// retained for legacy code paths.
+func (s *Service) UpdateWithCaller(id string, in UpdateClusterInput, ctxArg ...context.Context) (*Cluster, error) {
+	ctx := s.ctxOrBackground(ctxArg)
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, ErrForbidden
+	}
+	return s.Update(id, in, ctx)
+}
+
+// DeleteWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant
+// of Delete. The caller MUST be attached to the context; an
+// absent caller surfaces as ErrUnauthenticated (401). A
+// non-SuperAdmin caller is denied. The ungoverned Delete is
+// retained for legacy code paths.
+func (s *Service) DeleteWithCaller(id string, ctxArg ...context.Context) error {
+	ctx := s.ctxOrBackground(ctxArg)
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return ErrForbidden
+	}
+	return s.Delete(id, ctx)
 }
 
 // List returns a page of clusters plus the unfiltered total.

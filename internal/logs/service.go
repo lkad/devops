@@ -2,11 +2,28 @@ package logs
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
+
+// ErrUnauthenticated is the sentinel returned when a service
+// method is invoked without a caller on the context. The
+// handler maps it to a 401 UNAUTHORIZED APIError.
+var ErrUnauthenticated = errors.New("logs: unauthenticated")
+
+// ErrForbidden is the sentinel returned when the caller's
+// tenant membership does not allow the requested operation.
+// The handler maps it to a 403 FORBIDDEN APIError.
+//
+// Note: a log stream is keyed by a (service, env) pair that
+// has no direct project_id column. The v0.3.0.0 P0 #2
+// service-layer guard is SuperAdmin-only for read. Per-stream
+// project binding is the follow-up work.
+var ErrForbidden = errors.New("logs: forbidden")
 
 // ServiceConfig tunes the orchestration layer. MaxPageSize caps
 // the limit a client may request; the actual backend's limit is
@@ -44,6 +61,23 @@ func (s *Service) Capabilities() Capabilities {
 // Streams is a thin pass-through.
 func (s *Service) Streams(ctx context.Context) ([]Stream, error) {
 	return s.backend.Streams(ctx)
+}
+
+// StreamsWithCaller is the v0.3.0.0 P0 #2 cross-tenant
+// variant of Streams. The caller MUST be attached to the
+// context; an absent caller surfaces as ErrUnauthenticated
+// (401). A non-SuperAdmin caller is denied (streams are
+// global today; per-stream project binding is the
+// follow-up work).
+func (s *Service) StreamsWithCaller(ctx context.Context) ([]Stream, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, ErrForbidden
+	}
+	return s.Streams(ctx)
 }
 
 // CreateLogEntry persists a single LogEntry through the

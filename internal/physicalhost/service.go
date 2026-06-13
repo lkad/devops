@@ -2,9 +2,21 @@ package physicalhost
 
 import (
 	"context"
+	"errors"
 
 	"github.com/devops-toolkit/backend/internal/audit"
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 )
+
+// ErrUnauthenticated is the sentinel returned when a service
+// method is invoked without a caller on the context. The
+// handler maps it to a 401 UNAUTHORIZED APIError.
+var ErrUnauthenticated = errors.New("physicalhost: unauthenticated")
+
+// ErrForbidden is the sentinel returned when the caller's
+// tenant membership does not allow the requested operation.
+// The handler maps it to a 403 FORBIDDEN APIError.
+var ErrForbidden = errors.New("physicalhost: forbidden")
 
 // ServiceConfig bundles the dependencies of Service. The
 // Service hides the joins between Repository and audit.Repository
@@ -96,6 +108,23 @@ func (s *Service) ListWithDevice(_ context.Context, f ListFilter) ([]HostListIte
 	return s.repo.ListWithDevice(f)
 }
 
+// ListWithDeviceWithCaller is the v0.3.0.0 P0 #2 cross-tenant
+// variant of ListWithDevice. The caller MUST be attached to
+// the context; an absent caller surfaces as ErrUnauthenticated.
+// A non-SuperAdmin caller is denied (the per-host project
+// filter at the List level is the follow-up work; today
+// the service-layer guard is SuperAdmin only).
+func (s *Service) ListWithDeviceWithCaller(ctx context.Context, f ListFilter) ([]HostListItem, int64, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, 0, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, 0, ErrForbidden
+	}
+	return s.repo.ListWithDevice(f)
+}
+
 // Get returns the host with the given ID, or
 // physicalhost.ErrNotFound if no such row exists. It is a
 // pass-through to Repository.Get today; the seam is here so
@@ -104,6 +133,36 @@ func (s *Service) ListWithDevice(_ context.Context, f ListFilter) ([]HostListIte
 // place to land.
 func (s *Service) Get(_ context.Context, id string) (*PhysicalHost, error) {
 	return s.repo.Get(id)
+}
+
+// GetWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant
+// of Get. The caller MUST be attached to the context; an
+// absent caller surfaces as ErrUnauthenticated (401). A
+// non-SuperAdmin caller without membership in ANY of the
+// host's project links (via ProjectIDsForHost) is denied.
+func (s *Service) GetWithCaller(ctx context.Context, id string) (*PhysicalHost, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if cl.IsSuperAdmin() {
+		return s.repo.Get(id)
+	}
+	if s.projectIDsForHost == nil {
+		// No project resolution wired; deny to stay
+		// fail-closed rather than leak.
+		return nil, ErrForbidden
+	}
+	ids, err := s.projectIDsForHost(id)
+	if err != nil {
+		return nil, err
+	}
+	for _, pid := range ids {
+		if cl.IsMemberOf(ctx, pid, nil) {
+			return s.repo.Get(id)
+		}
+	}
+	return nil, ErrForbidden
 }
 
 // Create inserts a new physical_hosts row. ID is filled in

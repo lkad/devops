@@ -8,8 +8,24 @@ import (
 	"time"
 
 	"github.com/devops-toolkit/backend/internal/audit"
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
+
+// ErrUnauthenticated is the sentinel returned when a service
+// method is invoked without a caller on the context. The
+// handler maps it to a 401 UNAUTHORIZED APIError.
+var ErrUnauthenticated = errors.New("servicecatalog: unauthenticated")
+
+// ErrForbidden is the sentinel returned when the caller's
+// tenant membership does not allow the requested operation.
+// The handler maps it to a 403 FORBIDDEN APIError.
+//
+// Note: a Service row in the catalog is a global entity (it
+// has no project_id column); the v0.3.0.0 P0 #2 service-layer
+// guard is SuperAdmin-only for read/write. Per-service
+// project binding is the follow-up work.
+var ErrForbidden = errors.New("servicecatalog: forbidden")
 
 // ErrConflict is returned when a Create would violate a
 // uniqueness constraint. The service layer wraps it in
@@ -104,14 +120,62 @@ func (s *Catalog) Create(in CreateInput) (*Service, error) {
 	return row, nil
 }
 
+// CreateWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant
+// of Create. The caller MUST be attached to the context; an
+// absent caller surfaces as ErrUnauthenticated (401). A
+// non-SuperAdmin caller is denied. The ungoverned Create is
+// retained for legacy code paths.
+func (s *Catalog) CreateWithCaller(ctx context.Context, in CreateInput) (*Service, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, ErrForbidden
+	}
+	return s.Create(in)
+}
+
 // Get returns a single service by ID. 404 NOT_FOUND on
 // missing.
 func (s *Catalog) Get(id string) (*Service, error) {
 	return s.repo.Get(id)
 }
 
+// GetWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant
+// of Get. The caller MUST be attached to the context; an
+// absent caller surfaces as ErrUnauthenticated (401). A
+// non-SuperAdmin caller is denied (services are global
+// today; per-service project binding is the follow-up
+// work). The ungoverned Get is retained for legacy code
+// paths.
+func (s *Catalog) GetWithCaller(ctx context.Context, id string) (*Service, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, ErrForbidden
+	}
+	return s.repo.Get(id)
+}
+
 // List returns a page of services matching the filter.
 func (s *Catalog) List(f ServiceFilter) ([]Service, error) {
+	return s.repo.List(f)
+}
+
+// ListWithCaller is the v0.3.0.0 P0 #2 cross-tenant variant
+// of List. The caller MUST be attached to the context. A
+// non-SuperAdmin caller is denied.
+func (s *Catalog) ListWithCaller(ctx context.Context, f ServiceFilter) ([]Service, error) {
+	cl, ok := caller.FromContext(ctx)
+	if !ok || cl == nil || cl.User == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !cl.IsSuperAdmin() {
+		return nil, ErrForbidden
+	}
 	return s.repo.List(f)
 }
 
