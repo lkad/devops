@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/devops-toolkit/backend/internal/audit"
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/pkg/contracts"
 )
 
@@ -80,6 +81,15 @@ type Service struct {
 	// package wires the real validator in main.go; tests
 	// can inject a fake via WithServiceValidator.
 	serviceValidator ServiceValidator
+
+	// membershipChecker is the cross-tenant membership
+	// check used by the v0.3.0.0 P0 #2 service-layer guard.
+	// nil means "no memberships" (fail-closed). Production
+	// wires repo.ListProjectIDsForUser via the
+	// pipeline.NewService factory in main.go; tests
+	// supply a fake via SetMembershipChecker.
+	membershipChecker caller.MembershipChecker
+
 	// audit is the cross-module audit service. Optional
 	// (nil means "no audit emission"); production wires a
 	// real service so v0.2.0.0 P0 #3 audit-trail coverage
@@ -104,6 +114,12 @@ var errUnknownService = errors.New("pipeline: unknown service_id")
 func (s *Service) WithServiceValidator(v ServiceValidator) *Service {
 	s.serviceValidator = v
 	return s
+}
+
+// SetMembershipChecker wires the cross-tenant membership
+// check used by the v0.3.0.0 P0 #2 service-layer guard.
+func (s *Service) SetMembershipChecker(m caller.MembershipChecker) {
+	s.membershipChecker = m
 }
 
 // NewService builds a Service. The repository and executor

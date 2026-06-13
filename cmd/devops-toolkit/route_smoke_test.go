@@ -14,6 +14,7 @@ import (
 
 	"github.com/devops-toolkit/backend/internal/alerts"
 	"github.com/devops-toolkit/backend/internal/auth"
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 	"github.com/devops-toolkit/backend/internal/auth/rbac"
 	"github.com/devops-toolkit/backend/internal/config"
 	dbpkg "github.com/devops-toolkit/backend/internal/database"
@@ -89,6 +90,29 @@ func TestRouteSmoke_ProjectAndDeviceRegistered(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+
+	// devBypassAuth is a test-only middleware that
+	// synthesises a SuperAdmin caller from the X-User
+	// header. The real auth middleware does this in
+	// production; the route-smoke test bypasses auth
+	// (per the noopPerms comment below) but still
+	// needs a caller on the context so the v0.3.0.0
+	// P0 #2 service-layer guards don't reject the
+	// request.
+	devBypassAuth := func(c *gin.Context) {
+		username := c.GetHeader("X-User")
+		if username == "" {
+			username = "smoke-tester"
+		}
+		cl := caller.New(&contracts.User{
+			ID:       username,
+			Username: username,
+			Role:     contracts.RoleSuperAdmin,
+		})
+		caller.WithGin(c, cl)
+		c.Next()
+	}
+	r.Use(devBypassAuth)
 
 	// noopPerms disables the per-route RBAC factory so
 	// this smoke test exercises the route registration +

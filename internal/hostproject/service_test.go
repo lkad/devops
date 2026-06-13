@@ -1,6 +1,7 @@
 package hostproject
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -17,12 +18,25 @@ import (
 // same instance. Every helper below routes through this
 // single DB so the service and the seeds see the same
 // data.
+//
+// The membership checker is wired to projectSvc.MembershipChecker()
+// so the v0.3.0.0 P0 #2 cross-tenant guard in projectSvc is
+// satisfied for the seed projects (the test creates them
+// without an actor, but the checker allows any caller in
+// the test scenario).
 func newServiceWithDB(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
 	db := openTestDB(t)
 	repo := NewRepository(db)
 	projRepo := projectpkg.NewRepository(db)
 	projSvc := projectpkg.NewService(projRepo)
+	projSvc.SetMembershipChecker(func(ctx context.Context, userID string) (map[string]struct{}, error) {
+		// Allow any caller in tests so seed projects pass
+		// the cross-tenant guard. Production wires
+		// projSvc.MembershipChecker() which is the real
+		// repo-backed lookup.
+		return map[string]struct{}{}, nil
+	})
 	devRepo := devicepkg.NewRepository(db)
 	svc := NewService(repo, projSvc)
 	svc.SetDeviceGetter(devRepo.Get)

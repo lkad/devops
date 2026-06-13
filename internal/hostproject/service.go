@@ -10,6 +10,7 @@ import (
 	"github.com/devops-toolkit/backend/pkg/contracts"
 
 	"github.com/devops-toolkit/backend/internal/audit"
+	"github.com/devops-toolkit/backend/internal/auth/caller"
 )
 
 // Service is the business-logic layer for host-project
@@ -71,14 +72,15 @@ func (s *Service) SetDeviceGetter(getter func(id string) (*devicepkg.Device, err
 // context so the audit emission carries the right
 // request-scoped values.
 func (s *Service) Link(deviceID, projectID, linkedBy string, ctxArg ...context.Context) (HostProjectLink, error) {
-	ctx := s.ctxOrBackground(ctxArg)
+	ctx := s.systemCtx(ctxArg)
+
 	if err := s.validateLinkInputs(deviceID, projectID, linkedBy); err != nil {
 		return HostProjectLink{}, err
 	}
 	if err := s.assertDeviceExists(deviceID); err != nil {
 		return HostProjectLink{}, err
 	}
-	if err := s.assertProjectExists(projectID); err != nil {
+	if err := s.assertProjectExists(ctx, projectID); err != nil {
 		return HostProjectLink{}, err
 	}
 	link := HostProjectLink{
@@ -106,7 +108,7 @@ func (s *Service) Link(deviceID, projectID, linkedBy string, ctxArg ...context.C
 // (resource_link.delete) is best-effort. The context is
 // variadic so existing callers keep compiling.
 func (s *Service) Unlink(deviceID, projectID string, ctxArg ...context.Context) error {
-	ctx := s.ctxOrBackground(ctxArg)
+	ctx := s.systemCtx(ctxArg)
 	if err := s.repo.DeleteByDeviceAndProject(deviceID, projectID); err != nil {
 		return err
 	}
@@ -129,7 +131,7 @@ func (s *Service) Unlink(deviceID, projectID string, ctxArg ...context.Context) 
 // The context is variadic so existing callers keep
 // compiling.
 func (s *Service) BulkLink(deviceID string, projectIDs []string, linkedBy string, ctxArg ...context.Context) ([]HostProjectLink, error) {
-	ctx := s.ctxOrBackground(ctxArg)
+	ctx := s.systemCtx(ctxArg)
 	if err := s.validateLinkInputs(deviceID, "", linkedBy); err != nil {
 		return nil, err
 	}
@@ -146,7 +148,7 @@ func (s *Service) BulkLink(deviceID string, projectIDs []string, linkedBy string
 		if _, ok := seen[pid]; ok {
 			continue
 		}
-		if err := s.assertProjectExists(pid); err != nil {
+		if err := s.assertProjectExists(ctx, pid); err != nil {
 			return nil, err
 		}
 		seen[pid] = struct{}{}
@@ -189,7 +191,7 @@ func (s *Service) BulkLink(deviceID string, projectIDs []string, linkedBy string
 // intent. The context is variadic so existing callers
 // keep compiling.
 func (s *Service) BulkUnlink(deviceID string, projectIDs []string, ctxArg ...context.Context) error {
-	ctx := s.ctxOrBackground(ctxArg)
+	ctx := s.systemCtx(ctxArg)
 	for _, pid := range projectIDs {
 		if pid == "" {
 			continue
@@ -281,20 +283,21 @@ type DeviceProjectLink struct {
 // chain. The DTO matches the spec's "each project shows:
 // name, system, business line, link date" requirement.
 func (s *Service) ListProjectDetailsByDevice(deviceID string) ([]DeviceProjectLink, error) {
+	ctx := s.systemCtx(nil)
 	links, err := s.repo.ListByDevice(deviceID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]DeviceProjectLink, 0, len(links))
 	for _, l := range links {
-		p, err := s.projectSvc.GetProject(l.ProjectID)
+		p, err := s.projectSvc.GetProject(ctx, l.ProjectID)
 		if err != nil {
 			// Project was hard-deleted; skip the row. This
 			// is a defensive branch because the FK is not
 			// enforced as a hard constraint in SQLite tests.
 			continue
 		}
-		ancestors, _ := s.projectSvc.ListAncestors(p.ID)
+		ancestors, _ := s.projectSvc.ListAncestors(ctx, p.ID)
 		out = append(out, DeviceProjectLink{Link: l, Project: p, Ancestors: ancestors})
 	}
 	return out, nil
@@ -321,9 +324,10 @@ type ProjectDeviceLink struct {
 // "effective-link" rule that makes a BusinessLine link
 // visible to every System and Project underneath.
 func (s *Service) ListDeviceDetailsByProject(projectID string) ([]ProjectDeviceLink, error) {
+	ctx := s.systemCtx(nil)
 	// Walk ancestors root -> leaf, then append the project
 	// itself, so we get the full "linkage" set.
-	ancestors, err := s.projectSvc.ListAncestors(projectID)
+	ancestors, err := s.projectSvc.ListAncestors(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -427,8 +431,10 @@ func (s *Service) fetchDevice(id string) (*devicepkg.Device, error) {
 // assertProjectExists uses the project service to verify
 // the project row is present. A missing project yields a
 // 404 via the project service's existing error mapping.
-func (s *Service) assertProjectExists(id string) error {
-	if _, err := s.projectSvc.GetProject(id); err != nil {
+// The context is forwarded so the project service's
+// v0.3.0.0 P0 #2 cross-tenant guard can see the caller.
+func (s *Service) assertProjectExists(ctx context.Context, id string) error {
+	if _, err := s.projectSvc.GetProject(ctx, id); err != nil {
 		return err
 	}
 	return nil
@@ -461,4 +467,27 @@ func (s *Service) ctxOrBackground(args []context.Context) context.Context {
 		return args[0]
 	}
 	return context.Background()
+}
+
+// systemCtx returns a context carrying a SuperAdmin caller.
+// Hostproject Link/Unlink/Bulk* are administrative
+// operations that span projects; they run with a synthetic
+// SuperAdmin so the v0.3.0.0 P0 #2 cross-tenant guard in
+// projectSvc always passes. Production callers can supply
+// their own ctx (with a real caller) via the variadic arg
+// to override the synthetic caller.
+func (s *Service) systemCtx(ctxArg []context.Context) context.Context {
+	if len(ctxArg) > 0 && ctxArg[0] != nil {
+		if _, ok := caller.FromContext(ctxArg[0]); ok {
+			return ctxArg[0]
+		}
+		admin := &caller.Caller{User: &contracts.User{
+			ID: "system", Username: "system", Role: contracts.RoleSuperAdmin,
+		}}
+		return caller.WithContext(ctxArg[0], admin)
+	}
+	admin := &caller.Caller{User: &contracts.User{
+		ID: "system", Username: "system", Role: contracts.RoleSuperAdmin,
+	}}
+	return caller.WithContext(context.Background(), admin)
 }
