@@ -1,0 +1,7 @@
+enabled: false
+serviceMonitor:
+  enabled: false
+  interval: 30s
+podMonitor:
+  enabled: false
+  interval: 30s
