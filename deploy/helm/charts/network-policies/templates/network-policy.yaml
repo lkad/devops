@@ -1,0 +1,39 @@
+{{ if .Values.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "network-policies.fullname" . }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "network-policies.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow ingress from ingress-nginx
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.ingressNamespace | default "ingress-nginx" }}
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # Allow DNS to kube-system
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+    {{- if .Values.database.enabled }}
+    # Allow PostgreSQL (separate namespace)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.database.namespace | default "postgres" }}
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+{{ end }}
