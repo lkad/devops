@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1.0] - 2026-06-14
+
+scoped-Auditor RBAC matrix wiring (v0.2.0.0 P0 follow-up 'Scoped Auditor
+for /audit' — branch feat/b1-scoped-auditor landed in 4d6bebe6, after
+sitting unmerged through 5 sessions).
+
+### Added
+
+- **RoleScopedAuditor** (`pkg/contracts/user.go`) — new role
+  `"ScopedAuditor"`, ranked between Auditor and Developer.
+- **PermissionViewAuditLogProject** (`internal/auth/rbac/matrix.go`) —
+  `"audit.view.project"` permission key, the matrix primitive the
+  per-tenant filter (`feat/scoped-auditor` merge 7717372e) needs to be
+  granted to a role.
+- **RolePermissions row** for ScopedAuditor: every `view.*` + `ViewAuditLog`
+  + `ViewAuditLogProject`. Read-only across the whole project fleet, no
+  write perms.
+- **4 matrix_test.go cases** pinning the matrix: Scoped* has Scoped* /
+  Scoped* lacks write perms / Auditor lacks Scoped* / covers all view.*
+  keys.
+
+### Notes
+
+- 31 packages Go test 绿,RBAC 单测 0.005s。
+- 全 47 个 feat/* / test/* / refactor/* / chore/* 分支现都已 merge 或已 obsolete (1 unmerged branch = b1,本 commit 关掉)。
+- 主 main 现领先 origin/main 150 commits。
+
+---
+
 ## [0.5.0.0] - 2026-06-13
 
 C 子项目 — Helm chart 完整化 落地。5 个 agents 并行 + 主 session 收尾,~3 小时完成。
