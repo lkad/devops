@@ -1,1 +1,1 @@
-../../scripts/backup-postgres.sh
+../../../scripts/backup-postgres.sh
