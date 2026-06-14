@@ -1,9 +1,16 @@
-# deploy/containerlab/topology.yml — minimal containerlab topology.
+# deploy/containerlab/topology.yml — 8-node containerlab topology.
 #
-# The full spec calls for 8 nodes (4 per DC). This minimal file implements
-# the spec's Tier 3 contract — 2 simulated physical hosts using alpine + sshd
-# — for end-to-end probe testing. See docs/TEST-ENVIRONMENT.md §2.1 for the
-# full 8-node variant; expand by adding dc1-core-switch etc.
+# Implements docs/TEST-ENVIRONMENT.md §2.1 in full: 2 DC × 4 nodes
+# (1 core switch + 3 physical hosts per DC). The core switches use
+# network-multitool (alpine + ping/curl/iperf) for L3 health checks;
+# the 6 physical hosts use linuxserver/openssh-server so the SSHProber
+# in internal/physicalhost/prober has a real SSH daemon to talk to.
+#
+# PUBLIC_KEY is the prober's public key — generated via
+#   ssh-keygen -t ed25519 -f deploy/secrets/prober/id_ed25519
+# and NOT committed (only id_ed25519.pub is referenced here for
+# documentation; the actual PUBLIC_KEY in containerlab is set from
+# the .pub file at deploy time, see scripts/dev-env-up.sh).
 name: devops-toolkit-clab
 prefix: clab
 mgmt:
@@ -15,23 +22,94 @@ topology:
     linux:
       cmd: /bin/bash
   nodes:
-    dc1-physical-01:
+    # ---- DC1 ----
+    dc1-core-switch:
+      kind: linux
+      image: ghcr.io/network-multitool/alpine-multitool:latest
+      labels:
+        role: core_switch
+        dc: dc1
+        env: test
+    dc1-web-21:
       kind: linux
       image: linuxserver/openssh-server:latest
       labels:
         role: physical_host
         dc: dc1
         env: test
+        app: web
       env:
-        PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII9laPZPJQ7O6rWffAKgeGMGQMhYQzC6YbBa1e8Z/ZKL vagrant@test6"
-    dc2-physical-01:
+        PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+    dc1-db-22:
+      kind: linux
+      image: linuxserver/openssh-server:latest
+      labels:
+        role: physical_host
+        dc: dc1
+        env: test
+        app: db
+      env:
+        PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+    dc1-app-23:
+      kind: linux
+      image: linuxserver/openssh-server:latest
+      labels:
+        role: physical_host
+        dc: dc1
+        env: test
+        app: app
+      env:
+        PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+
+    # ---- DC2 ----
+    dc2-core-switch:
+      kind: linux
+      image: ghcr.io/network-multitool/alpine-multitool:latest
+      labels:
+        role: core_switch
+        dc: dc2
+        env: test
+    dc2-web-41:
       kind: linux
       image: linuxserver/openssh-server:latest
       labels:
         role: physical_host
         dc: dc2
         env: test
+        app: web
       env:
-        PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII9laPZPJQ7O6rWffAKgeGMGQMhYQzC6YbBa1e8Z/ZKL vagrant@test6"
+        PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+    dc2-db-42:
+      kind: linux
+      image: linuxserver/openssh-server:latest
+      labels:
+        role: physical_host
+        dc: dc2
+        env: test
+        app: db
+      env:
+        PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+    dc2-app-43:
+      kind: linux
+      image: linuxserver/openssh-server:latest
+      labels:
+        role: physical_host
+        dc: dc2
+        env: test
+        app: app
+      env:
+        PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+
   links:
-    - endpoints: ["dc1-physical-01:eth1", "dc2-physical-01:eth1"]
+    # DC1: core <-> each host
+    - endpoints: ["dc1-core-switch:eth1", "dc1-web-21:eth1"]
+    - endpoints: ["dc1-core-switch:eth2", "dc1-db-22:eth1"]
+    - endpoints: ["dc1-core-switch:eth3", "dc1-app-23:eth1"]
+    # DC2: core <-> each host
+    - endpoints: ["dc2-core-switch:eth1", "dc2-web-41:eth1"]
+    - endpoints: ["dc2-core-switch:eth2", "dc2-db-42:eth1"]
+    - endpoints: ["dc2-core-switch:eth3", "dc2-app-43:eth1"]
+    # Inter-DC: core-to-core (so probes can target either DC's hosts from
+    # either side; containerlab places the link endpoints on the host's
+    # data plane, not the mgmt plane — mgmt is for the prober to reach sshd)
+    - endpoints: ["dc1-core-switch:eth4", "dc2-core-switch:eth4"]

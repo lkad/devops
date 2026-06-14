@@ -49,18 +49,37 @@ services:
       dockerfile: deploy/Dockerfile
     image: devops-toolkit:local
     environment:
-      APP__ENV: production
+      # APP__ENV=dev (not production) so the dev stack can use
+      # ldap.dev_bypass + the in-memory JWT secret fallback without
+      # tripping the prod refusal in internal/config/config.go:213-228.
+      # For production deploys, override this in deploy/.env.prod.
+      APP__ENV: dev
       APP__PORT: 3000
       DATABASE__DRIVER: postgres
-      # DATABASE__URL, LDAP__*, APP__JWT_SECRET, INFLUX_*, etc.
-      # are loaded from .env.prod (see env_file below). The
-      # defaults below match dev/CI; .env.prod overrides them.
+      # DATABASE__URL, APP__JWT_SECRET, etc. are loaded from
+      # .env.prod (see env_file below). The defaults below match
+      # dev/CI; .env.prod overrides them.
       LOGS__BACKEND: loki
       LOGS__LOKI__URL: http://loki:3100
       REDIS__HOST: redis
+      # dev_bypass lets scripts/seed-data.sh + scripts/dev-env-up.sh
+      # authenticate with just `X-User: alice` (see
+      # internal/auth/middleware.go:137-141). No JWT needed.
+      LDAP__DEV_BYPASS: "true"
+      # SSH prober. Mounted from deploy/secrets/prober/ below; the
+      # matching public key is injected into the containerlab
+      # topology's PUBLIC_KEY env so the linuxserver/openssh-server
+      # container accepts our key. See scripts/dev-env-up.sh.
+      PROBER_SSH_KEY: /etc/devops-toolkit/prober/id_ed25519
+      PROBER_SSH_TIMEOUT: 5s
     env_file:
       - path: ./.env.prod
         required: false
+    volumes:
+      # Read-only mount of the prober's ed25519 private key.
+      # Generated locally with ssh-keygen — see
+      # deploy/secrets/prober/README.md (private key is gitignored).
+      - ../deploy/secrets/prober:/etc/devops-toolkit/prober:ro
     ports: ["3000:3000"]
     depends_on:
       - postgres

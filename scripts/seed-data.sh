@@ -19,9 +19,14 @@ post_json() {
 		log_warn "curl not installed; cannot POST $path"
 		return 0
 	fi
+	# The dev stack runs with ldap.dev_bypass=true. The auth middleware
+	# short-circuits to a fake user when the X-User header is set (see
+	# internal/auth/middleware.go:137-141). Without this header every
+	# /api/v1 POST returns 401 even when the server is up.
 	local code
 	code=$(curl -s -o /dev/null -w "%{http_code}" \
 		-X POST -H "Content-Type: application/json" \
+		-H "X-User: ${API_USER:-alice}" \
 		-d "$body" "$API_BASE$path" || echo 000)
 	if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
 		log_ok "POST $path -> $code"

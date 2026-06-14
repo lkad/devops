@@ -76,3 +76,10 @@ vendor/
 deploy/containerlab/clab-devops-toolkit-clab/
 devops-toolkit
 .gstack/
+
+# Prober SSH private key. Generate locally with:
+#   ssh-keygen -t ed25519 -f deploy/secrets/prober/id_ed25519 -N ""
+# The .pub file is intentionally NOT ignored — it can be referenced
+# from deploy/containerlab/topology.yml's PUBLIC_KEY for documentation
+# and for re-deploying the same key on a different host.
+deploy/secrets/prober/id_ed25519
