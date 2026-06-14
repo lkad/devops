@@ -1,0 +1,54 @@
+# Host-side dev config — runs the locally-built /tmp/devops-toolkit
+# binary on the host (not in a container), pointing at the services
+# that docker-compose exposes on localhost.
+#
+# The compose stack is on the docker network `devops-toolkit-net` and
+# publishes:
+#   - postgres     :5432
+#   - loki         :3100
+#   - prometheus   :9090
+#   - grafana      :3001 (host) -> 3000 (container)
+#   - alertmanager :9093
+#   - redis        :6379
+#
+# LDAP is OMITTED — dev_bypass is true and the Fake LDAP client
+# satisfies the auth middleware.
+#
+# InfluxDB sink is DISABLED — INFLUX_URL is unset so the backend
+# skips writing per-host CPU/mem/disk. The new dev/ops Grafana
+# dashboards don't query InfluxDB so the effect is still visible.
+app:
+  name: devops-toolkit
+  env: dev
+  host: 0.0.0.0
+  port: 3000
+  log_level: info
+
+database:
+  driver: postgres
+  host: localhost
+  port: 5432
+  user: devops
+  password: devops
+  dbname: devops
+  sslmode: disable
+  max_open_conns: 25
+  max_idle_conns: 5
+  conn_max_lifetime: 300
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+
+logs:
+  backend: loki
+  loki:
+    url: http://localhost:3100
+
+ldap:
+  dev_bypass: true
+  url: ""
+  base_dn: ""
+  bind_user: ""
+  bind_password: ""

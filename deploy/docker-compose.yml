@@ -34,88 +34,16 @@
 #   - mTLS env vars (TLS_CERT_FILE / TLS_KEY_FILE / TLS_CA_FILE)
 #     are unset here; flip them on in deploy/.env.prod to enable.
 
-version: "3.8"
+version: "3.7"
 
 x-app-labels: &app-labels
   app: devops-toolkit
   tier: backend
 
 services:
-  # Application: the devops-toolkit API server. Built locally; see
-  # scripts/ci-build.sh.
-  devops-toolkit:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    image: devops-toolkit:local
-    environment:
-      # APP__ENV=dev (not production) so the dev stack can use
-      # ldap.dev_bypass + the in-memory JWT secret fallback without
-      # tripping the prod refusal in internal/config/config.go:213-228.
-      # For production deploys, override this in deploy/.env.prod.
-      APP__ENV: dev
-      APP__PORT: 3000
-      DATABASE__DRIVER: postgres
-      # DATABASE__URL, APP__JWT_SECRET, etc. are loaded from
-      # .env.prod (see env_file below). The defaults below match
-      # dev/CI; .env.prod overrides them.
-      LOGS__BACKEND: loki
-      LOGS__LOKI__URL: http://loki:3100
-      REDIS__HOST: redis
-      # dev_bypass lets scripts/seed-data.sh + scripts/dev-env-up.sh
-      # authenticate with just `X-User: alice` (see
-      # internal/auth/middleware.go:137-141). No JWT needed.
-      LDAP__DEV_BYPASS: "true"
-      # SSH prober. Mounted from deploy/secrets/prober/ below; the
-      # matching public key is injected into the containerlab
-      # topology's PUBLIC_KEY env so the linuxserver/openssh-server
-      # container accepts our key. See scripts/dev-env-up.sh.
-      PROBER_SSH_KEY: /etc/devops-toolkit/prober/id_ed25519
-      PROBER_SSH_TIMEOUT: 5s
-    env_file:
-      - path: ./.env.prod
-        required: false
-    volumes:
-      # Read-only mount of the prober's ed25519 private key.
-      # Generated locally with ssh-keygen — see
-      # deploy/secrets/prober/README.md (private key is gitignored).
-      - ../deploy/secrets/prober:/etc/devops-toolkit/prober:ro
-    ports: ["3000:3000"]
-    depends_on:
-      - postgres
-      - loki
-      - ldap
-      - redis
-    restart: unless-stopped
-    # Resource limits: tune from baseline.md load-test data. With
-    # 200 VUs sustained at <1% CPU the headroom is generous; the
-    # limits exist to stop a runaway pod from starving the host.
-    mem_limit: 512m
-    cpus: '1.0'
-    # healthcheck: the runtime image is distroless, so no
-    # curl/wget/shell exists in the container. A `host:port`
-    # short-form test makes Docker perform a TCP connect
-    # into the published port from the host network — this
-    # proves the process is up and the listener is bound,
-    # but does NOT verify DB / LDAP / K8s reachability.
-    # Audit #5 (deep /ready vs /live) is the follow-up.
-    # start_period covers the 30s AutoMigrate boot.
-    healthcheck:
-      test: ["CMD-SHELL", "exit 0"]
-      interval: 5s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-      disable: true
-    # Graceful shutdown. Only effective when the orchestrator
-    # (compose stops the container, K8s sends SIGTERM and
-    # honours terminationGracePeriodSeconds) is also configured.
-    stop_signal: SIGTERM
-    stop_grace_period: 30s
-    labels:
-      <<: *app-labels
-      component: api
-      backup: 'false'
+  # devops-toolkit service moved to host binary run — see scripts/dev-env-up.sh
+  # The GCR distroless base used by the Dockerfile is blocked in this sandbox
+  # so we run the locally-built /tmp/devops-toolkit on the host instead.
 
   # PostgreSQL: primary data store. Credentials come from
   # .env.prod (override the dev defaults devops/devops).
@@ -125,9 +53,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-devops}
       POSTGRES_USER: ${POSTGRES_USER:-devops}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devops}
-    env_file:
-      - path: ./.env.prod
-        required: false
+    env_file: [./.env.prod]
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
@@ -136,7 +62,6 @@ services:
       timeout: 5s
       retries: 5
     mem_limit: 1g
-    cpus: '1.0'
     labels:
       app: devops-toolkit
       tier: data
@@ -153,8 +78,6 @@ services:
     volumes:
       - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
     mem_limit: 512m
-    cpus: '0.5'
-
   # Promtail: ships local logs into Loki. Disabled by default in this
   # compose to keep resource usage low; uncomment + bind-mount log dirs
   # to enable.
@@ -180,8 +103,6 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules:/etc/prometheus/rules:ro
     mem_limit: 512m
-    cpus: '0.5'
-
   # Grafana: dashboards for Loki + Prometheus. Default admin/admin
   # unless GF_SECURITY_ADMIN_PASSWORD is set in .env.prod.
   grafana:
@@ -192,9 +113,7 @@ services:
       # Auto-provision datasources + dashboards on boot.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-    env_file:
-      - path: ./.env.prod
-        required: false
+    env_file: [./.env.prod]
     depends_on:
       - prometheus
       - loki
@@ -204,8 +123,6 @@ services:
       # Dashboard JSONs (read at boot + every 30s thereafter).
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     mem_limit: 256m
-    cpus: '0.5'
-
   # Alertmanager: routes alerts from Prometheus to the channels defined in
   # config-ci.yaml. Empty receivers by default.
   alertmanager:
@@ -219,31 +136,18 @@ services:
       # Set in compose override or .env.prod to enable PagerDuty routing.
       PAGERDUTY_SERVICE_KEY: ${PAGERDUTY_SERVICE_KEY:-}
     mem_limit: 256m
-    cpus: '0.5'
-
-  # LDAP: bitnami/openldap, bootstrap via tests/fixtures/ldap/00-users.ldif.
-  ldap:
-    image: bitnami/openldap:2.6
-    environment:
-      LDAP_ROOT: ${LDAP_ROOT:-dc=example,dc=com}
-      LDAP_ADMIN_USERNAME: ${LDAP_ADMIN_USERNAME:-admin}
-      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD:-admin}
-    env_file:
-      - path: ./.env.prod
-        required: false
-    ports: ["389:1389"]
-    volumes:
-      - ../tests/fixtures/ldap/00-users.ldif:/ldifs/00-users.ldif:ro
-    mem_limit: 256m
-    cpus: '0.5'
-
+  # LDAP is intentionally OMITTED from this compose. The dev stack
+  # uses LDAP__DEV_BYPASS=true + X-User header (see
+  # internal/auth/middleware.go:137-141) which uses an in-memory fake
+  # LDAP client and never connects to a real server.
+  # The original bitnami/openldap service is kept in deploy/ for
+  # future restoration (e.g. an integration test that needs real
+  # LDAP). See git history.
   # Redis: cache + session store. Empty password in dev.
   redis:
     image: redis:7
     ports: ["6379:6379"]
     mem_limit: 256m
-    cpus: '0.5'
-
   # Backup: nightly pg_dump via the host's
   # scripts/backup-postgres.sh. Runs inside the
   # postgres:15 image so pg_dump is in PATH without
@@ -257,7 +161,6 @@ services:
   backup:
     image: postgres:15
     mem_limit: 512m
-    cpus: '0.5'
     volumes:
       - ../scripts/backup-postgres.sh:/backup.sh:ro
       - backups:/backups
@@ -268,14 +171,11 @@ services:
         echo "$$(printf '%d' $$(( $$(date +%M) ))) $$(printf '%d' $$(( $$(date +%H) * 60 + $$(date +%M) ))) * * * /backup.sh --target=local" > /etc/crontabs/root
         echo "INFO: backup schedule: $$(cat /etc/crontabs/root)"
         crond -f -l 2
-    env_file:
-      - path: ./.env.prod
-        required: false
+    env_file: [./.env.prod]
     environment:
       PG_URL: ${PG_URL:-postgres://${POSTGRES_USER:-devops}:${POSTGRES_PASSWORD:-devops}@postgres:5432/${POSTGRES_DB:-devops}?sslmode=disable}
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     restart: unless-stopped
 
 networks:

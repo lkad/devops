@@ -85,16 +85,20 @@ func NewHandler(svc *Service, cfg HandlerConfig) *Handler {
 // factory in unit tests that don't exercise auth.
 func (h *Handler) Register(r *gin.RouterGroup, perms func(rbac.Permission) gin.HandlerFunc) {
 	viewP := perms(rbac.PermissionViewK8sPodLogs)
-	r.GET("/k8s/clusters/:id/pods/:namespace/:pod/logs/stream", viewP, h.StreamWS)
-	r.GET("/k8s/clusters/:id/pods/:namespace/:pod/logs/sse", viewP, h.StreamSSE)
-	r.GET("/k8s/clusters/:id/pods/:namespace/:pod/logs", viewP, h.GetLogs)
+	// :clusterID (not :id) to match the param name used by the k8s
+	// handler in internal/k8s/handler.go — gin refuses two
+	// different param names at the same path slot
+	// ("':id' conflicts with existing wildcard ':clusterID'").
+	r.GET("/k8s/clusters/:clusterID/pods/:namespace/:pod/logs/stream", viewP, h.StreamWS)
+	r.GET("/k8s/clusters/:clusterID/pods/:namespace/:pod/logs/sse", viewP, h.StreamSSE)
+	r.GET("/k8s/clusters/:clusterID/pods/:namespace/:pod/logs", viewP, h.GetLogs)
 }
 
 // requestFromGin is the URL-shape → StreamRequest adapter
 // shared by all three endpoints.
 func (h *Handler) requestFromGin(c *gin.Context) (StreamRequest, *contracts.APIError) {
 	req := StreamRequest{
-		ClusterID: c.Param("id"),
+		ClusterID: c.Param("clusterID"),
 		Namespace: c.Param("namespace"),
 		Pod:       c.Param("pod"),
 		Container: c.Query("container"),

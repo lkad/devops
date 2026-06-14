@@ -25,7 +25,7 @@ topology:
     # ---- DC1 ----
     dc1-core-switch:
       kind: linux
-      image: ghcr.io/network-multitool/alpine-multitool:latest
+      image: linuxserver/openssh-server:latest
       labels:
         role: core_switch
         dc: dc1
@@ -40,6 +40,8 @@ topology:
         app: web
       env:
         PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+      ports:
+        - "2221:22/tcp"
     dc1-db-22:
       kind: linux
       image: linuxserver/openssh-server:latest
@@ -50,6 +52,8 @@ topology:
         app: db
       env:
         PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+      ports:
+        - "2222:22/tcp"
     dc1-app-23:
       kind: linux
       image: linuxserver/openssh-server:latest
@@ -60,11 +64,15 @@ topology:
         app: app
       env:
         PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+      ports:
+        - "2223:22/tcp"
+      ports:
+        - "2223:22/tcp"
 
     # ---- DC2 ----
     dc2-core-switch:
       kind: linux
-      image: ghcr.io/network-multitool/alpine-multitool:latest
+      image: linuxserver/openssh-server:latest
       labels:
         role: core_switch
         dc: dc2
@@ -79,6 +87,8 @@ topology:
         app: web
       env:
         PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+      ports:
+        - "2241:22/tcp"
     dc2-db-42:
       kind: linux
       image: linuxserver/openssh-server:latest
@@ -89,6 +99,8 @@ topology:
         app: db
       env:
         PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+      ports:
+        - "2242:22/tcp"
     dc2-app-43:
       kind: linux
       image: linuxserver/openssh-server:latest
@@ -99,6 +111,8 @@ topology:
         app: app
       env:
         PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIgtfxreh/nz9lO/kwEQlwPJdcD+sWNKOC/mTNAHNmJc prober@devops-toolkit"
+      ports:
+        - "2243:22/tcp"
 
   links:
     # DC1: core <-> each host

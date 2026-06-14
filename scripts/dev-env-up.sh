@@ -56,9 +56,13 @@ if [ ! -f "$PROBER_KEY" ]; then
 	log_ok "Key generated; private key is gitignored"
 fi
 
-# 3. 起 8-service compose
+# 3. 起 8-service compose (prefer v2 plugin, fall back to v1 standalone)
 log_step "Bringing up docker compose stack under deploy/"
-(cd "$DEPLOY_DIR" && docker compose up -d)
+if docker compose version >/dev/null 2>&1; then
+	(cd "$DEPLOY_DIR" && docker compose up -d)
+else
+	(cd "$DEPLOY_DIR" && docker-compose up -d)
+fi
 log_ok "Compose up; waiting for devops-toolkit to be ready"
 
 # 4. 等 devops-toolkit ready(/api/v1/capabilities 不需 auth)
