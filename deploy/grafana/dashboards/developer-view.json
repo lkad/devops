@@ -1,0 +1,381 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Developer-facing daily health: per-route traffic / errors / latency, my project's pipelines, live error log stream. Drill-downs into the 5 domain dashboards. Set 'my_route' (e.g. /api/v1/pipelines) and 'project' (UUID) template variables to scope the panels to your code.",
+  "editable": true,
+  "graphTooltip": 1,
+  "title": "DevOps Toolkit — Developer View",
+  "tags": ["devops-toolkit", "developer", "overview"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" }
+      },
+      {
+        "name": "pg",
+        "type": "datasource",
+        "query": "postgres",
+        "current": { "text": "Postgres", "value": "Postgres" }
+      },
+      {
+        "name": "loki",
+        "type": "datasource",
+        "query": "loki",
+        "current": { "text": "Loki", "value": "Loki" }
+      },
+      {
+        "name": "project",
+        "type": "textbox",
+        "label": "Project (UUID, blank = All)",
+        "current": { "text": "", "value": "" }
+      },
+      {
+        "name": "my_route",
+        "type": "textbox",
+        "label": "Route prefix (regex, blank = all routes)",
+        "current": { "text": "", "value": "" }
+      },
+      {
+        "name": "error_route_filter",
+        "type": "textbox",
+        "label": "Error route filter (regex, blank = all)",
+        "current": { "text": "", "value": "" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "My code, today",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "My route's traffic (5m)",
+      "description": "Total requests on routes matching ${my_route}. Blank matches all routes.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "sum(increase(devops_toolkit_http_requests_total{route=~\"${my_route:.*}.*\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "set 'my_route' template variable"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "My route's error rate (5m)",
+      "description": "5xx rate on routes matching ${my_route}. clamp_min avoids div-by-zero on quiet routes.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "sum(rate(devops_toolkit_http_requests_total{route=~\"${my_route:.*}.*\",status=~\"5..\"}[5m])) / clamp_min(sum(rate(devops_toolkit_http_requests_total{route=~\"${my_route:.*}.*\"}[5m])), 1)",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "set 'my_route' template variable",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "My route's p95 latency (5m)",
+      "description": "p95 latency histogram across ${my_route}. Buckets are 5ms..5s.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(devops_toolkit_http_request_duration_seconds_bucket{route=~\"${my_route:.*}.*\"}[5m])))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "set 'my_route' template variable",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.25 },
+              { "color": "red", "value": 1.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "My pipeline success rate (24h)",
+      "description": "Pipeline success % in the last 24h, optionally filtered to ${project}.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "postgres", "uid": "${pg}" },
+      "targets": [
+        {
+          "rawSql": "SELECT CASE WHEN COUNT(*)=0 THEN NULL ELSE 100.0*SUM(CASE WHEN r.status='succeeded' THEN 1 ELSE 0 END)/COUNT(*) END AS pct FROM pipeline_runs r JOIN pipelines p ON p.id=r.pipeline_id WHERE r.started_at > now() - interval '24 hours' AND ('${project:raw}' = '' OR p.project_id::text = '${project:raw}')",
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "no runs in 24h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "green", "value": 90 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Traffic, latency, errors by route",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Request rate by route (top 10, req/s)",
+      "description": "Top 10 routes by request rate over the dashboard time range. Use ${error_route_filter} to narrow error views.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (route) (rate(devops_toolkit_http_requests_total{route=~\"${error_route_filter:.*}\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "p95 latency by route (top 10, s)",
+      "description": "Top 10 routes by p95 latency. Buckets 5ms..5s.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le, route) (rate(devops_toolkit_http_request_duration_seconds_bucket{route=~\"${error_route_filter:.*}\"}[5m]))))",
+          "refId": "A",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Error rate by route (top 10)",
+      "description": "5xx/total ratio per route, top 10. Routes that don't appear here are clean.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (route) (rate(devops_toolkit_http_requests_total{status=~\"5..\",route=~\"${error_route_filter:.*}\"}[5m])) / clamp_min(sum by (route) (rate(devops_toolkit_http_requests_total{route=~\"${error_route_filter:.*}\"}[5m])), 1))",
+          "refId": "A",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "My project's pipelines + errors",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "My pipeline runs (by status)",
+      "description": "Pipeline runs over the dashboard time range, bucketed by status. Set ${project} to scope to your project.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "datasource": { "type": "postgres", "uid": "${pg}" },
+      "targets": [
+        {
+          "rawSql": "SELECT $__time(r.started_at) AS time, r.status, COUNT(*) AS n FROM pipeline_runs r JOIN pipelines p ON p.id=r.pipeline_id WHERE $__timeFilter(r.started_at) AND ('${project:raw}' = '' OR p.project_id::text = '${project:raw}') GROUP BY 1,2 ORDER BY 1",
+          "refId": "A",
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "Recent runs (last 25, my project)",
+      "description": "Last 25 pipeline runs, optionally filtered to ${project}.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "datasource": { "type": "postgres", "uid": "${pg}" },
+      "targets": [
+        {
+          "rawSql": "SELECT r.started_at AS \"started\", p.name AS \"pipeline\", r.status, COALESCE(r.triggered_by, '') AS \"triggered by\", r.duration_ms AS \"ms\", COALESCE(left(r.error_message, 80), '') AS \"error\" FROM pipeline_runs r JOIN pipelines p ON p.id=r.pipeline_id WHERE ('${project:raw}' = '' OR p.project_id::text = '${project:raw}') ORDER BY r.started_at DESC LIMIT 25",
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "started", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "status" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "succeeded": { "text": "✓ succeeded", "color": "green" } } },
+                  { "type": "value", "options": { "failed": { "text": "✗ failed", "color": "red" } } },
+                  { "type": "value", "options": { "cancelled": { "text": "⊘ cancelled", "color": "orange" } } },
+                  { "type": "value", "options": { "running": { "text": "↻ running", "color": "blue" } } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "type": "logs",
+      "title": "Live error stream (Loki, last 1h)",
+      "description": "Error-level log lines from the backend. NOTE: the repo has no Promtail/Alloy pipeline, so route/path are NOT Loki labels — this panel can't be filtered by ${my_route}.",
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 31 },
+      "datasource": { "type": "loki", "uid": "${loki}" },
+      "targets": [
+        {
+          "expr": "{service=\"devops-toolkit\", level=\"error\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 14,
+      "type": "text",
+      "title": "Drill-downs",
+      "description": "Jump to the per-domain dashboards for deeper analysis.",
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 31 },
+      "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+      "options": {
+        "mode": "markdown",
+        "content": "### Drill into the data\n\n- [Pipeline execution](/d/devops-toolkit-pipeline-execution) — per-pipeline drill-down, step-level failure\n- [Logs overview](/d/devops-toolkit-logs-overview) — full log volume by service\n- [Service catalog](/d/devops-toolkit-service-catalog) — services you depend on, health rollup\n- [Physical host metrics](/d/devops-toolkit-physical-host-metrics) — host your service runs on\n- [DevOps Toolkit overview](/d/devops-toolkit-devops-toolkit-overview) — system-wide health\n- [Ops view](/d/devops-toolkit-ops-view) — SLO + alert state for on-call"
+      }
+    }
+  ]
+}

@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Grafana role-based entry dashboards** — `developer-view.json` (14 panels, 13.6KB) + `ops-view.json` (20 panels, 19.6KB) at `deploy/grafana/dashboards/`. The 5 existing per-domain dashboards are unchanged; the 2 new ones are role-specific landing pages that link down to them.
+  - **Developer view** (5 template vars: `datasource` / `pg` / `loki` / `my_route` / `project` / `error_route_filter`): top stats for "my route's traffic / error rate / p95 / pipeline success", top-10 timeseries for per-route traffic / latency / error rate, "my project's pipelines" timeseries + recent-runs table, live Loki error stream, drill-down links.
+  - **Ops view** (3 template vars: `datasource` / `pg` / `route_filter`): SLO row (total traffic / error budget / p95 / monitor-loop staleness), "What's broken" tables (top 15 error routes / flapping hosts / monitoring_issue-or-offline hosts from PG), health trends (monitor-loop tick rate / 2xx-4xx-5xx stacked / pipeline failure rate / Go runtime goroutines+heap), alert state (services degraded / stuck-running pipelines / hosts offline % / 5xx count), drill-down links.
+  - All panels use existing 7 Prometheus metrics + Go runtime + Postgres tables; **no new metrics, no new datasources**.
+  - Caveat noted in panel description: Loki label set is just `service` + `level` (no Promtail/Alloy pipeline in repo), so the dev-view error stream can't filter by route.
+- **Grafana README** at `deploy/grafana/README.md` — documents the 4 datasources, 7 dashboards, role-based navigation, and template variables.
+
+### Notes
+
+- No backend / API changes — pure observability asset add.
+- No VERSION bump (0.5.1.0 stands; observability assets don't touch the API contract).
+
+---
+
 ## [0.5.1.0] - 2026-06-14
 
 scoped-Auditor RBAC matrix wiring (v0.2.0.0 P0 follow-up 'Scoped Auditor

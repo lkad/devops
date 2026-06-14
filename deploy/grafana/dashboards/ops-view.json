@@ -1,0 +1,584 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "On-call operations view. SLO at a glance, what's broken right now, alert-state panels. 10-second answer to 'is the platform fine and where do I look?'. Drill-downs to the per-domain dashboards via the bottom row.",
+  "editable": true,
+  "graphTooltip": 1,
+  "title": "DevOps Toolkit — Ops View",
+  "tags": ["devops-toolkit", "ops", "slo", "alerting"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" }
+      },
+      {
+        "name": "pg",
+        "type": "datasource",
+        "query": "postgres",
+        "current": { "text": "Postgres", "value": "Postgres" }
+      },
+      {
+        "name": "route_filter",
+        "type": "textbox",
+        "label": "Route regex (top error routes filter, default = all /api/v1)",
+        "current": { "text": "/api/v1/.*", "value": "/api/v1/.*" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "SLO at a glance",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total traffic (5m)",
+      "description": "Sum of all requests across the platform in the last 5 minutes.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "sum(increase(devops_toolkit_http_requests_total[5m]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Error budget burn (5xx/total, 5m)",
+      "description": "5xx ratio. Thresholds tighter than the dev view because ops cares about SLO breach sooner (1% yellow, 2% red).",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "sum(rate(devops_toolkit_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(devops_toolkit_http_requests_total[5m])), 1)",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.02 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "p95 latency, global (5m)",
+      "description": "Platform-wide p95 latency, all routes aggregated. Yellow at 500ms, red at 1s.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(devops_toolkit_http_request_duration_seconds_bucket[5m])))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red", "value": 1.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Monitor-loop staleness (s)",
+      "description": "Seconds since the last physical-host monitor-loop tick. Default tick is 30s; 3x that = loop is wedged.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "time() - devops_toolkit_monitor_loop_last_tick_timestamp_seconds",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "no ticks yet",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 120 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "What's broken",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Top error routes (5m, top 15)",
+      "description": "Top 15 routes by 5xx rate, filtered by ${route_filter}. Instant snapshot — refresh shows the current state, not a time series.",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "topk(15, sum by (route, method) (rate(devops_toolkit_http_requests_total{route=~\"${route_filter}\",status=~\"5..\"}[5m])))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Value", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "gauge" }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Value" },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "yellow", "value": 0.1 },
+                    { "color": "red", "value": 1.0 }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Flapping hosts (errors in 1h, top 15)",
+      "description": "Hosts with the most monitor-loop check failures in the last hour. Drill into Physical host metrics for context.",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "topk(15, sum by (host_id) (increase(devops_toolkit_monitor_loop_errors_total[1h])))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Value", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Hosts in monitoring_issue / offline",
+      "description": "Hosts stuck in monitoring_issue or offline state. Read from Postgres physical_hosts table.",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "${pg}" },
+      "targets": [
+        {
+          "rawSql": "SELECT ip_address AS ip, state, consecutive_fails AS fails, last_check_at AS last_check FROM physical_hosts WHERE deleted_at IS NULL AND state IN ('monitoring_issue','offline') ORDER BY consecutive_fails DESC NULLS LAST LIMIT 20",
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "fails", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "state" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "offline": { "text": "● offline", "color": "red" } } },
+                  { "type": "value", "options": { "monitoring_issue": { "text": "◐ issue", "color": "orange" } } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Health trends",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Monitor-loop tick rate (1/s)",
+      "description": "rate(monitor_loop_iterations_total[5m]). Yellow if below 0.02 (less than 1 tick per 50s — slow); red at 0 (dead).",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "rate(devops_toolkit_monitor_loop_iterations_total[5m])",
+          "refId": "A",
+          "legendFormat": "tick rate"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.02 },
+              { "color": "green", "value": 0.03 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Traffic by status class (2xx/4xx/5xx, stacked)",
+      "description": "Request rate stacked by status class. 5xx on top — a red layer = active incidents.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "sum(rate(devops_toolkit_http_requests_total{status=~\"2..\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "2xx"
+        },
+        {
+          "expr": "sum(rate(devops_toolkit_http_requests_total{status=~\"4..\"}[5m]))",
+          "refId": "B",
+          "legendFormat": "4xx"
+        },
+        {
+          "expr": "sum(rate(devops_toolkit_http_requests_total{status=~\"5..\"}[5m]))",
+          "refId": "C",
+          "legendFormat": "5xx"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" }, "fillOpacity": 70 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "5xx" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "4xx" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "2xx" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Pipeline failure rate (24h, 1h bins)",
+      "description": "Hourly % of pipeline runs that failed. Yellow at 5%, red at 15%.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 },
+      "datasource": { "type": "postgres", "uid": "${pg}" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('hour', started_at) AS t, 100.0*SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END)/NULLIF(COUNT(*),0) AS fail_pct FROM pipeline_runs WHERE started_at > now() - interval '24 hours' GROUP BY 1 ORDER BY 1",
+          "refId": "A",
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 15 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Go runtime: goroutines + heap in use",
+      "description": "go_goroutines (left axis) and go_memstats_heap_inuse_bytes (right axis, normalized). Sustained goroutine growth = leak.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "go_goroutines",
+          "refId": "A",
+          "legendFormat": "goroutines"
+        },
+        {
+          "expr": "go_memstats_heap_inuse_bytes / 1024 / 1024",
+          "refId": "B",
+          "legendFormat": "heap MB"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "goroutines" },
+            "properties": [{ "id": "unit", "value": "short" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "heap MB" },
+            "properties": [{ "id": "unit", "value": "decmbytes" }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "type": "row",
+      "title": "Alert state + drill-downs",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 },
+      "panels": []
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Services degraded",
+      "description": "Count of services with health_status == 2 (degraded). 0 = all healthy; >=3 = multiple problems.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 40 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "count(devops_toolkit_service_health_status == 2)",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "no health rollups yet",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Pipeline runs stuck running (>15m)",
+      "description": "Pipeline runs that have been in 'running' state for more than 15 minutes — likely wedged.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 40 },
+      "datasource": { "type": "postgres", "uid": "${pg}" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS n FROM pipeline_runs WHERE status='running' AND started_at < now() - interval '15 minutes'",
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 4 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Hosts offline %",
+      "description": "Percentage of physical_hosts in state='offline'. Threshold: 10% yellow, 25% red.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 40 },
+      "datasource": { "type": "postgres", "uid": "${pg}" },
+      "targets": [
+        {
+          "rawSql": "SELECT CASE WHEN COUNT(*)=0 THEN NULL ELSE 100.0*SUM(CASE WHEN state='offline' THEN 1 ELSE 0 END)/COUNT(*) END AS pct FROM physical_hosts WHERE deleted_at IS NULL",
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "no hosts",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 25 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "5xx in last 5m (count)",
+      "description": "Absolute 5xx count (not ratio). Pairs with Error budget burn above — both must be checked together.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 40 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "sum(increase(devops_toolkit_http_requests_total{status=~\"5..\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 11 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "text",
+      "title": "Drill-downs",
+      "description": "Jump to per-domain dashboards. The Overview and the 5 domain dashboards cover the full surface; Dev view is for engineers working on the platform.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
+      "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+      "options": {
+        "mode": "markdown",
+        "content": "### Drill into the data\n\n**System-wide:**\n- [DevOps Toolkit overview](/d/devops-toolkit-devops-toolkit-overview) — system-level health (5min at a glance)\n- [Developer view](/d/devops-toolkit-developer-view) — for engineers working on the platform\n\n**Per-domain:**\n- [Pipeline execution](/d/devops-toolkit-pipeline-execution) — pipeline success / duration / step-level failure\n- [Logs overview](/d/devops-toolkit-logs-overview) — service-level log volume / error ratio\n- [Service catalog](/d/devops-toolkit-service-catalog) — services, on-call, runbook, health rollup\n- [Physical host metrics](/d/devops-toolkit-physical-host-metrics) — per-host CPU / memory / disk\n\n**Runbook pointers (top 5xx routes / flapping hosts above → go to the per-domain dashboard for the matching entity):**\n- 5xx in a `/api/v1/pipelines/*` route → Pipeline execution dashboard, filter by pipeline\n- Flapping host entry → Physical host metrics dashboard, search by host_id\n- Service degraded → Service catalog dashboard, find the service in the inventory"
+      }
+    }
+  ]
+}
