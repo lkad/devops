@@ -4,3 +4,24 @@ description: DevOps Toolkit platform
 type: application
 version: 0.1.0
 appVersion: "0.2.1.0"
+dependencies:
+  - name: cert-manager-issuer
+    version: "0.1.0"
+    repository: "file://charts/cert-manager-issuer"
+    condition: cert-manager-issuer.enabled
+  - name: external-secrets
+    version: "0.1.0"
+    repository: "file://charts/external-secrets"
+    condition: external-secrets.enabled
+  - name: monitoring
+    version: "0.1.0"
+    repository: "file://charts/monitoring"
+    condition: monitoring.enabled
+  - name: network-policies
+    version: "0.1.0"
+    repository: "file://charts/network-policies"
+    condition: network-policies.enabled
+  - name: sealed-secrets
+    version: "0.1.0"
+    repository: "file://charts/sealed-secrets"
+    condition: sealed-secrets.enabled
