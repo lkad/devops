@@ -6,11 +6,12 @@ package contracts
 type Role string
 
 const (
-	RoleSuperAdmin   Role = "SuperAdmin"
-	RoleOperator     Role = "Operator"
-	RoleDeveloper    Role = "Developer"
-	RoleAuditor      Role = "Auditor"
-	RoleProjectAdmin Role = "ProjectAdmin"
+	RoleSuperAdmin     Role = "SuperAdmin"
+	RoleOperator       Role = "Operator"
+	RoleDeveloper      Role = "Developer"
+	RoleAuditor        Role = "Auditor"
+	RoleProjectAdmin   Role = "ProjectAdmin"
+	RoleScopedAuditor  Role = "ScopedAuditor"
 )
 
 // roleRank assigns each role a privilege rank. Higher number = more privilege.

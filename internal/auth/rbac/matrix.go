@@ -104,6 +104,13 @@ const (
 	PermissionProbePhysicalHost   Permission = "physicalhost.probe"
 	PermissionMaintenancePhysical Permission = "physicalhost.maintenance"
 	PermissionViewAuditLog        Permission = "audit.view"
+	// PermissionViewAuditLogProject covers GET /audit for a
+	// per-tenant scope. The /audit handler routes
+	// "ScopedAuditor"-role callers through ListForCaller's
+	// ProjectIDsIn filter so they only see audit events for
+	// projects they are a member of. Distinct from
+	// PermissionViewAuditLog which gives full read access.
+	PermissionViewAuditLogProject Permission = "audit.view.project"
 
 	// PermissionViewLogs covers GET on the log-aggregation
 	// surface (capabilities, query, streams). The retention /
@@ -281,6 +288,26 @@ var RolePermissions = map[contracts.Role][]Permission{
 		PermissionViewServiceCatalog,
 		PermissionViewPhysicalHosts,
 		PermissionViewAuditLog,
+		PermissionViewLogs,
+		PermissionViewMetrics,
+		PermissionViewAlerts,
+	},
+	// RoleScopedAuditor has the same view-permissions as
+	// RoleAuditor (read-only) PLUS the per-tenant audit-log
+	// permission. Per-tenant routing in audit.Service.ListForCaller
+	// (added in v0.2.0.0 scoped-Auditor follow-up) uses
+	// the membership cache built into caller.Caller.
+	contracts.RoleScopedAuditor: {
+		PermissionViewDevices,
+		PermissionViewProjects,
+		PermissionViewDiscovery,
+		PermissionViewK8sResources,
+		PermissionViewK8sPodLogs,
+		PermissionViewPipelines,
+		PermissionViewServiceCatalog,
+		PermissionViewPhysicalHosts,
+		PermissionViewAuditLog,
+		PermissionViewAuditLogProject,
 		PermissionViewLogs,
 		PermissionViewMetrics,
 		PermissionViewAlerts,
