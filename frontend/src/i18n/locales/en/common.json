@@ -1,106 +1,106 @@
 {
-  "app": {
-    "title": "DevOps Toolkit",
-    "tagline": "foundation"
-  },
-  "nav": {
-    "dashboard": "Dashboard",
-    "projects": "Projects",
-    "services": "Services",
-    "devices": "Devices",
-    "physical-hosts": "Physical Hosts",
-    "k8s-clusters": "K8s Clusters",
-    "discovery": "Discovery",
-    "pipelines": "Pipelines",
-    "logs": "Logs",
-    "metrics": "Metrics",
-    "alerts": "Alerts",
-    "audit": "Audit",
-    "trace": "Trace"
-  },
-  "user": {
-    "logged-in-as": "Logged in as",
-    "logout": "Logout",
-    "login": "Sign in"
-  },
   "actions": {
-    "save": "Save",
-    "cancel": "Cancel",
-    "delete": "Delete",
-    "edit": "Edit",
-    "create": "Create",
-    "submit": "Submit",
-    "refresh": "Refresh",
-    "search": "Search",
-    "filter": "Filter",
-    "clear": "Clear",
-    "confirm": "Confirm",
     "back": "Back",
+    "cancel": "Cancel",
+    "clear": "Clear",
+    "close": "Close",
+    "confirm": "Confirm",
+    "create": "Create",
+    "delete": "Delete",
+    "details": "Details",
+    "edit": "Edit",
+    "filter": "Filter",
     "next": "Next",
     "previous": "Previous",
-    "close": "Close",
+    "refresh": "Refresh",
     "retry": "Retry",
-    "view": "View",
-    "details": "Details"
+    "save": "Save",
+    "search": "Search",
+    "submit": "Submit",
+    "view": "View"
   },
-  "state": {
-    "online": "Online",
-    "offline": "Offline",
-    "monitoring-issue": "Monitoring issue",
-    "maintenance": "Maintenance",
-    "healthy": "Healthy",
-    "degraded": "Degraded",
-    "unknown": "Unknown",
-    "running": "Running",
-    "succeeded": "Succeeded",
-    "failed": "Failed",
-    "pending": "Pending",
-    "cancelled": "Cancelled",
-    "skipped": "Skipped"
+  "app": {
+    "tagline": "foundation",
+    "title": "DevOps Toolkit"
   },
   "errors": {
+    "forbidden": "Permission denied",
     "generic": "Something went wrong",
+    "loading": "Loading failed",
     "network": "Network error",
+    "not-found": "Not found",
+    "server-error": "Server error",
     "timeout": "Request timed out",
     "unauthorized": "Not authorized",
-    "forbidden": "Permission denied",
-    "not-found": "Not found",
-    "validation-failed": "Validation failed",
-    "server-error": "Server error",
-    "loading": "Loading failed"
-  },
-  "table": {
-    "no-data": "No data",
-    "loading": "Loading…",
-    "rows-per-page": "Rows per page",
-    "page": "Page",
-    "of": "of",
-    "selected": "{{count}} selected",
-    "select-all": "Select all"
+    "validation-failed": "Validation failed"
   },
   "form": {
-    "required": "Required",
     "optional": "Optional",
-    "placeholder-search": "Search…"
-  },
-  "time": {
-    "now": "now",
-    "minutes-ago_one": "{{count}} minute ago",
-    "minutes-ago_other": "{{count}} minutes ago",
-    "hours-ago_one": "{{count}} hour ago",
-    "hours-ago_other": "{{count}} hours ago",
-    "days-ago_one": "{{count}} day ago",
-    "days-ago_other": "{{count}} days ago",
-    "never": "never"
+    "placeholder-search": "Search…",
+    "required": "Required"
   },
   "language": {
     "label": "Language",
     "switch-to": "Switch to {{lang}}"
   },
-  "status": {
-    "operational": "Operational",
-    "incident": "Incident",
+  "nav": {
+    "alerts": "Alerts",
+    "audit": "Audit",
+    "dashboard": "Dashboard",
+    "devices": "Devices",
+    "discovery": "Discovery",
+    "k8s-clusters": "K8s Clusters",
+    "logs": "Logs",
+    "metrics": "Metrics",
+    "physical-hosts": "Physical Hosts",
+    "pipelines": "Pipelines",
+    "projects": "Projects",
+    "services": "Services",
+    "trace": "Trace"
+  },
+  "state": {
+    "cancelled": "Cancelled",
     "degraded": "Degraded",
-    "maintenance": "Maintenance"
+    "failed": "Failed",
+    "healthy": "Healthy",
+    "maintenance": "Maintenance",
+    "monitoring-issue": "Monitoring issue",
+    "offline": "Offline",
+    "online": "Online",
+    "pending": "Pending",
+    "running": "Running",
+    "skipped": "Skipped",
+    "succeeded": "Succeeded",
+    "unknown": "Unknown"
+  },
+  "status": {
+    "degraded": "Degraded",
+    "incident": "Incident",
+    "maintenance": "Maintenance",
+    "operational": "Operational"
+  },
+  "table": {
+    "loading": "Loading…",
+    "no-data": "No data",
+    "of": "of",
+    "page": "Page",
+    "rows-per-page": "Rows per page",
+    "select-all": "Select all",
+    "selected": "{{count}} selected"
+  },
+  "time": {
+    "days-ago_one": "{{count}} day ago",
+    "days-ago_other": "{{count}} days ago",
+    "hours-ago_one": "{{count}} hour ago",
+    "hours-ago_other": "{{count}} hours ago",
+    "minutes-ago_one": "{{count}} minute ago",
+    "minutes-ago_other": "{{count}} minutes ago",
+    "never": "never",
+    "now": "now"
+  },
+  "user": {
+    "logged-in-as": "Logged in as",
+    "login": "Sign in",
+    "logout": "Logout"
   }
 }

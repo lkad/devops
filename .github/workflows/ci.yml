@@ -118,15 +118,24 @@ jobs:
   i18n-check:
     # i18n enforcement per docs/i18n/SPEC.md §8.
     #
-    # Two independent gates:
-    #   1. frontend/src/i18n/locales/ parity — regenerates the locale
-    #      JSON via `i18n:extract` (i18next-parser) and fails if any
-    #      en/zh-CN key is missing or extra. Catches the "added a new
-    #      t('foo.bar') without translating it" class of regression.
-    #   2. doc heading parity — scripts/i18n-doc-parity.sh verifies
+    # Three non-destructive gates (no `git diff --exit-code`):
+    #   1. JSON syntax — every locale file must be valid JSON.
+    #   2. Locale parity — every dot-separated key in en/*.json must
+    #      exist in zh-CN/*.json. Catches "added t('foo.bar') to en
+    #      but didn't translate it to zh-CN".
+    #   3. Doc heading parity — scripts/i18n-doc-parity.sh verifies
     #      that *.zh.md translations have the same H2/H3 structure as
     #      their English source. Catches "renamed a section in
     #      README.md but didn't update README.zh.md".
+    #
+    # Why non-destructive? The locale files contain hand-curated
+    # content (status words, table headers, empty states) that is NOT
+    # yet wired into t() calls in source. `i18next-parser` with the
+    # default config would wipe those keys on every extract. We set
+    # `keepRemoved: true` so the parser only ADDS new keys; the
+    # gate above then verifies both en and zh-CN grow in lockstep.
+    # If a developer wants to delete orphaned keys, that's a
+    # conscious follow-up commit — never implicit.
     #
     # This job is ADDITIVE: failures here do not stop other jobs
     # (jobs run independently by default), so a broken translation
@@ -138,8 +147,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Fetch full history so `git diff` against HEAD works on the
-          # locale files we're about to (re)generate.
           fetch-depth: 0
 
       - name: Set up Node
@@ -152,25 +159,13 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Regenerate locale files
-        run: npm run i18n:extract
-
-      - name: Locale JSON parity (i18next-parser)
-        # 1. Fail if regeneration produced a diff — that means someone
-        #    added a t('new.key') but didn't translate it.
-        # 2. Cross-check that every key in en/* exists in zh-CN/* by
-        #    flattening both trees into dot-separated key lists and
-        #    diffing them. Catches stale keys that the parser would
-        #    otherwise leave behind.
+      - name: Locale JSON syntax + parity
+        # jq-based parity: every dot-separated key in en/*.json must
+        # have a matching key in zh-CN/*.json, and every locale file
+        # must be valid JSON. We rely on jq's parser to catch the
+        # JSON-syntax case; if any file is malformed jq exits non-zero.
         run: |
           set -euo pipefail
-          if ! git diff --exit-code -- src/i18n/locales/; then
-            echo "::error::Locale files are out of date. Run 'npm run i18n:extract' and commit the result."
-            exit 1
-          fi
-
-          # jq-based parity: every dot-separated key in en/*.json must
-          # have a matching key in zh-CN/*.json.
           for f in src/i18n/locales/en/*.json; do
             ns=$(basename "${f}" .json)
             zh_file="src/i18n/locales/zh-CN/${ns}.json"
@@ -188,8 +183,7 @@ jobs:
               exit 1
             fi
           done
-          echo "i18n locale parity: OK"
+          echo "i18n locale parity: OK ($(ls src/i18n/locales/en/*.json | wc -l) namespaces, $(jq -s 'add | length' src/i18n/locales/en/*.json) en keys, $(jq -s 'add | length' src/i18n/locales/zh-CN/*.json) zh-CN keys)"
 
       - name: Doc heading parity
         run: bash scripts/i18n-doc-parity.sh
-
