@@ -1,4 +1,93 @@
 {
   "title": "Services",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "Microservice catalog with on-call rotation, runbooks, and health rollups",
+  "actions": {
+    "new": "New service",
+    "refresh": "Refresh",
+    "delete": "Delete",
+    "view-detail": "View detail",
+    "cancel": "Cancel",
+    "save": "Save",
+    "create": "Create",
+    "add-oncall": "Add on-call",
+    "add-runbook": "Add runbook entry"
+  },
+  "list": {
+    "search-placeholder": "Search by name, owner, or tier…",
+    "empty": "No services yet",
+    "empty-hint": "Create your first microservice to start tracking its health, on-call rotation, and runbooks."
+  },
+  "tier": {
+    "label": "Tier",
+    "critical": "Critical",
+    "standard": "Standard",
+    "internal": "Internal"
+  },
+  "health": {
+    "label": "Health",
+    "healthy": "Healthy",
+    "degraded": "Degraded",
+    "unknown": "Unknown"
+  },
+  "derived-from": {
+    "label": "Health source",
+    "k8s_pod_health": "K8s pod health",
+    "last_pipeline_run": "Last pipeline run",
+    "manual": "Manual"
+  },
+  "detail": {
+    "fields": {
+      "id": "ID",
+      "name": "Name",
+      "tier": "Tier",
+      "owner": "Owner",
+      "repository": "Repository URL",
+      "description": "Description"
+    },
+    "sections": {
+      "oncall": "On-call rotation",
+      "runbook": "Runbook"
+    }
+  },
+  "oncall": {
+    "title": "On-call",
+    "add": "Add on-call",
+    "empty": "No on-call entries",
+    "user-label": "User email",
+    "shift-start-label": "Shift start",
+    "shift-end-label": "Shift end",
+    "delete-confirm": "Remove this on-call entry?"
+  },
+  "runbook": {
+    "title": "Runbook",
+    "add": "Add runbook entry",
+    "empty": "No runbook entries",
+    "title-label": "Title",
+    "body-label": "Body"
+  },
+  "create": {
+    "title": "Create service",
+    "name-label": "Name",
+    "name-placeholder": "e.g. order-backend",
+    "tier-label": "Tier",
+    "owner-label": "Owner",
+    "owner-placeholder": "team@example.com",
+    "repository-label": "Repository URL",
+    "repository-placeholder": "https://github.com/your-org/your-repo",
+    "description-label": "Description",
+    "submit": "Create",
+    "submitting": "Creating…",
+    "toast-success": "Service created",
+    "toast-failed": "Failed to create service: {{error}}"
+  },
+  "delete": {
+    "confirm-title": "Delete service?",
+    "confirm-body": "This will remove the service and all of its on-call / runbook entries. This action cannot be undone.",
+    "submit": "Delete",
+    "toast-success": "Service deleted",
+    "toast-failed": "Failed to delete service: {{error}}"
+  },
+  "toast": {
+    "load-failed": "Failed to load services: {{error}}"
+  }
 }

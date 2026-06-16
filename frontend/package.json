@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "i18n:extract": "i18next --config i18next-parser.config.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -29,6 +30,7 @@
     "@types/react": "^18.3.10",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "i18next-parser": "^9.4.0",
     "jsdom": "^29.1.1",
     "typescript": "^5.5.3",
     "vite": "^5.4.8",

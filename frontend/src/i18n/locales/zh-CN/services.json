@@ -1,4 +1,93 @@
 {
   "title": "服务",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "微服务目录,含 on-call 轮值、runbook 与健康汇总",
+  "actions": {
+    "new": "新建服务",
+    "refresh": "刷新",
+    "delete": "删除",
+    "view-detail": "查看详情",
+    "cancel": "取消",
+    "save": "保存",
+    "create": "创建",
+    "add-oncall": "添加 on-call",
+    "add-runbook": "添加 runbook 条目"
+  },
+  "list": {
+    "search-placeholder": "按名称、负责人或 tier 搜索…",
+    "empty": "暂无服务",
+    "empty-hint": "创建第一个微服务,开始跟踪其健康状态、on-call 轮值与 runbook。"
+  },
+  "tier": {
+    "label": "Tier",
+    "critical": "核心",
+    "standard": "标准",
+    "internal": "内部"
+  },
+  "health": {
+    "label": "健康",
+    "healthy": "健康",
+    "degraded": "降级",
+    "unknown": "未知"
+  },
+  "derived-from": {
+    "label": "健康来源",
+    "k8s_pod_health": "K8s pod 健康",
+    "last_pipeline_run": "上次流水线运行",
+    "manual": "人工"
+  },
+  "detail": {
+    "fields": {
+      "id": "ID",
+      "name": "名称",
+      "tier": "Tier",
+      "owner": "负责人",
+      "repository": "仓库地址",
+      "description": "描述"
+    },
+    "sections": {
+      "oncall": "On-call 轮值",
+      "runbook": "Runbook"
+    }
+  },
+  "oncall": {
+    "title": "On-call",
+    "add": "添加 on-call",
+    "empty": "暂无 on-call 条目",
+    "user-label": "用户邮箱",
+    "shift-start-label": "班次开始",
+    "shift-end-label": "班次结束",
+    "delete-confirm": "删除该 on-call 条目?"
+  },
+  "runbook": {
+    "title": "Runbook",
+    "add": "添加 runbook 条目",
+    "empty": "暂无 runbook 条目",
+    "title-label": "标题",
+    "body-label": "正文"
+  },
+  "create": {
+    "title": "新建服务",
+    "name-label": "名称",
+    "name-placeholder": "例如:order-backend",
+    "tier-label": "Tier",
+    "owner-label": "负责人",
+    "owner-placeholder": "team@example.com",
+    "repository-label": "仓库地址",
+    "repository-placeholder": "https://github.com/your-org/your-repo",
+    "description-label": "描述",
+    "submit": "创建",
+    "submitting": "创建中…",
+    "toast-success": "服务已创建",
+    "toast-failed": "创建服务失败:{{error}}"
+  },
+  "delete": {
+    "confirm-title": "删除服务?",
+    "confirm-body": "这将删除该服务及其所有 on-call / runbook 条目。此操作不可撤销。",
+    "submit": "删除",
+    "toast-success": "服务已删除",
+    "toast-failed": "删除服务失败:{{error}}"
+  },
+  "toast": {
+    "load-failed": "加载服务失败:{{error}}"
+  }
 }
