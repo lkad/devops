@@ -1,0 +1,45 @@
+{
+  "title": "物理主机",
+  "subtitle": "SSH 探针物理服务器、监控状态与指标",
+  "table": {
+    "column": {
+      "device-id": "设备 ID",
+      "ip-address": "IP 地址",
+      "state": "状态",
+      "last-check": "最近检查",
+      "consecutive-fails": "失败次数",
+      "actions": "操作"
+    }
+  },
+  "state": {
+    "online": "在线",
+    "offline": "离线",
+    "monitoring-issue": "监控异常",
+    "maintenance": "维护中"
+  },
+  "actions": {
+    "probe": "立即探针",
+    "enter-maintenance": "进入维护",
+    "exit-maintenance": "退出维护",
+    "view-metrics": "查看指标"
+  },
+  "probe": {
+    "in-progress": "探针中…",
+    "success": "探针成功（{{latency}} 毫秒）",
+    "failed": "探针失败：{{error}}"
+  },
+  "maintenance": {
+    "modal-title": "进入维护模式",
+    "reason-placeholder": "原因（例如：固件升级）",
+    "submit": "确认"
+  },
+  "create": {
+    "title": "注册物理主机",
+    "device-id-label": "设备 ID",
+    "device-id-help": "必须引用已存在的设备（先 POST /devices）",
+    "ip-label": "IP 地址",
+    "ssh-user-label": "SSH 用户",
+    "ssh-port-label": "SSH 端口",
+    "submit": "注册"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "title": "仪表盘",
+  "subtitle": "系统全局一览",
+  "stats": {
+    "total-hosts": "主机总数",
+    "online-hosts": "在线",
+    "monitoring-issue": "监控异常",
+    "offline-hosts": "离线",
+    "running-pipelines": "运行中流水线",
+    "failing-pipelines": "失败流水线",
+    "active-alerts": "活动告警",
+    "degraded-services": "降级服务"
+  },
+  "recent": {
+    "title": "最近活动",
+    "empty": "暂无活动",
+    "view-all": "查看全部"
+  },
+  "health": {
+    "title": "服务健康",
+    "operational": "所有服务正常",
+    "issues": "{{count}} 个服务存在异常"
+  }
+}

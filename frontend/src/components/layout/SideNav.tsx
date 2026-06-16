@@ -1,19 +1,21 @@
-// SideNav — left rail with module entries.
+// SideNav — left rail with module entries. Per docs/i18n/SPEC.md §4,
+// labels are read from the i18n common namespace.
+import { useTranslation } from 'react-i18next';
 import { NavLink } from 'react-router-dom';
 
 const items = [
-  { to: '/', label: 'Dashboard', icon: '◫' },
-  { to: '/projects', label: 'Projects', icon: '⌥' },
-  { to: '/services', label: 'Services', icon: '⬢' },
-  { to: '/devices', label: 'Devices', icon: '◇' },
-  { to: '/physical-hosts', label: 'Physical Hosts', icon: '☷' },
-  { to: '/k8s', label: 'K8s Clusters', icon: '⬡' },
-  { to: '/discovery', label: 'Discovery', icon: '◎' },
-  { to: '/pipelines', label: 'Pipelines', icon: '▶' },
-  { to: '/logs', label: 'Logs', icon: '☰' },
-  { to: '/metrics', label: 'Metrics', icon: '◐' },
-  { to: '/alerts', label: 'Alerts', icon: '⚠' },
-  { to: '/audit', label: 'Audit', icon: '✓' },
+  { to: '/', labelKey: 'nav.dashboard', icon: '◫' },
+  { to: '/projects', labelKey: 'nav.projects', icon: '⌥' },
+  { to: '/services', labelKey: 'nav.services', icon: '⬢' },
+  { to: '/devices', labelKey: 'nav.devices', icon: '◇' },
+  { to: '/physical-hosts', labelKey: 'nav.physical-hosts', icon: '☷' },
+  { to: '/k8s', labelKey: 'nav.k8s-clusters', icon: '⬡' },
+  { to: '/discovery', labelKey: 'nav.discovery', icon: '◎' },
+  { to: '/pipelines', labelKey: 'nav.pipelines', icon: '▶' },
+  { to: '/logs', labelKey: 'nav.logs', icon: '☰' },
+  { to: '/metrics', labelKey: 'nav.metrics', icon: '◐' },
+  { to: '/alerts', labelKey: 'nav.alerts', icon: '⚠' },
+  { to: '/audit', labelKey: 'nav.audit', icon: '✓' },
 ];
 
 const linkStyle = (active: boolean): React.CSSProperties => ({
@@ -31,6 +33,7 @@ const linkStyle = (active: boolean): React.CSSProperties => ({
 });
 
 export function SideNav() {
+  const { t } = useTranslation('common');
   return (
     <nav
       style={{
@@ -50,7 +53,7 @@ export function SideNav() {
           style={({ isActive }) => linkStyle(isActive)}
         >
           <span style={{ width: 16, textAlign: 'center', fontSize: 14, opacity: 0.7 }}>{it.icon}</span>
-          <span>{it.label}</span>
+          <span>{t(it.labelKey)}</span>
         </NavLink>
       ))}
     </nav>

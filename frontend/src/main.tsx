@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import './i18n';
 import './styles/global.css';
 import { AppShell } from './components/layout/AppShell';
 import { ToastProvider } from './components/common/Toast';

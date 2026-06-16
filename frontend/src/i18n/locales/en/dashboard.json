@@ -1,0 +1,24 @@
+{
+  "title": "Dashboard",
+  "subtitle": "System overview at a glance",
+  "stats": {
+    "total-hosts": "Total hosts",
+    "online-hosts": "Online",
+    "monitoring-issue": "Monitoring issue",
+    "offline-hosts": "Offline",
+    "running-pipelines": "Running pipelines",
+    "failing-pipelines": "Failing pipelines",
+    "active-alerts": "Active alerts",
+    "degraded-services": "Degraded services"
+  },
+  "recent": {
+    "title": "Recent activity",
+    "empty": "No recent activity",
+    "view-all": "View all"
+  },
+  "health": {
+    "title": "Service health",
+    "operational": "All services operational",
+    "issues": "{{count}} service with issues"
+  }
+}

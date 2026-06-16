@@ -1,0 +1,45 @@
+{
+  "title": "Physical Hosts",
+  "subtitle": "SSH-probed physical servers, monitor state and metrics",
+  "table": {
+    "column": {
+      "device-id": "Device ID",
+      "ip-address": "IP Address",
+      "state": "State",
+      "last-check": "Last check",
+      "consecutive-fails": "Failures",
+      "actions": "Actions"
+    }
+  },
+  "state": {
+    "online": "Online",
+    "offline": "Offline",
+    "monitoring-issue": "Monitoring issue",
+    "maintenance": "Maintenance"
+  },
+  "actions": {
+    "probe": "Probe now",
+    "enter-maintenance": "Enter maintenance",
+    "exit-maintenance": "Exit maintenance",
+    "view-metrics": "View metrics"
+  },
+  "probe": {
+    "in-progress": "Probing…",
+    "success": "Probe successful ({{latency}}ms)",
+    "failed": "Probe failed: {{error}}"
+  },
+  "maintenance": {
+    "modal-title": "Enter maintenance mode",
+    "reason-placeholder": "Reason (e.g. firmware upgrade)",
+    "submit": "Confirm"
+  },
+  "create": {
+    "title": "Register physical host",
+    "device-id-label": "Device ID",
+    "device-id-help": "Must reference an existing device (POST /devices first)",
+    "ip-label": "IP address",
+    "ssh-user-label": "SSH user",
+    "ssh-port-label": "SSH port",
+    "submit": "Register"
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "app": {
+    "title": "DevOps Toolkit",
+    "tagline": "基础平台"
+  },
+  "nav": {
+    "dashboard": "仪表盘",
+    "projects": "项目",
+    "services": "服务",
+    "devices": "设备",
+    "physical-hosts": "物理主机",
+    "k8s-clusters": "K8s 集群",
+    "discovery": "发现",
+    "pipelines": "流水线",
+    "logs": "日志",
+    "metrics": "指标",
+    "alerts": "告警",
+    "audit": "审计",
+    "trace": "追踪"
+  },
+  "user": {
+    "logged-in-as": "已登录为",
+    "logout": "退出",
+    "login": "登录"
+  },
+  "actions": {
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "create": "创建",
+    "submit": "提交",
+    "refresh": "刷新",
+    "search": "搜索",
+    "filter": "筛选",
+    "clear": "清空",
+    "confirm": "确认",
+    "back": "返回",
+    "next": "下一步",
+    "previous": "上一步",
+    "close": "关闭",
+    "retry": "重试",
+    "view": "查看",
+    "details": "详情"
+  },
+  "state": {
+    "online": "在线",
+    "offline": "离线",
+    "monitoring-issue": "监控异常",
+    "maintenance": "维护中",
+    "healthy": "健康",
+    "degraded": "降级",
+    "unknown": "未知",
+    "running": "运行中",
+    "succeeded": "成功",
+    "failed": "失败",
+    "pending": "等待中",
+    "cancelled": "已取消",
+    "skipped": "已跳过"
+  },
+  "errors": {
+    "generic": "出错了",
+    "network": "网络错误",
+    "timeout": "请求超时",
+    "unauthorized": "未授权",
+    "forbidden": "权限不足",
+    "not-found": "未找到",
+    "validation-failed": "校验失败",
+    "server-error": "服务器错误",
+    "loading": "加载失败"
+  },
+  "table": {
+    "no-data": "暂无数据",
+    "loading": "加载中…",
+    "rows-per-page": "每页行数",
+    "page": "第",
+    "of": "页，共",
+    "selected": "已选 {{count}} 项",
+    "select-all": "全选"
+  },
+  "form": {
+    "required": "必填",
+    "optional": "可选",
+    "placeholder-search": "搜索…"
+  },
+  "time": {
+    "now": "刚刚",
+    "minutes-ago_one": "{{count}} 分钟前",
+    "minutes-ago_other": "{{count}} 分钟前",
+    "hours-ago_one": "{{count}} 小时前",
+    "hours-ago_other": "{{count}} 小时前",
+    "days-ago_one": "{{count}} 天前",
+    "days-ago_other": "{{count}} 天前",
+    "never": "从不"
+  },
+  "language": {
+    "label": "语言",
+    "switch-to": "切换到 {{lang}}"
+  },
+  "status": {
+    "operational": "正常运行",
+    "incident": "故障",
+    "degraded": "降级",
+    "maintenance": "维护中"
+  }
+}

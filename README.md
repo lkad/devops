@@ -2,7 +2,7 @@
 
 # DevOps Toolkit
 
-**The internal platform for managing 8+ nodes across dual data centers — CI/CD pipelines, multi-cluster Kubernetes, physical hosts, service catalog with on-call & runbooks, and a Prometheus-grade observability stack.**
+**The internal platform for managing 100+ nodes across multi-region data centers — CI/CD pipelines, multi-cluster Kubernetes, physical hosts, service catalog with on-call & runbooks, and a Prometheus-grade observability stack.**
 
 [![Go 1.25+](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](#)
 [![React 18](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](#)
@@ -13,6 +13,8 @@
 [Quick Start](#quick-start) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [Contributing](#contributing)
 
 </div>
+
+> 📖 **Languages:** [English](README.md) · [简体中文](README.zh.md) — see the [i18n spec](docs/i18n/SPEC.md) for how the project handles translations of both docs and the UI.
 
 ---
 
@@ -219,6 +221,8 @@ postgres   redis     prometheus   loki     influxdb
 ```
 
 Detailed architecture: [ARCHITECTURE.md](ARCHITECTURE.md) · Specs: [openspec/specs/](openspec/specs/) · Per-module design: [docs/BACKEND.md](docs/BACKEND.md), [docs/FRONTEND.md](docs/FRONTEND.md)
+
+The dev environment ships an 8-node containerlab topology (2 DC × 4 nodes: 1 core switch + 3 sshd hosts each) for local validation — production deployments scale to **100+ nodes across multi-region data centers** through the same REST + WebSocket API.
 
 ---
 

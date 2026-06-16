@@ -18,10 +18,11 @@
 7. [docs/BACKEND.md](docs/BACKEND.md) — 后端代码级规范
 8. [docs/FRONTEND.md](docs/FRONTEND.md) — 前端实现规格
 9. [DESIGN.md](DESIGN.md) — 前端设计系统 (Active)
-10. [DEPLOY.md](DEPLOY.md) — 部署指南
-11. [docs/TEST-ENVIRONMENT.md](docs/TEST-ENVIRONMENT.md) — 测试环境准备清单 (v1.0)
-12. [TEST_CASES.md](TEST_CASES.md) — 测试用例总览
-13. [docs/CONFLICTS.md](docs/CONFLICTS.md) — 文档间冲突历史溯源 (选择性参考)
+10. **[docs/i18n/SPEC.md](docs/i18n/SPEC.md)** — 国际化规范(双轨:文档 + UI;en / zh-CN)
+11. [DEPLOY.md](DEPLOY.md) — 部署指南
+12. [docs/TEST-ENVIRONMENT.md](docs/TEST-ENVIRONMENT.md) — 测试环境准备清单 (v1.0)
+13. [TEST_CASES.md](TEST_CASES.md) — 测试用例总览
+14. [docs/CONFLICTS.md](docs/CONFLICTS.md) — 文档间冲突历史溯源 (选择性参考)
 
 ---
 
