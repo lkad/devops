@@ -1,4 +1,46 @@
 {
   "title": "发现",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "通过 SNMP / SSH 网络发现运行,把设备纳入清单",
+  "actions": {
+    "new": "新建发现运行",
+    "refresh": "刷新",
+    "promote": "纳入清单"
+  },
+  "table": {
+    "id": "运行",
+    "target": "目标 (CIDR)",
+    "discovered": "发现数",
+    "started": "开始",
+    "status": "状态"
+  },
+  "status": {
+    "pending": "等待",
+    "running": "运行中",
+    "succeeded": "成功",
+    "failed": "失败"
+  },
+  "empty": "暂无发现运行",
+  "new-run": {
+    "title": "新建发现运行",
+    "cidr-label": "目标 CIDR",
+    "cidr-placeholder": "10.0.0.0/24",
+    "submit": "开始",
+    "submitting": "启动中…",
+    "toast-success": "发现运行已启动",
+    "toast-failed": "启动发现失败:{{error}}"
+  },
+  "promote": {
+    "title-prefix": "纳入设备",
+    "summary_one": "本运行发现 {{count}} 台设备",
+    "summary_other": "本运行发现 {{count}} 台设备",
+    "port-count_one": "{{count}} 个开放端口",
+    "port-count_other": "{{count}} 个开放端口",
+    "submit": "纳入",
+    "toast-success_one": "已纳入 {{count}} 台设备",
+    "toast-success_other": "已纳入 {{count}} 台设备",
+    "toast-failed": "纳入失败:{{error}}"
+  },
+  "toast": {
+    "load-failed": "加载发现运行失败:{{error}}"
+  }
 }

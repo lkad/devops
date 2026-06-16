@@ -1,4 +1,29 @@
 {
   "title": "Sign in",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "Use a dev token or LDAP credentials",
+  "form": {
+    "username-label": "Username",
+    "username-placeholder": "alice",
+    "password-label": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in…"
+  },
+  "tabs": {
+    "dev": "Dev token",
+    "ldap": "LDAP"
+  },
+  "dev-token": {
+    "title": "Dev token",
+    "body": "For local development, mint a JWT with `cmd/mint-dev-token` and paste it here. The X-User header short-circuit is enabled in dev mode.",
+    "token-label": "Token",
+    "token-placeholder": "eyJhbGciOi…",
+    "submit": "Use token"
+  },
+  "toast": {
+    "login-failed": "Sign-in failed: {{error}}"
+  },
+  "errors": {
+    "required": "Username is required",
+    "network": "Network error contacting the auth endpoint"
+  }
 }

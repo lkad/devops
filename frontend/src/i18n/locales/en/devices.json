@@ -1,4 +1,50 @@
 {
   "title": "Devices",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "Generic device inventory (network / container / physical host)",
+  "actions": {
+    "new": "New device",
+    "refresh": "Refresh",
+    "view": "View"
+  },
+  "filters": {
+    "type-label": "Type",
+    "state-label": "State",
+    "all": "All",
+    "total": "Total: {{count}}"
+  },
+  "type": {
+    "physical_host": "Physical host",
+    "network_device": "Network device",
+    "container": "Container"
+  },
+  "state": {
+    "online": "Online",
+    "offline": "Offline",
+    "monitoring_issue": "Monitoring issue",
+    "maintenance": "Maintenance",
+    "unknown": "Unknown"
+  },
+  "table": {
+    "name": "Name",
+    "type": "Type",
+    "state": "State",
+    "ip": "IP",
+    "dc": "DC",
+    "last-seen": "Last seen"
+  },
+  "empty": "No devices match the filter",
+  "create": {
+    "title": "Register device",
+    "name-label": "Name",
+    "type-label": "Type",
+    "ip-label": "IP address",
+    "dc-label": "Data center",
+    "submit": "Register",
+    "submitting": "Registering…",
+    "toast-success": "Device registered",
+    "toast-failed": "Failed to register device: {{error}}"
+  },
+  "toast": {
+    "load-failed": "Failed to load devices: {{error}}"
+  }
 }

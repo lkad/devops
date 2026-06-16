@@ -1,4 +1,50 @@
 {
   "title": "设备",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "通用设备清单(网络 / 容器 / 物理主机)",
+  "actions": {
+    "new": "新建设备",
+    "refresh": "刷新",
+    "view": "查看"
+  },
+  "filters": {
+    "type-label": "类型",
+    "state-label": "状态",
+    "all": "全部",
+    "total": "共 {{count}} 条"
+  },
+  "type": {
+    "physical_host": "物理主机",
+    "network_device": "网络设备",
+    "container": "容器"
+  },
+  "state": {
+    "online": "在线",
+    "offline": "离线",
+    "monitoring_issue": "监控异常",
+    "maintenance": "维护中",
+    "unknown": "未知"
+  },
+  "table": {
+    "name": "名称",
+    "type": "类型",
+    "state": "状态",
+    "ip": "IP",
+    "dc": "数据中心",
+    "last-seen": "最近见到"
+  },
+  "empty": "没有符合过滤条件的设备",
+  "create": {
+    "title": "注册设备",
+    "name-label": "名称",
+    "type-label": "类型",
+    "ip-label": "IP 地址",
+    "dc-label": "数据中心",
+    "submit": "注册",
+    "submitting": "注册中…",
+    "toast-success": "设备已注册",
+    "toast-failed": "注册设备失败:{{error}}"
+  },
+  "toast": {
+    "load-failed": "加载设备失败:{{error}}"
+  }
 }

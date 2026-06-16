@@ -1,4 +1,46 @@
 {
   "title": "Discovery",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "SNMP / SSH network discovery runs that promote devices into the inventory",
+  "actions": {
+    "new": "New discovery run",
+    "refresh": "Refresh",
+    "promote": "Promote to inventory"
+  },
+  "table": {
+    "id": "Run",
+    "target": "Target (CIDR)",
+    "discovered": "Discovered",
+    "started": "Started",
+    "status": "Status"
+  },
+  "status": {
+    "pending": "Pending",
+    "running": "Running",
+    "succeeded": "Succeeded",
+    "failed": "Failed"
+  },
+  "empty": "No discovery runs",
+  "new-run": {
+    "title": "New discovery run",
+    "cidr-label": "Target CIDR",
+    "cidr-placeholder": "10.0.0.0/24",
+    "submit": "Start",
+    "submitting": "Starting…",
+    "toast-success": "Discovery run started",
+    "toast-failed": "Failed to start discovery: {{error}}"
+  },
+  "promote": {
+    "title-prefix": "Promote device",
+    "summary_one": "{{count}} device discovered on this run",
+    "summary_other": "{{count}} devices discovered on this run",
+    "port-count_one": "{{count}} port open",
+    "port-count_other": "{{count}} ports open",
+    "submit": "Promote",
+    "toast-success_one": "Promoted {{count}} device",
+    "toast-success_other": "Promoted {{count}} devices",
+    "toast-failed": "Failed to promote: {{error}}"
+  },
+  "toast": {
+    "load-failed": "Failed to load discovery runs: {{error}}"
+  }
 }

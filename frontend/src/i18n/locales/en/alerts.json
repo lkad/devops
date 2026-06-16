@@ -1,4 +1,77 @@
 {
   "title": "Alerts",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "Multi-channel alert rules, active firings, and history",
+  "tabs": {
+    "active": "Active",
+    "channels": "Channels",
+    "history": "History"
+  },
+  "actions": {
+    "new-rule": "New rule",
+    "new-channel": "New channel",
+    "acknowledge": "Acknowledge",
+    "resolve": "Resolve",
+    "refresh": "Refresh"
+  },
+  "active": {
+    "table": {
+      "name": "Name",
+      "severity": "Severity",
+      "state": "State",
+      "fired-at": "Fired at",
+      "channel": "Channel"
+    },
+    "empty": "No active alerts",
+    "empty-hint": "Alerts will appear here when a rule's expression is true and a channel routes them."
+  },
+  "channels": {
+    "table": {
+      "name": "Name",
+      "type": "Type",
+      "target": "Target"
+    },
+    "empty": "No channels configured",
+    "empty-hint": "Configure at least one channel (Slack / Webhook / Email) before authoring rules."
+  },
+  "history": {
+    "table": {
+      "name": "Name",
+      "fired-at": "Fired at",
+      "resolved-at": "Resolved at",
+      "duration": "Duration"
+    },
+    "empty": "No alert history"
+  },
+  "new-rule": {
+    "title": "New alert rule",
+    "name-label": "Name",
+    "expression-label": "PromQL expression",
+    "expression-placeholder": "rate(http_requests_total{status=~\"5..\"}[5m]) > 1",
+    "severity-label": "Severity",
+    "channel-label": "Channel",
+    "submit": "Create",
+    "toast-success": "Alert rule created",
+    "toast-failed": "Failed to create alert rule: {{error}}"
+  },
+  "new-channel": {
+    "title": "New channel",
+    "name-label": "Name",
+    "type-label": "Type",
+    "type-options": {
+      "webhook": "Webhook",
+      "slack": "Slack",
+      "pagerduty": "PagerDuty",
+      "log": "Log (server-side)"
+    },
+    "target-label": "Target",
+    "target-placeholder": "https://hooks.slack.com/…",
+    "submit": "Create",
+    "toast-success": "Channel created",
+    "toast-failed": "Failed to create channel: {{error}}"
+  },
+  "toast": {
+    "load-failed": "Failed to load alerts: {{error}}",
+    "ack-failed": "Failed to acknowledge: {{error}}",
+    "resolve-failed": "Failed to resolve: {{error}}"
+  }
 }

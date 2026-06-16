@@ -1,4 +1,43 @@
 {
   "title": "审计",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "项目变更、角色授予与配置修改",
+  "scoped-banner": {
+    "title": "Scoped auditor 视图",
+    "body": "你看到的是你所加入的 {{count}} 个项目的审计事件。跨租户事件按设计隐藏。"
+  },
+  "filter": {
+    "actor-label": "操作人",
+    "actor-placeholder": "alice",
+    "action-label": "动作",
+    "resource-label": "资源",
+    "from-label": "起始",
+    "to-label": "结束",
+    "all": "全部",
+    "apply": "应用",
+    "clear": "清空"
+  },
+  "table": {
+    "timestamp": "时间",
+    "actor": "操作人",
+    "action": "动作",
+    "resource": "资源",
+    "ip": "IP"
+  },
+  "empty": "没有符合过滤条件的审计事件",
+  "empty-hint-actor": "尝试更宽泛的操作人名或移除操作人过滤。",
+  "empty-hint-default": "一旦发生写操作,审计事件会立即出现在这里。",
+  "modal": {
+    "title": "审计事件 {{id}}",
+    "loading": "加载事件中…",
+    "close": "关闭",
+    "fields": {
+      "actor": "操作人",
+      "ip": "IP",
+      "user-agent": "User agent",
+      "metadata": "元数据"
+    }
+  },
+  "toast": {
+    "load-failed": "加载审计日志失败:{{error}}"
+  }
 }

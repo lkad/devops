@@ -1,4 +1,38 @@
 {
   "title": "日志",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "跨 Loki / Elasticsearch / 本地的聚合日志查询",
+  "stream": {
+    "live": "实时流",
+    "snapshot": "快照"
+  },
+  "query": {
+    "label": "LogQL / Lucene 查询",
+    "placeholder": "{service=\"devops-toolkit\"} |= \"error\"",
+    "run": "执行",
+    "limit-label": "上限",
+    "limit-hint": "每页最大行数"
+  },
+  "capabilities": {
+    "title": "后端能力",
+    "supported": "支持",
+    "not-supported": "不支持",
+    "unlimited": "无限制",
+    "freshness": "数据新鲜度"
+  },
+  "degraded-banner": {
+    "title": "日志后端降级",
+    "body": "部分查询功能可能不可用,已回退到本地缓冲。"
+  },
+  "table": {
+    "timestamp": "时间",
+    "level": "级别",
+    "service": "服务",
+    "message": "消息"
+  },
+  "empty": "没有匹配该查询的日志行",
+  "empty-hint-query": "尝试扩大时间范围或移除过滤子句。",
+  "empty-hint-backend": "已配置日志后端可达,但未返回数据。",
+  "toast": {
+    "query-failed": "查询失败:{{error}}"
+  }
 }

@@ -1,4 +1,77 @@
 {
   "title": "告警",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "多通道告警规则、当前触发与历史",
+  "tabs": {
+    "active": "当前",
+    "channels": "通道",
+    "history": "历史"
+  },
+  "actions": {
+    "new-rule": "新建规则",
+    "new-channel": "新建通道",
+    "acknowledge": "确认",
+    "resolve": "解决",
+    "refresh": "刷新"
+  },
+  "active": {
+    "table": {
+      "name": "名称",
+      "severity": "严重度",
+      "state": "状态",
+      "fired-at": "触发时间",
+      "channel": "通道"
+    },
+    "empty": "暂无活动告警",
+    "empty-hint": "当规则表达式为真且有通道路由时,告警会出现在这里。"
+  },
+  "channels": {
+    "table": {
+      "name": "名称",
+      "type": "类型",
+      "target": "目标"
+    },
+    "empty": "暂无通道",
+    "empty-hint": "在配置规则之前,先配置至少一个通道(Slack / Webhook / Email)。"
+  },
+  "history": {
+    "table": {
+      "name": "名称",
+      "fired-at": "触发时间",
+      "resolved-at": "解决时间",
+      "duration": "持续时间"
+    },
+    "empty": "暂无告警历史"
+  },
+  "new-rule": {
+    "title": "新建告警规则",
+    "name-label": "名称",
+    "expression-label": "PromQL 表达式",
+    "expression-placeholder": "rate(http_requests_total{status=~\"5..\"}[5m]) > 1",
+    "severity-label": "严重度",
+    "channel-label": "通道",
+    "submit": "创建",
+    "toast-success": "告警规则已创建",
+    "toast-failed": "创建告警规则失败:{{error}}"
+  },
+  "new-channel": {
+    "title": "新建通道",
+    "name-label": "名称",
+    "type-label": "类型",
+    "type-options": {
+      "webhook": "Webhook",
+      "slack": "Slack",
+      "pagerduty": "PagerDuty",
+      "log": "服务端日志"
+    },
+    "target-label": "目标",
+    "target-placeholder": "https://hooks.slack.com/…",
+    "submit": "创建",
+    "toast-success": "通道已创建",
+    "toast-failed": "创建通道失败:{{error}}"
+  },
+  "toast": {
+    "load-failed": "加载告警失败:{{error}}",
+    "ack-failed": "确认告警失败:{{error}}",
+    "resolve-failed": "解决告警失败:{{error}}"
+  }
 }

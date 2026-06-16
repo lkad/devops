@@ -1,4 +1,23 @@
 {
   "title": "追踪",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "分布式 OpenTelemetry 追踪查看器(Tempo / stdouttrace)",
+  "no-trace": "该请求无追踪数据 —— 追踪可能已过期,或 X-Trace-Id 无效。",
+  "spans": "Span",
+  "duration": "持续时间",
+  "metadata": "元数据",
+  "copy-id": "复制 trace ID",
+  "actions": {
+    "refresh": "刷新"
+  },
+  "errors": {
+    "load-failed": "加载追踪失败:{{error}}"
+  },
+  "fields": {
+    "span-name": "Span",
+    "service": "服务",
+    "start": "开始",
+    "end": "结束",
+    "duration": "持续时间",
+    "status": "状态"
+  }
 }

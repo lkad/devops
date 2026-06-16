@@ -1,4 +1,39 @@
 {
   "title": "Metrics",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "Business-metric time series from /api/v1/metrics",
+  "series": {
+    "empty": "No series for this name yet",
+    "labels": "Labels"
+  },
+  "detail": {
+    "values": "Values",
+    "labels": "Labels",
+    "close": "Close"
+  },
+  "actions": {
+    "new": "New series",
+    "refresh": "Refresh",
+    "view": "View"
+  },
+  "state": {
+    "loading": "Loading…",
+    "ready": "ready"
+  },
+  "form": {
+    "search-placeholder": "Filter by name, target, or label…"
+  },
+  "errors": {
+    "load-failed": "Failed to load metrics: {{error}}"
+  },
+  "fields": {
+    "name": "Name",
+    "target": "Target",
+    "value": "Value",
+    "timestamp": "Time"
+  },
+  "tempo-not-configured": "Tempo / distributed tracing is not configured for this instance.",
+  "copy": "Copy",
+  "metadata": "Metadata",
+  "dev-hint": "Need a metric time series? Run any pipeline or trigger a probe to populate the metrics table.",
+  "brand": "DevOps Toolkit"
 }

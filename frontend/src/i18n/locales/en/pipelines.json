@@ -1,4 +1,71 @@
 {
   "title": "Pipelines",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "CI/CD pipelines and run history",
+  "actions": {
+    "new": "New pipeline",
+    "trigger": "Trigger run",
+    "cancel": "Cancel",
+    "create": "Create",
+    "refresh": "Refresh",
+    "view": "View"
+  },
+  "list": {
+    "empty": "No pipelines",
+    "empty-hint": "Create a pipeline to start triggering runs against your targets."
+  },
+  "strategy": {
+    "label": "Strategy",
+    "blue-green": "Blue-green",
+    "canary": "Canary",
+    "rolling": "Rolling",
+    "linear": "Linear"
+  },
+  "detail": {
+    "select": "Select a pipeline",
+    "no-runs": "No runs yet",
+    "triggered-by": "Triggered by",
+    "started": "Started",
+    "duration": "Duration",
+    "status": "Status",
+    "strategy-flow": "Strategy flow"
+  },
+  "run-history": {
+    "title": "Run history",
+    "empty": "No runs yet",
+    "table": {
+      "run-id": "Run",
+      "status": "Status",
+      "started": "Started",
+      "duration": "Duration",
+      "triggered-by": "Triggered by"
+    }
+  },
+  "run-modal": {
+    "title-prefix": "Run",
+    "steps": "Steps",
+    "status": "Status",
+    "started": "Started",
+    "duration": "Duration",
+    "triggered-by": "Triggered by",
+    "strategy": "Strategy",
+    "cancel": "Cancel run",
+    "close": "Close"
+  },
+  "create": {
+    "title": "New Pipeline",
+    "name-label": "Name",
+    "name-placeholder": "build-and-deploy",
+    "description-label": "Description",
+    "description-placeholder": "Optional",
+    "target-type-label": "Target type",
+    "submit": "Create",
+    "submitting": "Creating…",
+    "toast-success": "Pipeline created",
+    "toast-failed": "Failed to create pipeline: {{error}}"
+  },
+  "toast": {
+    "load-failed": "Failed to load pipelines: {{error}}",
+    "trigger-failed": "Failed to trigger run: {{error}}",
+    "cancel-failed": "Failed to cancel run: {{error}}"
+  }
 }

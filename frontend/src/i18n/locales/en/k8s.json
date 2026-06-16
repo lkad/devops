@@ -1,4 +1,72 @@
 {
   "title": "K8s Clusters",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "Manage registered Kubernetes clusters",
+  "actions": {
+    "new": "New cluster",
+    "refresh": "Refresh",
+    "view": "View",
+    "logs": "Logs",
+    "shell": "Shell",
+    "close": "Close"
+  },
+  "list": {
+    "empty": "No clusters yet",
+    "empty-hint": "Register a Kubernetes cluster to start browsing its pods, deployments, and services."
+  },
+  "filter": {
+    "all": "All",
+    "k3d": "k3d",
+    "kind": "kind",
+    "standard": "standard"
+  },
+  "type": {
+    "label": "Type",
+    "k3d": "k3d (local dev)",
+    "kind": "kind (local dev)",
+    "standard": "Standard cluster"
+  },
+  "status": {
+    "label": "Status",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "checking": "Checking…"
+  },
+  "view-modal": {
+    "title-prefix": "Cluster:",
+    "tabs": {
+      "pods": "Pods",
+      "deployments": "Deployments",
+      "services": "Services"
+    },
+    "namespace-placeholder": "namespace (optional)",
+    "no-resources": "No {{kind}} found in this cluster",
+    "pod-action": {
+      "logs": "Logs",
+      "shell": "Shell"
+    }
+  },
+  "resource-table": {
+    "name": "Name",
+    "namespace": "Namespace",
+    "status": "Status"
+  },
+  "create": {
+    "title": "New Cluster",
+    "name-label": "Name",
+    "name-placeholder": "prod-us-east-1",
+    "api-endpoint-label": "API endpoint",
+    "api-endpoint-placeholder": "https://k8s.example.com:6443",
+    "kubeconfig-label": "Kubeconfig (optional)",
+    "kubeconfig-placeholder": "Paste a kubeconfig YAML to import credentials",
+    "description-label": "Description",
+    "description-placeholder": "Optional",
+    "type-label": "Type",
+    "submit": "Register",
+    "submitting": "Registering…",
+    "toast-success": "Cluster registered",
+    "toast-failed": "Failed to register cluster: {{error}}"
+  },
+  "toast": {
+    "load-failed": "Failed to load clusters: {{error}}"
+  }
 }

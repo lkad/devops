@@ -1,4 +1,38 @@
 {
   "title": "Logs",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "Aggregated log query across Loki / Elasticsearch / local",
+  "stream": {
+    "live": "Live stream",
+    "snapshot": "Snapshot"
+  },
+  "query": {
+    "label": "LogQL / Lucene query",
+    "placeholder": "{service=\"devops-toolkit\"} |= \"error\"",
+    "run": "Run",
+    "limit-label": "Limit",
+    "limit-hint": "Max lines per page"
+  },
+  "capabilities": {
+    "title": "Backend capabilities",
+    "supported": "Supported",
+    "not-supported": "Not supported",
+    "unlimited": "Unlimited",
+    "freshness": "Freshness"
+  },
+  "degraded-banner": {
+    "title": "Log backend degraded",
+    "body": "Some query features may be unavailable. Falling back to local buffer."
+  },
+  "table": {
+    "timestamp": "Time",
+    "level": "Level",
+    "service": "Service",
+    "message": "Message"
+  },
+  "empty": "No log lines match the query",
+  "empty-hint-query": "Try widening the time range or removing filter clauses.",
+  "empty-hint-backend": "The configured log backend is reachable but returned no data.",
+  "toast": {
+    "query-failed": "Query failed: {{error}}"
+  }
 }

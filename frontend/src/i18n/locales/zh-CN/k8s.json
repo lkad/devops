@@ -1,4 +1,72 @@
 {
   "title": "K8s 集群",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "管理已注册的 Kubernetes 集群",
+  "actions": {
+    "new": "新建集群",
+    "refresh": "刷新",
+    "view": "查看",
+    "logs": "日志",
+    "shell": "Shell",
+    "close": "关闭"
+  },
+  "list": {
+    "empty": "暂无集群",
+    "empty-hint": "注册一个 Kubernetes 集群,开始浏览其 Pod、Deployment 和 Service。"
+  },
+  "filter": {
+    "all": "全部",
+    "k3d": "k3d",
+    "kind": "kind",
+    "standard": "标准"
+  },
+  "type": {
+    "label": "类型",
+    "k3d": "k3d(本地开发)",
+    "kind": "kind(本地开发)",
+    "standard": "标准集群"
+  },
+  "status": {
+    "label": "状态",
+    "connected": "已连接",
+    "disconnected": "未连接",
+    "checking": "检查中…"
+  },
+  "view-modal": {
+    "title-prefix": "集群:",
+    "tabs": {
+      "pods": "Pod",
+      "deployments": "Deployment",
+      "services": "Service"
+    },
+    "namespace-placeholder": "namespace(可选)",
+    "no-resources": "该集群中暂无 {{kind}}",
+    "pod-action": {
+      "logs": "日志",
+      "shell": "Shell"
+    }
+  },
+  "resource-table": {
+    "name": "名称",
+    "namespace": "命名空间",
+    "status": "状态"
+  },
+  "create": {
+    "title": "新建集群",
+    "name-label": "名称",
+    "name-placeholder": "prod-us-east-1",
+    "api-endpoint-label": "API 端点",
+    "api-endpoint-placeholder": "https://k8s.example.com:6443",
+    "kubeconfig-label": "Kubeconfig(可选)",
+    "kubeconfig-placeholder": "粘贴 kubeconfig YAML 以导入凭据",
+    "description-label": "描述",
+    "description-placeholder": "可选",
+    "type-label": "类型",
+    "submit": "注册",
+    "submitting": "注册中…",
+    "toast-success": "集群已注册",
+    "toast-failed": "注册集群失败:{{error}}"
+  },
+  "toast": {
+    "load-failed": "加载集群失败:{{error}}"
+  }
 }

@@ -1,4 +1,43 @@
 {
   "title": "Audit",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "Project mutations, role grants, and configuration changes",
+  "scoped-banner": {
+    "title": "Scoped auditor view",
+    "body": "You see audit events for the {{count}} project(s) you are a member of. Cross-tenant events are hidden by design."
+  },
+  "filter": {
+    "actor-label": "Actor",
+    "actor-placeholder": "alice",
+    "action-label": "Action",
+    "resource-label": "Resource",
+    "from-label": "From",
+    "to-label": "To",
+    "all": "All",
+    "apply": "Apply",
+    "clear": "Clear"
+  },
+  "table": {
+    "timestamp": "Time",
+    "actor": "Actor",
+    "action": "Action",
+    "resource": "Resource",
+    "ip": "IP"
+  },
+  "empty": "No audit events match the filter",
+  "empty-hint-actor": "Try a broader actor name or remove the actor filter.",
+  "empty-hint-default": "Audit events appear here as soon as a mutating action is performed.",
+  "modal": {
+    "title": "Audit event {{id}}",
+    "loading": "Loading event…",
+    "close": "Close",
+    "fields": {
+      "actor": "Actor",
+      "ip": "IP",
+      "user-agent": "User agent",
+      "metadata": "Metadata"
+    }
+  },
+  "toast": {
+    "load-failed": "Failed to load audit log: {{error}}"
+  }
 }

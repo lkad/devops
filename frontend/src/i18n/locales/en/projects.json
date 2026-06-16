@@ -1,4 +1,53 @@
 {
   "title": "Projects",
-  "_i18n-status": "stub — see docs/i18n/SPEC.md §9 roadmap"
+  "subtitle": "Business line → system → project hierarchy with FinOps hooks",
+  "actions": {
+    "new": "New project",
+    "refresh": "Refresh"
+  },
+  "tree": {
+    "empty": "No projects yet",
+    "empty-hint": "Projects group devices, pipelines, and services under a business unit."
+  },
+  "detail": {
+    "empty": "Select a project from the tree to see its members and child resources.",
+    "empty-hint": "Members, devices, and pipelines assigned to this project will appear here.",
+    "fields": {
+      "id": "ID",
+      "name": "Name",
+      "code": "Code",
+      "type": "Type",
+      "parent": "Parent",
+      "parent-root": "(root)",
+      "weight": "FinOps weight",
+      "weight-hint": "0 = cost neutral, 1 = full chargeback"
+    },
+    "members": {
+      "title": "Members",
+      "empty": "No members yet",
+      "table": {
+        "user": "User",
+        "role": "Role",
+        "added-by": "Added by",
+        "added-at": "Added at"
+      }
+    }
+  },
+  "create": {
+    "title": "New project",
+    "name-label": "Name",
+    "name-placeholder": "order-backend",
+    "code-label": "Code",
+    "code-hint": "Short identifier used in URLs",
+    "type-label": "Type",
+    "parent-label": "Parent project",
+    "parent-root": "(root)",
+    "submit": "Create",
+    "submitting": "Creating…",
+    "toast-success": "Project created",
+    "toast-failed": "Failed to create project: {{error}}"
+  },
+  "toast": {
+    "load-failed": "Failed to load projects: {{error}}"
+  }
 }

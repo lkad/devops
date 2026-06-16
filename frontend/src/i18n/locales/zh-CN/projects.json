@@ -1,4 +1,53 @@
 {
   "title": "项目",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "业务线 → 系统 → 项目层级,含 FinOps 钩子",
+  "actions": {
+    "new": "新建项目",
+    "refresh": "刷新"
+  },
+  "tree": {
+    "empty": "暂无项目",
+    "empty-hint": "项目把同一业务单元下的设备、流水线和服务分组到一起。"
+  },
+  "detail": {
+    "empty": "从树中选择一个项目,查看其成员与子资源。",
+    "empty-hint": "归属于此项目的成员、设备和流水线会显示在这里。",
+    "fields": {
+      "id": "ID",
+      "name": "名称",
+      "code": "代码",
+      "type": "类型",
+      "parent": "父项目",
+      "parent-root": "(根)",
+      "weight": "FinOps 权重",
+      "weight-hint": "0 = 成本中性,1 = 全额成本回算"
+    },
+    "members": {
+      "title": "成员",
+      "empty": "暂无成员",
+      "table": {
+        "user": "用户",
+        "role": "角色",
+        "added-by": "添加人",
+        "added-at": "添加时间"
+      }
+    }
+  },
+  "create": {
+    "title": "新建项目",
+    "name-label": "名称",
+    "name-placeholder": "order-backend",
+    "code-label": "代码",
+    "code-hint": "URL 中使用的短标识",
+    "type-label": "类型",
+    "parent-label": "父项目",
+    "parent-root": "(根)",
+    "submit": "创建",
+    "submitting": "创建中…",
+    "toast-success": "项目已创建",
+    "toast-failed": "创建项目失败:{{error}}"
+  },
+  "toast": {
+    "load-failed": "加载项目失败:{{error}}"
+  }
 }

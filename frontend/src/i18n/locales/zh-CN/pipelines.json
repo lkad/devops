@@ -1,4 +1,71 @@
 {
   "title": "流水线",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "CI/CD 流水线与运行历史",
+  "actions": {
+    "new": "新建流水线",
+    "trigger": "触发运行",
+    "cancel": "取消",
+    "create": "创建",
+    "refresh": "刷新",
+    "view": "查看"
+  },
+  "list": {
+    "empty": "暂无流水线",
+    "empty-hint": "创建一条流水线,开始对你的目标触发运行。"
+  },
+  "strategy": {
+    "label": "策略",
+    "blue-green": "蓝绿",
+    "canary": "金丝雀",
+    "rolling": "滚动",
+    "linear": "线性"
+  },
+  "detail": {
+    "select": "选择一条流水线",
+    "no-runs": "暂无运行",
+    "triggered-by": "触发人",
+    "started": "开始时间",
+    "duration": "持续时间",
+    "status": "状态",
+    "strategy-flow": "策略流程"
+  },
+  "run-history": {
+    "title": "运行历史",
+    "empty": "暂无运行",
+    "table": {
+      "run-id": "运行",
+      "status": "状态",
+      "started": "开始时间",
+      "duration": "持续时间",
+      "triggered-by": "触发人"
+    }
+  },
+  "run-modal": {
+    "title-prefix": "运行",
+    "steps": "步骤",
+    "status": "状态",
+    "started": "开始时间",
+    "duration": "持续时间",
+    "triggered-by": "触发人",
+    "strategy": "策略",
+    "cancel": "取消运行",
+    "close": "关闭"
+  },
+  "create": {
+    "title": "新建流水线",
+    "name-label": "名称",
+    "name-placeholder": "build-and-deploy",
+    "description-label": "描述",
+    "description-placeholder": "可选",
+    "target-type-label": "目标类型",
+    "submit": "创建",
+    "submitting": "创建中…",
+    "toast-success": "流水线已创建",
+    "toast-failed": "创建流水线失败:{{error}}"
+  },
+  "toast": {
+    "load-failed": "加载流水线失败:{{error}}",
+    "trigger-failed": "触发运行失败:{{error}}",
+    "cancel-failed": "取消运行失败:{{error}}"
+  }
 }

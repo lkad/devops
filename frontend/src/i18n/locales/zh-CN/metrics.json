@@ -1,4 +1,39 @@
 {
   "title": "指标",
-  "_i18n-status": "占位 — 见 docs/i18n/SPEC.md §9 路线图"
+  "subtitle": "来自 /api/v1/metrics 的业务指标时序",
+  "series": {
+    "empty": "该名称暂无时序",
+    "labels": "标签"
+  },
+  "detail": {
+    "values": "值",
+    "labels": "标签",
+    "close": "关闭"
+  },
+  "actions": {
+    "new": "新建时序",
+    "refresh": "刷新",
+    "view": "查看"
+  },
+  "state": {
+    "loading": "加载中…",
+    "ready": "就绪"
+  },
+  "form": {
+    "search-placeholder": "按名称、目标或标签筛选…"
+  },
+  "errors": {
+    "load-failed": "加载指标失败:{{error}}"
+  },
+  "fields": {
+    "name": "名称",
+    "target": "目标",
+    "value": "值",
+    "timestamp": "时间"
+  },
+  "tempo-not-configured": "本实例未配置 Tempo / 分布式追踪。",
+  "copy": "复制",
+  "metadata": "元数据",
+  "dev-hint": "需要指标时序?运行任一流水线或触发一次探针即可填充指标表。",
+  "brand": "DevOps Toolkit"
 }
