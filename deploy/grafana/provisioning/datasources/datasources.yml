@@ -43,8 +43,15 @@ datasources:
   - name: Postgres
     type: postgres
     access: proxy
+    # The Postgres plugin reads BOTH the top-level `database`
+    # field AND `jsonData.database` to build the connection
+    # string. Setting only `jsonData.database` (as in earlier
+    # versions of this file) leaves the top-level field empty
+    # and every Postgres panel errors with "no default database
+    # configured" even though the jsonData value is correct.
     url: postgres:5432
     user: devops
+    database: devops
     secureJsonData:
       password: devops
     editable: true
