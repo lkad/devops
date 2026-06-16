@@ -176,7 +176,54 @@ done
 log_ok "  5 services created + health polled"
 
 # -----------------------------------------------------------------------------
-# 4. Final traffic burst — one more round to capture the
+# 4. Register a real k8s cluster with encrypted kubeconfig.
+#
+# Pulls the active k3d context from `kubectl config view --raw`
+# and POSTs it to /api/v1/k8s/clusters with all the fields.
+# The handler encrypts the kubeconfig (AES-GCM via K8S_CRYPTO_KEY)
+# before persisting to k8s_clusters.kubeconfig_encrypted.
+#
+# Idempotency: the cluster name is unique-indexed, so re-running
+# seed-traffic.sh returns 409 Conflict. We detect that and skip.
+# -----------------------------------------------------------------------------
+log_step "Registering active k3d cluster (k8s_clusters row + encrypted kubeconfig)"
+if ! command -v kubectl >/dev/null 2>&1; then
+  log_warn "  kubectl not in PATH; skipping k8s cluster registration"
+else
+  KUBECONFIG_RAW=$(kubectl config view --raw 2>/dev/null || echo "")
+  K8S_NAME=$(kubectl config current-context 2>/dev/null || echo "")
+  K8S_API=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo "")
+  if [ -z "$KUBECONFIG_RAW" ] || [ -z "$K8S_API" ]; then
+    log_warn "  no active kubectl context; skipping"
+  else
+    # Build JSON payload. Use python for proper escaping of the
+    # multi-line kubeconfig YAML.
+    PAYLOAD=$(KUBECONFIG="$KUBECONFIG_RAW" K8S_NAME="$K8S_NAME" K8S_API="$K8S_API" \
+      python3 -c '
+import json, os
+print(json.dumps({
+  "name": os.environ["K8S_NAME"],
+  "type": "k3d",
+  "api_server": os.environ["K8S_API"],
+  "kubeconfig": os.environ["KUBECONFIG"],
+  "in_cluster": False,
+}))')
+    CODE=$(curl -s -o /tmp/k8s-resp.json -w "%{http_code}" \
+      -X POST -H "Content-Type: application/json" -H "X-User: $API_USER" \
+      -d "$PAYLOAD" "${API_BASE}/k8s/clusters" || echo "000")
+    if [ "$CODE" = "201" ]; then
+      log_ok "  registered $K8S_NAME → $K8S_API"
+    elif [ "$CODE" = "409" ]; then
+      log_info "  $K8S_NAME already registered (409 Conflict, expected on re-run)"
+    else
+      log_warn "  POST /k8s/clusters -> $CODE  (response below)"
+      cat /tmp/k8s-resp.json | head -1
+    fi
+  fi
+fi
+
+# -----------------------------------------------------------------------------
+# 5. Final traffic burst — one more round to capture the
 # post-seed state. This is the data the dashboard will show.
 # -----------------------------------------------------------------------------
 log_step "Final traffic burst to capture post-seed state"
