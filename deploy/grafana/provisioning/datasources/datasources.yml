@@ -1,20 +1,11 @@
-# Grafana datasource provisioning for DevOps Toolkit.
-#
-# Auto-loaded on Grafana startup; declares the four
-# datasources the dashboards query:
-#   - Prometheus  → backend's /metrics (Go runtime, request count/duration)
-#   - InfluxDB v2 → physical host CPU / memory / disk (per host time series)
-#   - Loki        → log aggregation
-#   - Postgres    → pipeline runs, audit, hosts (business-data dashboards)
-#
-# `isDefault: true` is set on Prometheus so the Overview
-# dashboard opens against it.
-#
-# Mount into grafana container:
-#   volumes:
-#     - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
-
 apiVersion: 1
+
+# List of existing datasources to delete on startup. The provisioning
+# provider is idempotent: a name in `datasources` below that already
+# exists is updated (not skipped), so this is only needed to clean
+# up leftover broken entries from earlier failed runs.
+deleteDatasources:
+  - name: PostgresDev
 
 datasources:
   - name: Prometheus
@@ -38,7 +29,7 @@ datasources:
       defaultBucket: metrics
       tlsSkipVerify: true
     secureJsonData:
-      token: ${INFLUXDB_TOKEN}
+      token: devops-toolkit-default-token
 
   - name: Loki
     type: loki
@@ -53,12 +44,12 @@ datasources:
     type: postgres
     access: proxy
     url: postgres:5432
-    user: ${POSTGRES_USER:-devops}
+    user: devops
     secureJsonData:
-      password: ${POSTGRES_PASSWORD:-devops}
+      password: devops
     editable: true
     jsonData:
-      database: ${POSTGRES_DB:-devops}
+      database: devops
       sslmode: disable
       maxIdleConns: 2
       maxOpenConns: 10

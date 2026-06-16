@@ -40,7 +40,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
-        { "expr": "sum(increase(http_requests_total[5m]))", "refId": "A" }
+        { "expr": "sum(increase(devops_toolkit_http_requests_total[5m]))", "refId": "A" }
       ],
       "options": {
         "reduceOptions": { "calcs": ["lastNotNull"] },
@@ -57,7 +57,7 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 1)",
+          "expr": "sum(rate(devops_toolkit_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(devops_toolkit_http_requests_total[5m])), 1)",
           "refId": "A"
         }
       ],
@@ -120,7 +120,7 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "sum by (status) (rate(http_requests_total[$__rate_interval]))",
+          "expr": "sum by (status) (rate(devops_toolkit_http_requests_total[$__rate_interval]))",
           "legendFormat": "{{status}}",
           "refId": "A"
         }

@@ -102,6 +102,12 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules:/etc/prometheus/rules:ro
+    # host.docker.internal resolves to the docker host's gateway IP
+    # (172.17.0.1 by default on Linux). Needed because the
+    # devops-toolkit binary runs on the host (not in a container)
+    # — see scripts/seed-traffic.sh for the dev-environment layout.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     mem_limit: 512m
   # Grafana: dashboards for Loki + Prometheus. Default admin/admin
   # unless GF_SECURITY_ADMIN_PASSWORD is set in .env.prod.
@@ -113,6 +119,14 @@ services:
       # Auto-provision datasources + dashboards on boot.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # Pass-through so the Postgres datasource can resolve the
+      # ${POSTGRES_USER:-devops} / ${POSTGRES_DB:-devops} template
+      # defaults in datasources.yml. Without these, the datasource
+      # is created with empty user / database and every Postgres
+      # panel errors with "no default database configured".
+      POSTGRES_USER: ${POSTGRES_USER:-devops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devops}
+      POSTGRES_DB: ${POSTGRES_DB:-devops}
     env_file: [./.env.prod]
     depends_on:
       - prometheus
