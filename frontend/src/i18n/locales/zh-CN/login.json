@@ -1,12 +1,13 @@
 {
-  "title": "登录",
   "subtitle": "使用开发 token 或 LDAP 凭据",
   "form": {
     "username-label": "用户名",
     "password-label": "密码",
-    "submit": "登录",
-    "submitting": "登录中…"
+    "submitting": "登录中…",
+    "submit": "登录"
   },
+  "hint": "",
+  "title": "登录",
   "toast": {
     "login-failed": "登录失败:{{error}}"
   },

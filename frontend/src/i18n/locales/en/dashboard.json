@@ -1,6 +1,14 @@
 {
+  "table": {
+    "column": {
+      "actor": "Actor",
+      "action": "Action",
+      "resource-type": "Resource Type",
+      "resource-id": "Resource ID",
+      "occurred-at": "Occurred At"
+    }
+  },
   "title": "Dashboard",
-  "subtitle": "System overview at a glance",
   "welcome": "Welcome back, {{name}}",
   "welcome-anonymous": "Welcome back",
   "stats": {
@@ -27,15 +35,7 @@
     "empty-hint": "Audit events from the last few actions will appear here.",
     "view-all": "View all"
   },
-  "table": {
-    "column": {
-      "actor": "Actor",
-      "action": "Action",
-      "resource-type": "Resource Type",
-      "resource-id": "Resource ID",
-      "occurred-at": "Occurred At"
-    }
-  },
+  "subtitle": "System overview at a glance",
   "health": {
     "title": "Service health",
     "operational": "All services operational",

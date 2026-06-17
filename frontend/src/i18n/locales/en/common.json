@@ -1,4 +1,17 @@
 {
+  "language": {
+    "switch-to": "Switch to {{lang}}",
+    "label": "Language"
+  },
+  "app": {
+    "title": "DevOps Toolkit",
+    "tagline": "foundation"
+  },
+  "user": {
+    "logout": "Logout",
+    "logged-in-as": "Logged in as",
+    "login": "Sign in"
+  },
   "actions": {
     "back": "Back",
     "cancel": "Cancel",
@@ -19,10 +32,6 @@
     "submit": "Submit",
     "view": "View"
   },
-  "app": {
-    "tagline": "foundation",
-    "title": "DevOps Toolkit"
-  },
   "errors": {
     "forbidden": "Permission denied",
     "generic": "Something went wrong",
@@ -38,10 +47,6 @@
     "optional": "Optional",
     "placeholder-search": "Search…",
     "required": "Required"
-  },
-  "language": {
-    "label": "Language",
-    "switch-to": "Switch to {{lang}}"
   },
   "nav": {
     "alerts": "Alerts",
@@ -97,10 +102,5 @@
     "minutes-ago_other": "{{count}} minutes ago",
     "never": "never",
     "now": "now"
-  },
-  "user": {
-    "logged-in-as": "Logged in as",
-    "login": "Sign in",
-    "logout": "Logout"
   }
 }

@@ -28,8 +28,14 @@ export default {
   // Char that separates namespace from key when both appear in one call:
   //   t('nav:dashboard')  -> namespace "nav", key "dashboard".
   namespaceSeparator: ':',
-  // Lexicographic sort so CI diffs are minimal / stable across runs.
-  sort: true,
+  // sort: false — preserve insertion order. With sort: true, the parser
+  // alphabetically reorders keys on every run, and since hand-curated
+  // files (e.g. `common.json`'s nav section ordered Dashboard, Projects,
+  // Services, etc. — matching SideNav) are not alphabetical, the
+  // diff is large but content-identical. Turning sort off means a
+  // re-run of i18next-parser only changes content when a new t() is
+  // added or removed, not just on every execution.
+  sort: false,
 
   // Skip writing the source-locale default value into non-default locales.
   // This is the only setting that lets us enforce parity via git diff

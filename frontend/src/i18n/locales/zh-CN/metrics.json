@@ -1,24 +1,26 @@
 {
+  "detail": {
+    "no-points": "暂无数据点。",
+    "select-title": "选择一个序列",
+    "select-hint": "从左侧选一个指标查看趋势线。",
+    "last-50": "最近 50 个点",
+    "total_other": "",
+    "recent-values": "最近的值",
+    "total": "共 {{count}} 个"
+  },
   "title": "指标",
   "subtitle": "来自 /api/v1/metrics 的业务指标时序",
   "series": {
-    "empty-hint": "尚未采集到任何指标序列。",
+    "header_other": "",
     "empty-title": "暂无序列",
+    "empty-hint": "尚未采集到任何指标序列。",
     "header": "序列({{count}})"
-  },
-  "detail": {
-    "last-50": "最近 50 个点",
-    "no-points": "暂无数据点。",
-    "recent-values": "最近的值",
-    "select-hint": "从左侧选一个指标查看趋势线。",
-    "select-title": "选择一个序列",
-    "total": "共 {{count}} 个"
-  },
-  "actions": {
-    "refresh": "刷新"
   },
   "state": {
     "loading": "加载中…"
+  },
+  "actions": {
+    "refresh": "刷新"
   },
   "errors": {
     "load-failed": "加载指标失败:{{error}}"

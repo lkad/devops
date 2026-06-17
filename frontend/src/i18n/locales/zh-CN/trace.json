@@ -1,17 +1,17 @@
 {
   "title": "追踪",
   "subtitle": "失败请求的 OpenTelemetry 追踪 ID",
-  "fields": {
-    "trace-id": "追踪 ID",
-    "opened": "打开时间",
-    "source": "来源",
-    "source-detail": " 失败后端请求的响应头"
-  },
   "actions": {
     "back-to-services": "← 返回服务",
     "copy": "复制",
     "open-in-tempo": "在 Tempo 中打开 ↗",
     "search-logs": "搜索日志"
+  },
+  "fields": {
+    "trace-id": "追踪 ID",
+    "opened": "打开时间",
+    "source": "来源",
+    "source-detail": " 失败后端请求的响应头"
   },
   "tempo-not-configured": "未配置 Tempo 地址。请在 {{file}} 里设置 {{env}}(支持 {{placeholder}} 占位符)并重新加载以启用应用内深链接。",
   "errors": {

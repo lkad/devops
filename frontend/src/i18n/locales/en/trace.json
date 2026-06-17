@@ -1,17 +1,17 @@
 {
   "title": "Trace",
   "subtitle": "OpenTelemetry trace id from a failed request",
-  "fields": {
-    "trace-id": "Trace id",
-    "opened": "Opened",
-    "source": "Source",
-    "source-detail": " response header on a failed backend request"
-  },
   "actions": {
     "back-to-services": "← Back to Services",
     "copy": "Copy",
     "open-in-tempo": "Open in Tempo ↗",
     "search-logs": "Search Logs"
+  },
+  "fields": {
+    "trace-id": "Trace id",
+    "opened": "Opened",
+    "source": "Source",
+    "source-detail": " response header on a failed backend request"
   },
   "tempo-not-configured": "No Tempo URL configured. Set {{env}} in {{file}} (supports a {{placeholder}} placeholder) and reload to enable the in-app deep link.",
   "errors": {

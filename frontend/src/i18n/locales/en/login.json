@@ -1,12 +1,13 @@
 {
-  "title": "Sign in",
   "subtitle": "Sign in to your account",
   "form": {
     "username-label": "Username",
     "password-label": "Password",
-    "submit": "Sign In",
-    "submitting": "Signing in…"
+    "submitting": "Signing in…",
+    "submit": "Sign In"
   },
+  "hint": "",
+  "title": "Sign in",
   "toast": {
     "login-failed": "Sign-in failed: {{error}}"
   },

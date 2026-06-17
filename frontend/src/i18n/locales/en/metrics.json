@@ -1,18 +1,22 @@
 {
-  "title": "Metrics",
-  "subtitle": "Time-series data and sparklines",
-  "series": {
-    "header": "Series ({{count}})",
-    "empty-title": "No series",
-    "empty-hint": "No metric series have been ingested yet."
-  },
   "detail": {
+    "no-points": "No points recorded.",
     "select-title": "Select a series",
     "select-hint": "Pick a metric on the left to view its sparkline.",
     "last-50": "Last 50 points",
-    "total": "{{count}} total",
+    "total_one": "",
+    "total_other": "",
     "recent-values": "Recent values",
-    "no-points": "No points recorded."
+    "total": "{{count}} total"
+  },
+  "title": "Metrics",
+  "subtitle": "Time-series data and sparklines",
+  "series": {
+    "header_one": "",
+    "header_other": "",
+    "empty-title": "No series",
+    "empty-hint": "No metric series have been ingested yet.",
+    "header": "Series ({{count}})"
   },
   "state": {
     "loading": "Loading…"

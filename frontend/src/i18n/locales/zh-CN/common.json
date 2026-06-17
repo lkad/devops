@@ -1,4 +1,17 @@
 {
+  "language": {
+    "switch-to": "切换到 {{lang}}",
+    "label": "语言"
+  },
+  "app": {
+    "title": "DevOps Toolkit",
+    "tagline": "基础平台"
+  },
+  "user": {
+    "logout": "退出",
+    "logged-in-as": "已登录为",
+    "login": "登录"
+  },
   "actions": {
     "back": "返回",
     "cancel": "取消",
@@ -19,10 +32,6 @@
     "submit": "提交",
     "view": "查看"
   },
-  "app": {
-    "tagline": "基础平台",
-    "title": "DevOps Toolkit"
-  },
   "errors": {
     "forbidden": "权限不足",
     "generic": "出错了",
@@ -38,10 +47,6 @@
     "optional": "可选",
     "placeholder-search": "搜索…",
     "required": "必填"
-  },
-  "language": {
-    "label": "语言",
-    "switch-to": "切换到 {{lang}}"
   },
   "nav": {
     "alerts": "告警",
@@ -97,10 +102,5 @@
     "minutes-ago_other": "{{count}} 分钟前",
     "never": "从不",
     "now": "刚刚"
-  },
-  "user": {
-    "logged-in-as": "已登录为",
-    "login": "登录",
-    "logout": "退出"
   }
 }

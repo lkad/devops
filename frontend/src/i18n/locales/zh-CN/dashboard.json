@@ -1,6 +1,14 @@
 {
+  "table": {
+    "column": {
+      "actor": "操作者",
+      "action": "操作",
+      "resource-type": "资源类型",
+      "resource-id": "资源 ID",
+      "occurred-at": "发生时间"
+    }
+  },
   "title": "仪表盘",
-  "subtitle": "系统全局一览",
   "welcome": "欢迎回来,{{name}}",
   "welcome-anonymous": "欢迎回来",
   "stats": {
@@ -27,15 +35,7 @@
     "empty-hint": "最近操作的审计事件会显示在这里。",
     "view-all": "查看全部"
   },
-  "table": {
-    "column": {
-      "actor": "操作者",
-      "action": "操作",
-      "resource-type": "资源类型",
-      "resource-id": "资源 ID",
-      "occurred-at": "发生时间"
-    }
-  },
+  "subtitle": "系统全局一览",
   "health": {
     "title": "服务健康",
     "operational": "所有服务正常",
