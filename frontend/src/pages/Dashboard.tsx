@@ -70,28 +70,43 @@ function StatsCard({
   subtitle,
   tone = 'default',
   loading,
+  locale,
 }: {
   label: string;
   value: number | null;
   subtitle: string;
   tone?: 'default' | 'alert';
   loading?: boolean;
+  locale: string;
 }) {
+  // Intl.NumberFormat picks locale-appropriate separators
+  // and digit grouping (1,000 vs 1.000 vs 1 000). Falls back
+  // to Intl default for any unsupported locale tag.
+  const formatted = value == null
+    ? null
+    : new Intl.NumberFormat(locale).format(value);
   return (
     <div style={cardStyle}>
       <div style={cardLabelStyle}>{label}</div>
       <div style={{ ...cardValueStyle, color: valueToneColor[tone] }}>
-        {loading ? '—' : value ?? '—'}
+        {loading || formatted == null ? '—' : formatted}
       </div>
       <div style={cardSubtitleStyle}>{subtitle}</div>
     </div>
   );
 }
 
-function formatTimestamp(s: string): string {
+function formatTimestamp(s: string, locale: string): string {
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
-  return d.toLocaleString();
+  // Intl.DateTimeFormat picks the locale's date format
+  // (YYYY-MM-DD in zh-CN, M/D/YYYY in en-US, DD/MM/YYYY in
+  // most of Europe). Falls back to the default formatter for
+  // any locale tag Intl doesn't recognize.
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(d);
 }
 
 function actionTone(action: string) {
@@ -102,7 +117,7 @@ function actionTone(action: string) {
 }
 
 export function Dashboard() {
-  const { t } = useTranslation('dashboard');
+  const { t, i18n } = useTranslation('dashboard');
   const user = useAuth((s) => s.user);
 
   // Stats — useApi aborts on unmount, so all four run in parallel.
@@ -126,7 +141,7 @@ export function Dashboard() {
       header: t('table.column.occurred-at'),
       align: 'right',
       render: (r) => (
-        <span style={{ color: 'var(--color-text-muted)' }}>{formatTimestamp(r.occurred_at)}</span>
+        <span style={{ color: 'var(--color-text-muted)' }}>{formatTimestamp(r.occurred_at, i18n.language)}</span>
       ),
     },
   ];
@@ -144,18 +159,21 @@ export function Dashboard() {
           value={projects.data?.pagination.total ?? null}
           subtitle={t('stats.projects-subtitle')}
           loading={projects.loading}
+          locale={i18n.language}
         />
         <StatsCard
           label={t('stats.devices')}
           value={devices.data?.pagination.total ?? null}
           subtitle={t('stats.devices-subtitle')}
           loading={devices.loading}
+          locale={i18n.language}
         />
         <StatsCard
           label={t('stats.physical-hosts')}
           value={hosts.data?.pagination.total ?? null}
           subtitle={t('stats.physical-hosts-subtitle')}
           loading={hosts.loading}
+          locale={i18n.language}
         />
         <StatsCard
           label={t('stats.open-alerts')}
@@ -163,6 +181,7 @@ export function Dashboard() {
           subtitle={t('stats.open-alerts-subtitle')}
           tone="alert"
           loading={alerts.loading}
+          locale={i18n.language}
         />
       </div>
 

@@ -35,12 +35,19 @@ function buildTempoURL(traceId: string, base: string): string | null {
   return base.replace(/\/+$/, '') + '/api/traces/' + traceId;
 }
 
-function fmtTimestamp(d: Date): string {
-  return d.toISOString().replace('T', ' ').replace(/\..+$/, '') + ' UTC';
+function fmtTimestamp(d: Date, locale: string): string {
+  // Intl.DateTimeFormat picks the locale's date+time format
+  // (YYYY-MM-DD HH:mm in zh-CN; M/D/YYYY, h:mm AM in en-US;
+  // DD/MM/YYYY HH:mm in most of Europe). Falls back to the
+  // default formatter for any locale tag Intl doesn't recognize.
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(d);
 }
 
 export function TraceDetail() {
-  const { t } = useTranslation('trace');
+  const { t, i18n } = useTranslation('trace');
   const { id } = useParams<{ id: string }>();
   const traceId = id ?? '';
   const tempoURL = buildTempoURL(traceId, TEMPO_URL);
@@ -104,7 +111,7 @@ export function TraceDetail() {
           </div>
 
           <div style={{ color: 'var(--color-text-secondary)' }}>{t('fields.opened')}</div>
-          <div>{fmtTimestamp(openedAt)}</div>
+          <div>{fmtTimestamp(openedAt, i18n.language)}</div>
 
           <div style={{ color: 'var(--color-text-secondary)' }}>{t('fields.source')}</div>
           <div>
