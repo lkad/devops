@@ -3,21 +3,9 @@
   "subtitle": "使用开发 token 或 LDAP 凭据",
   "form": {
     "username-label": "用户名",
-    "username-placeholder": "alice",
     "password-label": "密码",
     "submit": "登录",
     "submitting": "登录中…"
-  },
-  "tabs": {
-    "dev": "开发 token",
-    "ldap": "LDAP"
-  },
-  "dev-token": {
-    "title": "开发 token",
-    "body": "本地开发时,用 `cmd/mint-dev-token` 铸一个 JWT 并粘贴到这里。dev 模式下 X-User 头短路已启用。",
-    "token-label": "Token",
-    "token-placeholder": "eyJhbGciOi…",
-    "submit": "使用该 token"
   },
   "toast": {
     "login-failed": "登录失败:{{error}}"

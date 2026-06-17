@@ -1,39 +1,31 @@
 {
   "title": "Metrics",
-  "subtitle": "Business-metric time series from /api/v1/metrics",
+  "subtitle": "Time-series data and sparklines",
   "series": {
-    "empty": "No series for this name yet",
-    "labels": "Labels"
+    "header": "Series ({{count}})",
+    "empty-title": "No series",
+    "empty-hint": "No metric series have been ingested yet."
   },
   "detail": {
-    "values": "Values",
-    "labels": "Labels",
-    "close": "Close"
-  },
-  "actions": {
-    "new": "New series",
-    "refresh": "Refresh",
-    "view": "View"
+    "select-title": "Select a series",
+    "select-hint": "Pick a metric on the left to view its sparkline.",
+    "last-50": "Last 50 points",
+    "total": "{{count}} total",
+    "recent-values": "Recent values",
+    "no-points": "No points recorded."
   },
   "state": {
-    "loading": "Loading…",
-    "ready": "ready"
-  },
-  "form": {
-    "search-placeholder": "Filter by name, target, or label…"
+    "loading": "Loading…"
   },
   "errors": {
     "load-failed": "Failed to load metrics: {{error}}"
   },
   "fields": {
     "name": "Name",
-    "target": "Target",
     "value": "Value",
     "timestamp": "Time"
   },
-  "tempo-not-configured": "Tempo / distributed tracing is not configured for this instance.",
-  "copy": "Copy",
-  "metadata": "Metadata",
-  "dev-hint": "Need a metric time series? Run any pipeline or trigger a probe to populate the metrics table.",
-  "brand": "DevOps Toolkit"
+  "actions": {
+    "refresh": "Refresh"
+  }
 }

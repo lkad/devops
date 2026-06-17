@@ -1,7 +1,17 @@
 {
   "title": "仪表盘",
   "subtitle": "系统全局一览",
+  "welcome": "欢迎回来,{{name}}",
+  "welcome-anonymous": "欢迎回来",
   "stats": {
+    "projects": "项目",
+    "projects-subtitle": "业务线、系统、项目",
+    "devices": "设备",
+    "devices-subtitle": "纳管的逻辑设备",
+    "physical-hosts": "物理主机",
+    "physical-hosts-subtitle": "所有数据中心的服务器",
+    "open-alerts": "未处理告警",
+    "open-alerts-subtitle": "需要关注的活动告警",
     "total-hosts": "主机总数",
     "online-hosts": "在线",
     "monitoring-issue": "监控异常",
@@ -14,7 +24,17 @@
   "recent": {
     "title": "最近活动",
     "empty": "暂无活动",
+    "empty-hint": "最近操作的审计事件会显示在这里。",
     "view-all": "查看全部"
+  },
+  "table": {
+    "column": {
+      "actor": "操作者",
+      "action": "操作",
+      "resource-type": "资源类型",
+      "resource-id": "资源 ID",
+      "occurred-at": "发生时间"
+    }
   },
   "health": {
     "title": "服务健康",

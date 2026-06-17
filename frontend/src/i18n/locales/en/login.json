@@ -1,23 +1,11 @@
 {
   "title": "Sign in",
-  "subtitle": "Use a dev token or LDAP credentials",
+  "subtitle": "Sign in to your account",
   "form": {
     "username-label": "Username",
-    "username-placeholder": "alice",
     "password-label": "Password",
-    "submit": "Sign in",
+    "submit": "Sign In",
     "submitting": "Signing in…"
-  },
-  "tabs": {
-    "dev": "Dev token",
-    "ldap": "LDAP"
-  },
-  "dev-token": {
-    "title": "Dev token",
-    "body": "For local development, mint a JWT with `cmd/mint-dev-token` and paste it here. The X-User header short-circuit is enabled in dev mode.",
-    "token-label": "Token",
-    "token-placeholder": "eyJhbGciOi…",
-    "submit": "Use token"
   },
   "toast": {
     "login-failed": "Sign-in failed: {{error}}"

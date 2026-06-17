@@ -14,6 +14,7 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference types="vite/client" />
 
+import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { PageHeader } from '../components/common/PageHeader';
@@ -39,6 +40,7 @@ function fmtTimestamp(d: Date): string {
 }
 
 export function TraceDetail() {
+  const { t } = useTranslation('trace');
   const { id } = useParams<{ id: string }>();
   const traceId = id ?? '';
   const tempoURL = buildTempoURL(traceId, TEMPO_URL);
@@ -65,11 +67,11 @@ export function TraceDetail() {
   return (
     <div>
       <PageHeader
-        title="Trace"
-        subtitle="OpenTelemetry trace id from a failed request"
+        title={t('title')}
+        subtitle={t('subtitle')}
         actions={
           <Link to="/services">
-            <Button variant="secondary">← Back to Services</Button>
+            <Button variant="secondary">{t('actions.back-to-services')}</Button>
           </Link>
         }
       />
@@ -92,7 +94,7 @@ export function TraceDetail() {
             fontSize: 'var(--fs-small)',
           }}
         >
-          <div style={{ color: 'var(--color-text-secondary)' }}>Trace id</div>
+          <div style={{ color: 'var(--color-text-secondary)' }}>{t('fields.trace-id')}</div>
           <div
             className="mono"
             style={{ wordBreak: 'break-all' }}
@@ -101,13 +103,13 @@ export function TraceDetail() {
             {traceId}
           </div>
 
-          <div style={{ color: 'var(--color-text-secondary)' }}>Opened</div>
+          <div style={{ color: 'var(--color-text-secondary)' }}>{t('fields.opened')}</div>
           <div>{fmtTimestamp(openedAt)}</div>
 
-          <div style={{ color: 'var(--color-text-secondary)' }}>Source</div>
+          <div style={{ color: 'var(--color-text-secondary)' }}>{t('fields.source')}</div>
           <div>
-            <code style={{ fontSize: 'var(--fs-caption)' }}>X-Trace-Id</code>{' '}
-            response header on a failed backend request
+            <code style={{ fontSize: 'var(--fs-caption)' }}>X-Trace-Id</code>
+            {t('fields.source-detail')}
           </div>
         </div>
 
@@ -136,7 +138,7 @@ export function TraceDetail() {
             flexWrap: 'wrap',
           }}
         >
-          <Button onClick={copyToClipboard}>Copy</Button>
+          <Button onClick={copyToClipboard}>{t('actions.copy')}</Button>
           {tempoURL && (
             <a
               href={tempoURL}
@@ -144,14 +146,14 @@ export function TraceDetail() {
               rel="noreferrer"
               data-testid="tempo-link"
             >
-              <Button variant="secondary">Open in Tempo ↗</Button>
+              <Button variant="secondary">{t('actions.open-in-tempo')}</Button>
             </a>
           )}
           <Link
             to={`/logs?q=${encodeURIComponent(traceId)}`}
             data-testid="logs-link"
           >
-            <Button variant="secondary">Search Logs</Button>
+            <Button variant="secondary">{t('actions.search-logs')}</Button>
           </Link>
         </div>
 
@@ -166,13 +168,11 @@ export function TraceDetail() {
               fontSize: 'var(--fs-small)',
             }}
           >
-            No Tempo URL configured. Set{' '}
-            <code style={{ fontFamily: 'var(--font-mono, monospace)' }}>
-              VITE_TEMPO_URL
-            </code>{' '}
-            in <code>.env</code> (supports a{' '}
-            <code>{'{traceId}'}</code> placeholder) and reload
-            to enable the in-app deep link.
+            {t('tempo-not-configured', {
+              env: 'VITE_TEMPO_URL',
+              file: '.env',
+              placeholder: '{traceId}',
+            })}
           </div>
         )}
       </div>

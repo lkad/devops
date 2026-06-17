@@ -1,4 +1,5 @@
 // Metrics — two-pane: series list (left) + sparkline detail (right).
+import { useTranslation } from 'react-i18next';
 import { useMemo, useState } from 'react';
 import { PageHeader } from '../components/common/PageHeader';
 import { useApi } from '../hooks/useApi';
@@ -24,14 +25,14 @@ interface SeriesResponse {
   points: MetricPoint[];
 }
 
-function Sparkline({ points, width = 200, height = 60 }: { points: MetricPoint[]; width?: number; height?: number }) {
+function Sparkline({ points, t, width = 200, height = 60 }: { points: MetricPoint[]; t: (k: string) => string; width?: number; height?: number }) {
   if (!points || points.length === 0) {
     return (
       <div style={{
         width, height, display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: 'var(--color-text-muted)', fontSize: 'var(--fs-caption)',
         border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-sm)',
-      }}>No data</div>
+      }}>{t('detail.no-points')}</div>
     );
   }
   const values = points.map((p) => p.value);
@@ -62,6 +63,7 @@ function Sparkline({ points, width = 200, height = 60 }: { points: MetricPoint[]
 }
 
 export function Metrics() {
+  const { t } = useTranslation('metrics');
   const seriesList = useApi<MetricSeries[] | { data: MetricSeries[] }>('metrics/series');
   const [selected, setSelected] = useState<{ name: string; target_type: string; target_id: string } | null>(null);
 
@@ -87,7 +89,7 @@ export function Metrics() {
 
   return (
     <div>
-      <PageHeader title="Metrics" subtitle="Time-series data and sparklines" />
+      <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 'var(--sp-4)', minHeight: 480 }}>
         {/* Left: series list */}
@@ -106,13 +108,13 @@ export function Metrics() {
             letterSpacing: 0.5,
             fontWeight: 600,
             color: 'var(--color-text-secondary)',
-          }}>Series ({seriesRows.length})</div>
+          }}>{t('series.header', { count: seriesRows.length })}</div>
           <div style={{ overflow: 'auto', flex: 1 }}>
-            {seriesList.loading && <div style={{ padding: 'var(--sp-4)', color: 'var(--color-text-muted)' }}>Loading…</div>}
+            {seriesList.loading && <div style={{ padding: 'var(--sp-4)', color: 'var(--color-text-muted)' }}>{t('state.loading')}</div>}
             {seriesList.error && <div style={{ padding: 'var(--sp-4)', color: 'var(--color-error)' }}>{seriesList.error}</div>}
             {!seriesList.loading && seriesRows.length === 0 && (
               <div style={{ padding: 'var(--sp-4)' }}>
-                <EmptyState title="No series" hint="No metric series have been ingested yet." />
+                <EmptyState title={t('series.empty-title')} hint={t('series.empty-hint')} />
               </div>
             )}
             {seriesRows.map((s) => {
@@ -154,7 +156,7 @@ export function Metrics() {
           padding: 'var(--sp-5)',
         }}>
           {!selected && (
-            <EmptyState title="Select a series" hint="Pick a metric on the left to view its sparkline." />
+            <EmptyState title={t('detail.select-title')} hint={t('detail.select-hint')} />
           )}
           {selected && (
             <div>
@@ -165,7 +167,7 @@ export function Metrics() {
                 </div>
               </div>
 
-              {detail.loading && <div style={{ color: 'var(--color-text-muted)' }}>Loading…</div>}
+              {detail.loading && <div style={{ color: 'var(--color-text-muted)' }}>{t('state.loading')}</div>}
               {detail.error && <div style={{ color: 'var(--color-error)' }}>{detail.error}</div>}
 
               {!detail.loading && !detail.error && (
@@ -173,19 +175,19 @@ export function Metrics() {
                   <div style={{ marginBottom: 'var(--sp-5)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
                       <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
-                        Last 50 points
+                        {t('detail.last-50')}
                       </div>
-                      <Badge tone="neutral">{detailPoints.length} total</Badge>
+                      <Badge tone="neutral">{t('detail.total', { count: detailPoints.length })}</Badge>
                     </div>
-                    <Sparkline points={last50} />
+                    <Sparkline points={last50} t={t} />
                   </div>
 
                   <div>
                     <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 'var(--sp-2)' }}>
-                      Recent values
+                      {t('detail.recent-values')}
                     </div>
                     {last50.length === 0 ? (
-                      <div style={{ color: 'var(--color-text-muted)' }}>No points recorded.</div>
+                      <div style={{ color: 'var(--color-text-muted)' }}>{t('detail.no-points')}</div>
                     ) : (
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 0, maxHeight: 280, overflow: 'auto', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-sm)' }}>
                         {[...last50].reverse().map((p, i) => (

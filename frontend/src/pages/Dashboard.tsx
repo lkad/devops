@@ -2,6 +2,7 @@
 // Top: 4 stats cards (projects, devices, physical hosts, open alerts).
 // Bottom: Recent Activity from /api/v1/audit?limit=10 rendered in a DataTable.
 
+import { useTranslation } from 'react-i18next';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../stores/auth';
 import { PageHeader } from '../components/common/PageHeader';
@@ -101,6 +102,7 @@ function actionTone(action: string) {
 }
 
 export function Dashboard() {
+  const { t } = useTranslation('dashboard');
   const user = useAuth((s) => s.user);
 
   // Stats — useApi aborts on unmount, so all four run in parallel.
@@ -111,17 +113,17 @@ export function Dashboard() {
   const audit = useApi<AuditResponse>('audit', { limit: 10 });
 
   const cols: Column<AuditEvent>[] = [
-    { key: 'actor', header: 'Actor', render: (r) => <span className="mono">{r.actor}</span> },
-    { key: 'action', header: 'Action', render: (r) => <Badge tone={actionTone(r.action)}>{r.action}</Badge> },
-    { key: 'resource_type', header: 'Resource Type', render: (r) => r.resource_type },
+    { key: 'actor', header: t('table.column.actor'), render: (r) => <span className="mono">{r.actor}</span> },
+    { key: 'action', header: t('table.column.action'), render: (r) => <Badge tone={actionTone(r.action)}>{r.action}</Badge> },
+    { key: 'resource_type', header: t('table.column.resource-type'), render: (r) => r.resource_type },
     {
       key: 'resource_id',
-      header: 'Resource ID',
+      header: t('table.column.resource-id'),
       render: (r) => <span className="mono" style={{ color: 'var(--color-text-muted)' }}>{r.resource_id}</span>,
     },
     {
       key: 'occurred_at',
-      header: 'Occurred At',
+      header: t('table.column.occurred-at'),
       align: 'right',
       render: (r) => (
         <span style={{ color: 'var(--color-text-muted)' }}>{formatTimestamp(r.occurred_at)}</span>
@@ -132,33 +134,33 @@ export function Dashboard() {
   return (
     <div>
       <PageHeader
-        title="Dashboard"
-        subtitle={user ? `Welcome back, ${user.username}` : 'Welcome back'}
+        title={t('title')}
+        subtitle={user ? t('welcome', { name: user.username }) : t('welcome-anonymous')}
       />
 
       <div style={gridStyle}>
         <StatsCard
-          label="Projects"
+          label={t('stats.projects')}
           value={projects.data?.pagination.total ?? null}
-          subtitle="Business lines, systems, projects"
+          subtitle={t('stats.projects-subtitle')}
           loading={projects.loading}
         />
         <StatsCard
-          label="Devices"
+          label={t('stats.devices')}
           value={devices.data?.pagination.total ?? null}
-          subtitle="Logical devices under management"
+          subtitle={t('stats.devices-subtitle')}
           loading={devices.loading}
         />
         <StatsCard
-          label="Physical Hosts"
+          label={t('stats.physical-hosts')}
           value={hosts.data?.pagination.total ?? null}
-          subtitle="Servers across all data centers"
+          subtitle={t('stats.physical-hosts-subtitle')}
           loading={hosts.loading}
         />
         <StatsCard
-          label="Open Alerts"
+          label={t('stats.open-alerts')}
           value={alerts.data?.pagination.total ?? null}
-          subtitle="Active alerts requiring attention"
+          subtitle={t('stats.open-alerts-subtitle')}
           tone="alert"
           loading={alerts.loading}
         />
@@ -171,7 +173,7 @@ export function Dashboard() {
           marginBottom: 'var(--sp-3)',
         }}
       >
-        Recent Activity
+        {t('recent.title')}
       </h2>
       <DataTable<AuditEvent>
         rows={audit.data?.data ?? null}
@@ -179,8 +181,8 @@ export function Dashboard() {
         rowKey={(r) => r.id}
         loading={audit.loading}
         empty={{
-          title: 'No recent activity',
-          hint: 'Audit events from the last few actions will appear here.',
+          title: t('recent.empty'),
+          hint: t('recent.empty-hint'),
         }}
       />
     </div>

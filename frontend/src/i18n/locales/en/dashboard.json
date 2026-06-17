@@ -1,7 +1,17 @@
 {
   "title": "Dashboard",
   "subtitle": "System overview at a glance",
+  "welcome": "Welcome back, {{name}}",
+  "welcome-anonymous": "Welcome back",
   "stats": {
+    "projects": "Projects",
+    "projects-subtitle": "Business lines, systems, projects",
+    "devices": "Devices",
+    "devices-subtitle": "Logical devices under management",
+    "physical-hosts": "Physical Hosts",
+    "physical-hosts-subtitle": "Servers across all data centers",
+    "open-alerts": "Open Alerts",
+    "open-alerts-subtitle": "Active alerts requiring attention",
     "total-hosts": "Total hosts",
     "online-hosts": "Online",
     "monitoring-issue": "Monitoring issue",
@@ -12,9 +22,19 @@
     "degraded-services": "Degraded services"
   },
   "recent": {
-    "title": "Recent activity",
+    "title": "Recent Activity",
     "empty": "No recent activity",
+    "empty-hint": "Audit events from the last few actions will appear here.",
     "view-all": "View all"
+  },
+  "table": {
+    "column": {
+      "actor": "Actor",
+      "action": "Action",
+      "resource-type": "Resource Type",
+      "resource-id": "Resource ID",
+      "occurred-at": "Occurred At"
+    }
   },
   "health": {
     "title": "Service health",

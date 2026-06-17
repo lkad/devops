@@ -1,23 +1,20 @@
 {
   "title": "追踪",
-  "subtitle": "分布式 OpenTelemetry 追踪查看器(Tempo / stdouttrace)",
-  "no-trace": "该请求无追踪数据 —— 追踪可能已过期,或 X-Trace-Id 无效。",
-  "spans": "Span",
-  "duration": "持续时间",
-  "metadata": "元数据",
-  "copy-id": "复制 trace ID",
-  "actions": {
-    "refresh": "刷新"
+  "subtitle": "失败请求的 OpenTelemetry 追踪 ID",
+  "fields": {
+    "trace-id": "追踪 ID",
+    "opened": "打开时间",
+    "source": "来源",
+    "source-detail": " 失败后端请求的响应头"
   },
+  "actions": {
+    "back-to-services": "← 返回服务",
+    "copy": "复制",
+    "open-in-tempo": "在 Tempo 中打开 ↗",
+    "search-logs": "搜索日志"
+  },
+  "tempo-not-configured": "未配置 Tempo 地址。请在 {{file}} 里设置 {{env}}(支持 {{placeholder}} 占位符)并重新加载以启用应用内深链接。",
   "errors": {
     "load-failed": "加载追踪失败:{{error}}"
-  },
-  "fields": {
-    "span-name": "Span",
-    "service": "服务",
-    "start": "开始",
-    "end": "结束",
-    "duration": "持续时间",
-    "status": "状态"
   }
 }

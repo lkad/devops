@@ -1,6 +1,7 @@
 // Login — centered card on a near-black background.
 // Posts credentials to the auth store, navigates to "/" on success.
 
+import { useTranslation } from 'react-i18next';
 import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../stores/auth';
@@ -71,6 +72,7 @@ const inputDisabledStyle: React.CSSProperties = {
 };
 
 export function Login() {
+  const { t } = useTranslation('login');
   const nav = useNavigate();
   const login = useAuth((s) => s.login);
   const loading = useAuth((s) => s.loading);
@@ -104,6 +106,7 @@ export function Login() {
       <form onSubmit={onSubmit} style={cardStyle}>
         <div style={brandStyle}>
           <div style={logoStyle}>D</div>
+          {/* Brand name stays English per SPEC §5 */}
           <div style={nameStyle}>DevOps Toolkit</div>
         </div>
 
@@ -116,12 +119,12 @@ export function Login() {
             marginBottom: 'var(--sp-6)',
           }}
         >
-          Sign in to your account
+          {t('subtitle')}
         </h1>
 
         {error && <div role="alert" style={errorStyle}>{error}</div>}
 
-        <FormField label="Username">
+        <FormField label={t('form.username-label')}>
           {(s) => (
             <input
               type="text"
@@ -135,7 +138,7 @@ export function Login() {
           )}
         </FormField>
 
-        <FormField label="Password">
+        <FormField label={t('form.password-label')}>
           {(s) => (
             <input
               type="password"
@@ -155,19 +158,11 @@ export function Login() {
           disabled={loading || !username || !password}
           style={{ width: '100%', justifyContent: 'center', padding: '8px 14px' }}
         >
-          {loading ? 'Signing in…' : 'Sign In'}
+          {loading ? t('form.submitting') : t('form.submit')}
         </Button>
 
         <div style={hintStyle}>
-          Dev: use <span className="mono" style={{ color: 'var(--color-primary)' }}>test_admin</span>
-          {' / '}
-          <span className="mono" style={{ color: 'var(--color-primary)' }}>test</span>
-          {' '}for SuperAdmin;
-          {' '}
-          <span className="mono" style={{ color: 'var(--color-primary)' }}>test_viewer</span>
-          {' / '}
-          <span className="mono" style={{ color: 'var(--color-primary)' }}>test</span>
-          {' '}for Auditor.
+          {t('hint', { user1: 'test_admin', user2: 'test_viewer', pass: 'test' })}
         </div>
       </form>
     </div>
