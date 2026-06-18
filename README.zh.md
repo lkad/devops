@@ -55,6 +55,7 @@
 - **单进程部署** —— 监听 `:3000`，SPA + JSON API + WebSocket 在同一端口
 - **PostgreSQL 或 SQLite** —— 同一套 GORM 模型，开发默认 SQLite，生产用 Postgres
 - **TLS / mTLS 准备** —— `internal/server/tls.go` + `cmd/gen-mtls-cert/` 用于证书生成
+- **双语 UI** —— i18next + react-i18next，en / zh-CN，header 里挂 `LanguageSwitcher`
 
 ### 🔄  设备与物理主机生命周期
 
@@ -179,14 +180,6 @@ go build -o devops-toolkit ./cmd/devops-toolkit
 ./devops-toolkit                  # 监听 :3000，SQLite 在 tests/fixtures/db/dev.db
 ```
 
-### 测试
-
-```bash
-go test ./...                                  # 31 个包
-go test -race ./...                            # race 检测
-cd frontend && npx vitest run                  # React 组件
-```
-
 ---
 
 ## 架构
@@ -269,6 +262,38 @@ postgres   redis     prometheus   loki     influxdb
 
 ---
 
+## 认证 & RBAC 注意事项
+
+新贡献者容易踩的几个坑。**都是有意为之**,带 file:line 引用:
+
+- **dev 下的认证短路**:`X-User: alice` 请求头 → 伪造 `RoleOperator` 用户,不需要 JWT。`internal/auth/middleware.go:137` 在 `LDAP.dev_bypass=true` 时短路。`scripts/seed-data.sh` 早期漏了这个头(POST 全 401),bug 修过了,但你写自己的客户端时记得带上头
+- **逐项目访问**:角色矩阵说 yes,但 `requireMembership` 中间件要求「用户属于这个项目」才放行。即使你捏一个 `RoleSuperAdmin` 也得过这一关。旁路是 hostproject 包里的 `systemCtx`
+- **审计的 `actor_id` 取自 JWT subject**,永远不从请求体里取 —— 这是不变量,审计轨迹的价值就靠它。如果你想从 `c.Query("actor_id")` 取,打住
+- **路由参数名是 load-bearing**:`internal/k8s/logstream/handler.go` 里的 `:clusterID`(不是 `:id`)必须和 k8s handler 对齐,gin 遇到参数名冲突会 panic。所以「修一下把 `:clusterID` 改成 `:id`」的 PR 会让服务启动不了
+
+---
+
+## 开发
+
+```bash
+# 测试
+go test ./...                                  # 31 个包
+go test -race ./...                            # race 检测
+cd frontend && npx vitest run                  # React 组件
+npx tsc --noEmit                               # 类型检查
+
+# 重新生成 i18n locale(CI 不跑 —— 这是开发者工具)
+# `keepRemoved: true` 写在 i18next-parser.config.js,避免每次跑都把人工翻译清空
+cd frontend && npm run i18n:extract
+```
+
+Commit 约定:
+- 模块级改动:`feat(physicalhost):` 或 `fix(pipeline):`
+- 跨模块:`docs(readme):`、`chore(deps):`
+- `Co-Authored-By: Claude <noreply@anthropic.com>` trailer 是 Claude 写的 commit 的标配,不要删
+
+---
+
 ## 项目状态
 
 当前版本：**v0.5.1.0**（见 [VERSION](VERSION)）
@@ -281,6 +306,12 @@ postgres   redis     prometheus   loki     influxdb
 - ✅ 2026-06-10 生产就绪审计的 #1-#6 关闭
 
 发布历史见 [CHANGELOG.md](CHANGELOG.md)，未完成项见 [TODOS.md](TODOS.md)。
+
+---
+
+## 版本控制
+
+语义化:`MAJOR.MINOR.PATCH.BUILD`(如 `0.5.1.0`)。版本号在 release commit 上 bump,不在每次 merge 时 bump。版本间 diff 看 [CHANGELOG.md](CHANGELOG.md);当前值看 [VERSION](VERSION)。
 
 ---
 
@@ -319,10 +350,7 @@ postgres   redis     prometheus   loki     influxdb
 
 代码规约写在代码里，不在 style guide 里。匹配周围的注释密度、命名风格、错误包装模式（`fmt.Errorf("module.X: %w", err)`）。
 
-两条不明显的规则：
-
-- **`auth.Bearer` 永远来自 JWT subject**，永远不要来自请求体字段 —— 审计轨迹依赖这个
-- **不要改 `internal/k8s/handler.go` 里的路由参数名** —— k8s logstream handler 依赖 `:clusterID`；gin 在参数名冲突时会 panic
+更细的「认证 & RBAC 注意事项」和文件:line 引用见上面的对应章节。
 
 ---
 
